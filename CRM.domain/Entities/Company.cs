@@ -7,4 +7,6 @@ public class Company
     public string CompanyName { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<Device> Devices { get; set; } = new List<Device>();
 }

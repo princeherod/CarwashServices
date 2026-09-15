@@ -7,5 +7,7 @@ public class CompanyDatabase
     public string ServerName { get; set; } = string.Empty;
     public string DatabaseName { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
+    public string CredentialKey { get; set; } = string.Empty;
+
     public Company? Company { get; set; }
 }

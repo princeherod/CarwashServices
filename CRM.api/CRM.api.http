@@ -1,6 +1,250 @@
 @CRM.api_HostAddress = http://localhost:5180
 
-GET {{CRM.api_HostAddress}}/weatherforecast/
+### ================================================================
+### Seed (dev helper — run once if DB is empty)
+### ================================================================
+POST {{CRM.api_HostAddress}}/seed/company-with-database
+Accept: application/json
+
+###
+
+### ================================================================
+### Companies
+### ================================================================
+GET {{CRM.api_HostAddress}}/api/companies
+Accept: application/json
+
+###
+
+GET {{CRM.api_HostAddress}}/api/companies/1
+Accept: application/json
+%
+###
+  
+POST {{CRM.api_HostAddress}}/api/companies
+Content-Type: application/json
+
+{
+  "companyCode": "COMP004",
+  "companyName": "Fourth Company",
+  "isActive": true,
+  "createdAt": "2026-09-14T10:00:00"
+}
+
+###
+
+DELETE {{CRM.api_HostAddress}}/api/companies/5
+
+###
+
+### ================================================================
+### Devices
+### ================================================================
+GET {{CRM.api_HostAddress}}/api/devices
+Accept: application/json
+
+###
+
+POST {{CRM.api_HostAddress}}/api/devices
+Content-Type: application/json
+
+{
+  "companyId": 1,
+  "deviceCode": "DEV003",
+  "deviceName": "Third PC",
+  "isActive": true,
+  "createdAt": "2026-09-14T10:00:00"
+}
+
+###
+
+### ================================================================
+### Company Databases
+### ================================================================
+GET {{CRM.api_HostAddress}}/api/company-databases
+Accept: application/json
+
+###
+
+### ================================================================
+### Tenant Products — run in this order
+### ================================================================
+
+### 1. List all products
+GET {{CRM.api_HostAddress}}/api/tenant/1/products
+Accept: application/json
+
+###
+
+### 2. Create a product
+POST {{CRM.api_HostAddress}}/api/tenant/1/products
+Content-Type: application/json
+
+{
+  "productCode": "PROD004",
+  "productName": "Fourth Product",
+  "unitPrice": 249.99,
+  "isActive": true
+}
+
+###
+
+### 3. List all products again5
+GET {{CRM.api_HostAddress}}/api/tenant/1/products
+Accept: application/json
+
+###
+
+### 4. Get product by ID (use actual ID from step 2)
+GET {{CRM.api_HostAddress}}/api/tenant/1/products/1
+Accept: application/json
+
+###
+
+### 5. Delete product by ID (use actual ID from step 2)
+DELETE {{CRM.api_HostAddress}}/api/tenant/1/products/1
+
+###
+
+### ================================================================
+### Tenant Diagnostics
+### ================================================================
+GET {{CRM.api_HostAddress}}/api/test-tenant/1
+Accept: application/json
+
+###
+
+### ================================================================
+### Lab 5 Phase 1 — Test Tenant B
+### ================================================================
+GET {{CRM.api_HostAddress}}/api/test-tenant/3
+Accept: application/json
+
+###
+### ================================================================
+### Lab 5 — Phase 2 — Tenant Customers
+### ================================================================
+
+### 1. List tenant customers in Tenant A (companyId = 1)
+GET {{CRM.api_HostAddress}}/api/tenant/1/tenant-customers
+Accept: application/json
+
+###
+
+### 2. Create tenant customer in Tenant A
+POST {{CRM.api_HostAddress}}/api/tenant/1/tenant-customers
+Content-Type: application/json
+
+{
+  "customerCode": "CUST001",
+  "customerName": "Juan Dela Cruz",
+  "contactNumber": "09171234567",
+  "emailAddress": "juan@example.com",
+  "address": "Davao City",
+  "isActive": true,
+  "createdAt": "2026-09-09T16:45:00"
+}
+
+###
+
+### 3. List tenant customers in Tenant A again — should show Juan
+GET {{CRM.api_HostAddress}}/api/tenant/1/tenant-customers
+Accept: application/json
+
+###
+
+### 4. List tenant customers in Tenant B (companyId = 3)
+GET {{CRM.api_HostAddress}}/api/tenant/3/tenant-customers
+Accept: application/json
+
+###
+
+### 5. Create tenant customer in Tenant B
+POST {{CRM.api_HostAddress}}/api/tenant/3/tenant-customers
+Content-Type: application/json
+
+{
+  "customerCode": "CUST001",
+  "customerName": "Maria Santos",
+  "contactNumber": "09181234567",
+  "emailAddress": "maria@example.com",
+  "address": "Cebu City",
+  "isActive": true,
+  "createdAt": "2026-09-09T16:56:00"
+}
+
+###
+
+### 6. List tenant customers in Tenant B again — should show Maria
+GET {{CRM.api_HostAddress}}/api/tenant/3/tenant-customers
+Accept: application/json
+
+###
+
+### 7. Multi-tenant proof — Tenant A shows only Juan
+GET {{CRM.api_HostAddress}}/api/tenant/1/tenant-customers
+Accept: application/json
+
+### 
+
+### ================================================================
+### Lab 5 — Phase 3 — Suppliers
+### ================================================================
+
+### 1. List suppliers in Tenant A (companyId = 1)
+GET {{CRM.api_HostAddress}}/api/tenant/1/suppliers
+Accept: application/json
+
+###
+
+### 2. Create supplier in Tenant A
+POST {{CRM.api_HostAddress}}/api/tenant/1/suppliers
+Content-Type: application/json
+
+{
+  "supplierCode": "SUP001",
+  "supplierName": "Davao Tech Supply",
+  "contactPerson": "Carlos Reyes",
+  "contactNumber": "09175551234",
+  "emailAddress": "sales@davaotechsupply.com",
+  "address": "Davao City",
+  "isActive": true,
+  "createdAt": "2026-09-10T09:00:00"
+}
+
+###
+
+### 3. List suppliers in Tenant B (companyId = 3)
+GET {{CRM.api_HostAddress}}/api/tenant/3/suppliers
+Accept: application/json
+
+###
+
+### 4. Create supplier in Tenant B
+POST {{CRM.api_HostAddress}}/api/tenant/3/suppliers
+Content-Type: application/json
+
+{
+  "supplierCode": "SUP001",
+  "supplierName": "Cebu Office Supply",
+  "contactPerson": "Ana Lim",
+  "contactNumber": "09186667777",
+  "emailAddress": "sales@cebuofficesupply.com",
+  "address": "Cebu City",
+  "isActive": true,
+  "createdAt": "2026-09-10T13:20:00"
+}
+
+###
+
+### 5. List suppliers in Tenant B again — should show Cebu Office Supply only
+GET {{CRM.api_HostAddress}}/api/tenant/3/suppliers
+Accept: application/json
+
+###
+
+### 6. Multi-tenant proof — Tenant A shows only Davao Tech Supply
+GET {{CRM.api_HostAddress}}/api/tenant/1/suppliers
 Accept: application/json
 
 ###
