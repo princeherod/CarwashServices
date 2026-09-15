@@ -33,8 +33,14 @@ public class TenantErpDbContext : DbContext
                 .HasMaxLength(200)
                 .IsRequired();
 
+            entity.Property(x => x.Description)
+                .HasMaxLength(1000);
+
             entity.Property(x => x.UnitPrice)
                 .HasPrecision(18, 2);
+
+            entity.Property(x => x.Category)
+                .HasMaxLength(50);
 
             entity.HasIndex(x => x.ProductCode)
                 .IsUnique();
@@ -60,6 +66,14 @@ public class TenantErpDbContext : DbContext
 
             entity.Property(x => x.Address)
                 .HasMaxLength(500);
+
+            // Vehicle extension
+            entity.Property(x => x.PlateNumber).HasMaxLength(50);
+            entity.Property(x => x.VehicleMake).HasMaxLength(100);
+            entity.Property(x => x.VehicleModel).HasMaxLength(100);
+            entity.Property(x => x.VehicleColor).HasMaxLength(50);
+            entity.Property(x => x.VehicleType).HasMaxLength(50);
+            entity.Property(x => x.Source).HasMaxLength(50);
 
             entity.HasIndex(x => x.CustomerCode)
                 .IsUnique();

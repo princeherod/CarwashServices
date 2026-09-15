@@ -82,6 +82,55 @@ public class TenantCustomersController : ControllerBase
             customer);
     }
 
+    // PUT: api/tenant/1/tenant-customers/5
+    [HttpPut("{tenantCustomerId:int}")]
+    public async Task<IActionResult> Update(
+        int companyId,
+        int tenantCustomerId,
+        [FromBody] TenantCustomer customer)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        await using var tenantDb = await _tenantFactory.CreateAsync(companyId);
+
+        var existing = await tenantDb.TenantCustomers
+            .FirstOrDefaultAsync(c => c.TenantCustomerId == tenantCustomerId);
+
+        if (existing is null)
+        {
+            return NotFound(new
+            {
+                message = $"TenantCustomer {tenantCustomerId} not found in tenant {companyId}."
+            });
+        }
+
+        // ---- Customer fields ----
+        existing.CustomerCode = customer.CustomerCode;
+        existing.CustomerName = customer.CustomerName;
+        existing.ContactNumber = customer.ContactNumber;
+        existing.EmailAddress = customer.EmailAddress;
+        existing.Address = customer.Address;
+        existing.IsActive = customer.IsActive;
+
+        // ---- Vehicle extension fields ----
+        existing.PlateNumber = customer.PlateNumber;
+        existing.VehicleMake = customer.VehicleMake;
+        existing.VehicleModel = customer.VehicleModel;
+        existing.VehicleYear = customer.VehicleYear;
+        existing.VehicleColor = customer.VehicleColor;
+        existing.VehicleType = customer.VehicleType;
+        existing.Source = customer.Source;
+
+        // NOTE: CreatedAt is intentionally NOT updated — it stays as the original.
+
+        await tenantDb.SaveChangesAsync();
+
+        return Ok(existing);
+    }
+
     // DELETE: api/tenant/1/tenant-customers/5
     [HttpDelete("{tenantCustomerId:int}")]
     public async Task<IActionResult> Delete(int companyId, int tenantCustomerId)

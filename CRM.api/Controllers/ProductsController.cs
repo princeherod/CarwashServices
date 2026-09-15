@@ -41,9 +41,7 @@ public class ProductsController : ControllerBase
             .FirstOrDefaultAsync(p => p.ProductId == productId);
 
         if (product is null)
-        {
             return NotFound(new { message = $"Product {productId} not found in tenant {companyId}." });
-        }
 
         return Ok(product);
     }
@@ -53,9 +51,7 @@ public class ProductsController : ControllerBase
     public async Task<IActionResult> Create(int companyId, [FromBody] Product product)
     {
         if (!ModelState.IsValid)
-        {
             return BadRequest(ModelState);
-        }
 
         await using var tenantDb = await _tenantFactory.CreateAsync(companyId);
 
@@ -63,20 +59,40 @@ public class ProductsController : ControllerBase
             .AnyAsync(p => p.ProductCode == product.ProductCode);
 
         if (exists)
-        {
-            return Conflict(new
-            {
-                message = $"A product with code '{product.ProductCode}' already exists in tenant {companyId}."
-            });
-        }
+            return Conflict(new { message = $"A product with code '{product.ProductCode}' already exists in tenant {companyId}." });
 
         tenantDb.Products.Add(product);
         await tenantDb.SaveChangesAsync();
 
-        return CreatedAtAction(
-            nameof(GetById),
-            new { companyId, productId = product.ProductId },
-            product);
+        return CreatedAtAction(nameof(GetById), new { companyId, productId = product.ProductId }, product);
+    }
+
+    // PUT: api/tenant/1/products/5
+    [HttpPut("{productId:int}")]
+    public async Task<IActionResult> Update(int companyId, int productId, [FromBody] Product product)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        await using var tenantDb = await _tenantFactory.CreateAsync(companyId);
+
+        var existing = await tenantDb.Products
+            .FirstOrDefaultAsync(p => p.ProductId == productId);
+
+        if (existing is null)
+            return NotFound(new { message = $"Product {productId} not found in tenant {companyId}." });
+
+        existing.ProductCode = product.ProductCode;
+        existing.ProductName = product.ProductName;
+        existing.Description = product.Description;
+        existing.UnitPrice = product.UnitPrice;
+        existing.DurationMinutes = product.DurationMinutes;
+        existing.Category = product.Category;
+        existing.IsActive = product.IsActive;
+
+        await tenantDb.SaveChangesAsync();
+
+        return Ok(existing);
     }
 
     // DELETE: api/tenant/1/products/5
@@ -89,9 +105,7 @@ public class ProductsController : ControllerBase
             .FirstOrDefaultAsync(p => p.ProductId == productId);
 
         if (product is null)
-        {
             return NotFound(new { message = $"Product {productId} not found in tenant {companyId}." });
-        }
 
         tenantDb.Products.Remove(product);
         await tenantDb.SaveChangesAsync();

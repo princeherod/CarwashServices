@@ -10,7 +10,7 @@ public class TenantErpDbContextFactory
     {
         var optionsBuilder = new DbContextOptionsBuilder<TenantErpDbContext>();
         optionsBuilder.UseSqlServer(
-    "Server=(localdb)\\MSSQLLocalDB;Database=TenantB_ErpDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True;");
+             "Server=(localdb)\\MSSQLLocalDB;Database=TenantErpDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True;");
 
         return new TenantErpDbContext(optionsBuilder.Options);
     }

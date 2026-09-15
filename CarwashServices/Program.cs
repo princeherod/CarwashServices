@@ -6,7 +6,7 @@ namespace CarwashServices
         static void Main()
         {
             ApplicationConfiguration.Initialize();
-            Application.Run(new CustomerManagementForm());
+            Application.Run(new MainForm());
         }
     }
 }
