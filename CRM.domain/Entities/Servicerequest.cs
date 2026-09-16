@@ -10,15 +10,17 @@ namespace CRM.domain.Entities
         public int ServiceId { get; set; }
         public int? AssignedStaffId { get; set; }
         public int CreatedBy { get; set; }
-        public string Status { get; set; } // Pending, Assigned, InProgress, Completed, Cancelled
-        public DateTime RequestedDate { get; set; }
+
+        public string Status { get; set; } = "Pending";
+        public string? Priority { get; set; } = "Normal";
+        public string? Notes { get; set; }
+
+        public DateTime RequestedDate { get; set; } = DateTime.Now;
         public DateTime? ScheduledDate { get; set; }
         public DateTime? CompletedDate { get; set; }
 
-        public Customer Customer { get; set; }
-        public Service Service { get; set; }
-        public User AssignedStaff { get; set; }
-        public User CreatedByUser { get; set; }
+        public User? AssignedStaff { get; set; }
+        public User? CreatedByUser { get; set; }
 
         public ICollection<ServiceStatusLog> StatusLogs { get; set; } = new List<ServiceStatusLog>();
         public ICollection<FollowUp> FollowUps { get; set; } = new List<FollowUp>();

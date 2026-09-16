@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using CarwashServices.Views;   // ← ADD THIS (makes ProductDto resolvable without the full path)
 
 namespace CarwashServices
 {
@@ -266,7 +267,8 @@ namespace CarwashServices
         {
             try
             {
-                var list = await _http.GetFromJsonAsync<System.Collections.Generic.List<CarwashServices.Views.ProductDto>>(
+                // ProductDto now lives in CarwashServices.Views (Dtos.cs)
+                var list = await _http.GetFromJsonAsync<System.Collections.Generic.List<ProductDto>>(
                     "api/tenant/1/products");
                 if (list == null) return;
                 var p = list.Find(x => x.ProductId == id);

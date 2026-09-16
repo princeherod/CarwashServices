@@ -88,6 +88,11 @@ namespace CarwashServices
                     headerText = "🔧  MANAGE SERVICES";
                     break;
 
+                case "Manage Service Requests":
+                    view = new ServiceRequestsView();
+                    headerText = "📋  MANAGE SERVICE REQUESTS";
+                    break;
+
                 default:
                     MessageBox.Show($"'{key}' is coming soon.",
                         "Coming Soon", MessageBoxButtons.OK, MessageBoxIcon.Information);

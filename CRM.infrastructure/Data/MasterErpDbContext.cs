@@ -125,21 +125,16 @@ public class MasterErpDbContext : IdentityDbContext
         builder.Entity<ServiceRequest>(entity =>
         {
             entity.HasKey(x => x.RequestId);
+            entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
+            entity.Property(x => x.Priority).HasMaxLength(20);
+            entity.Property(x => x.Notes).HasMaxLength(1000);
 
-            entity.HasOne(x => x.Customer)
-                .WithMany(c => c.ServiceRequests)
-                .HasForeignKey(x => x.CustomerId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            entity.HasOne(x => x.Service)
-                .WithMany(s => s.ServiceRequests)
-                .HasForeignKey(x => x.ServiceId)
-                .OnDelete(DeleteBehavior.Restrict);
-
+            // FK → Users (both are same-DB, keep these)
             entity.HasOne(x => x.AssignedStaff)
                 .WithMany(u => u.AssignedRequests)
                 .HasForeignKey(x => x.AssignedStaffId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);   // ← optional relationship
 
             entity.HasOne(x => x.CreatedByUser)
                 .WithMany(u => u.CreatedRequests)
