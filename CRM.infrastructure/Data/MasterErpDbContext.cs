@@ -160,21 +160,14 @@ public class MasterErpDbContext : IdentityDbContext
         builder.Entity<FollowUp>(entity =>
         {
             entity.HasKey(x => x.FollowUpId);
+            entity.Property(x => x.Type).HasMaxLength(50).IsRequired();
+            entity.Property(x => x.ContactMethod).HasMaxLength(50).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(200);
+            entity.Property(x => x.DiscountOffer).HasMaxLength(200);
+            entity.Property(x => x.Notes).HasMaxLength(1000);
+            entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
 
-            entity.HasOne(x => x.Customer)
-                .WithMany(c => c.FollowUps)
-                .HasForeignKey(x => x.CustomerId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            entity.HasOne(x => x.ServiceRequest)
-                .WithMany(r => r.FollowUps)
-                .HasForeignKey(x => x.RequestId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            entity.HasOne(x => x.CreatedByUser)
-                .WithMany(u => u.FollowUpsCreated)
-                .HasForeignKey(x => x.CreatedBy)
-                .OnDelete(DeleteBehavior.Restrict);
+            // No FK to Customer — tenant side reference only
         });
 
         builder.Entity<SubscriptionPlan>(entity =>

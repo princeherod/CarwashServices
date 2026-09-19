@@ -28,7 +28,7 @@ namespace CarwashServices.Views
     }
 
     // ============================================================
-    // Product / Service DTOs — used by ServicesView + ServiceEditDialog
+    // Product / Service DTOs
     // ============================================================
 
     public class ProductDto
@@ -45,7 +45,7 @@ namespace CarwashServices.Views
     }
 
     // ============================================================
-    // Service Request DTOs — used by ServiceRequestsView
+    // Service Request DTOs
     // ============================================================
 
     public class ServiceRequestDto
@@ -85,6 +85,88 @@ namespace CarwashServices.Views
         public int UserId { get; set; }
         public string FullName { get; set; } = "";
         public int RoleId { get; set; }
+    }
+
+    // ============================================================
+    // Follow-Up DTOs
+    // ============================================================
+
+    public class FollowUpDto
+    {
+        public int FollowUpId { get; set; }
+        public int CustomerId { get; set; }
+        public string Type { get; set; } = "Service Reminder";
+        public string ContactMethod { get; set; } = "SMS";
+        public string? Reason { get; set; }
+        public string? DiscountOffer { get; set; }
+        public string? Notes { get; set; }
+        public string Status { get; set; } = "Pending";
+        public DateTime ScheduledDate { get; set; }
+        public DateTime? ValidUntil { get; set; }
+        public DateTime? SentAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public int? CreatedBy { get; set; }
+    }
+
+    public class FollowUpStatsDto
+    {
+        public int DueToday { get; set; }
+        public int OffersSent { get; set; }
+        public int Redeemed { get; set; }
+        public int Expired { get; set; }
+    }
+    public class AnalyticsSummaryDto
+    {
+        public int TotalCustomers { get; set; }
+        public int ReturningCustomers { get; set; }
+        public double ChurnRate { get; set; }
+        public decimal AvgSpendPerCustomer { get; set; }
+        public int CarsWashedThisMonth { get; set; }
+        public decimal RevenueThisMonth { get; set; }
+    }
+
+    public class RetentionPointDto
+    {
+        public string Month { get; set; } = "";
+        public int Value { get; set; }
+    }
+
+    public class SegmentCountsDto
+    {
+        public int Total { get; set; }
+        public int Active { get; set; }
+        public double ActivePct { get; set; }
+        public int AtRisk { get; set; }
+        public double AtRiskPct { get; set; }
+        public int Lost { get; set; }
+        public double LostPct { get; set; }
+    }
+
+    public class SegmentCustomerDto
+    {
+        public int CustomerId { get; set; }
+        public string Name { get; set; } = "";
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
+        public string? Vehicle { get; set; }
+        public DateTime LastVisit { get; set; }
+        public int DaysSince { get; set; }
+        public string Segment { get; set; } = "Active";
+        public int DaysLeft { get; set; }
+    }
+
+    public class RevenuePointDto
+    {
+        public string Label { get; set; } = "";
+        public decimal Value { get; set; }
+    }
+
+    public class RevenueResponseDto
+    {
+        public List<RevenuePointDto> Months { get; set; } = new();
+        public decimal Ytd { get; set; }
+        public string BestMonth { get; set; } = "";
+        public decimal BestValue { get; set; }
     }
 
     // ============================================================

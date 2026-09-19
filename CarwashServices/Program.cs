@@ -1,3 +1,6 @@
+using System;
+using System.Windows.Forms;
+
 namespace CarwashServices
 {
     internal static class Program
@@ -6,6 +9,15 @@ namespace CarwashServices
         static void Main()
         {
             ApplicationConfiguration.Initialize();
+
+            // Show login first
+            using (var login = new LoginForm())
+            {
+                if (login.ShowDialog() != DialogResult.OK)
+                    return; // user closed the login form
+            }
+
+            // Login successful → open the CRM
             Application.Run(new MainForm());
         }
     }

@@ -14,19 +14,17 @@ namespace CarwashServices
 
         public MainForm()
         {
-            Text = "Carwash Services CRM";
+            Text = "AquaShine CRM";
             StartPosition = FormStartPosition.CenterScreen;
             WindowState = FormWindowState.Maximized;
             BackColor = Color.FromArgb(0xF0, 0xF4, 0xFA);
             Font = new Font("Segoe UI", 9.5f);
             MinimumSize = new Size(1200, 700);
 
-            // ---- Sidebar ----
             _sidebar = new Sidebar();
             _sidebar.ModuleSelected += Sidebar_ModuleSelected;
             Controls.Add(_sidebar);
 
-            // ---- Header ----
             _headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -36,7 +34,7 @@ namespace CarwashServices
 
             _titleLabel = new Label
             {
-                Text = "👥  MANAGE CUSTOMERS",
+                Text = "MANAGE CUSTOMERS",
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI Semibold", 14f),
                 AutoSize = true,
@@ -46,7 +44,6 @@ namespace CarwashServices
             Controls.Add(_headerPanel);
             _headerPanel.BringToFront();
 
-            // ---- Content ----
             _contentPanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -55,7 +52,6 @@ namespace CarwashServices
             Controls.Add(_contentPanel);
             _contentPanel.BringToFront();
 
-            // ---- Start on Customers ----
             NavigateTo("Manage Customers");
         }
 
@@ -64,13 +60,31 @@ namespace CarwashServices
             NavigateTo(key);
         }
 
-        private void NavigateTo(string key)
+        public void NavigateToModule(string key)
         {
-            // Dispose the previous view
+            NavigateTo(key);
+        }
+
+        public void NavigateToFollowUpsWithCustomers(System.Collections.Generic.List<int> customerIds)
+        {
+            // 1) Navigate to the module
+            NavigateTo("Follow-Ups / Reminders");
+
+            // 2) Find the FollowUpsView we just added and open the dialog with preselection
             foreach (Control c in _contentPanel.Controls)
             {
-                c.Dispose();
+                if (c is FollowUpsView fuv)
+                {
+                    fuv.OpenAddDialogWithCustomers(customerIds);
+                    break;
+                }
             }
+        }
+
+        private void NavigateTo(string key)
+        {
+            foreach (Control c in _contentPanel.Controls)
+                c.Dispose();
             _contentPanel.Controls.Clear();
 
             UserControl? view = null;
@@ -78,33 +92,69 @@ namespace CarwashServices
 
             switch (key)
             {
+                case "View Dashboard":
+                    ShowComingSoon(key);
+                    return;
+
+                case "Analytics":
+                    view = new AnalyticsView();
+                    headerText = "ANALYTICS";
+                    break;
+
+                case "View Reports":
+                    ShowComingSoon(key);
+                    return;
+
+                case "Manage Users":
+                    ShowComingSoon(key);
+                    return;
+
                 case "Manage Customers":
                     view = new CustomersView();
-                    headerText = "👥  MANAGE CUSTOMERS";
+                    headerText = "MANAGE CUSTOMERS";
                     break;
 
                 case "Manage Services":
                     view = new ServicesView();
-                    headerText = "🔧  MANAGE SERVICES";
+                    headerText = "MANAGE SERVICES";
                     break;
 
                 case "Manage Service Requests":
                     view = new ServiceRequestsView();
-                    headerText = "📋  MANAGE SERVICE REQUESTS";
+                    headerText = "MANAGE SERVICE REQUESTS";
                     break;
 
+                case "Follow-Ups / Reminders":
+                    view = new FollowUpsView();
+                    headerText = "FOLLOW-UPS / REMINDERS";
+                    break;
+
+                case "Manage Admin Accounts":
+                    ShowComingSoon(key);
+                    return;
+
                 default:
-                    MessageBox.Show($"'{key}' is coming soon.",
-                        "Coming Soon", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    // Revert to the previous active module in the sidebar
-                    _sidebar.SetActiveModule(_sidebar.ActiveModuleKey);
+                    ShowComingSoon(key);
                     return;
             }
+
+            if (view == null) return;
 
             view.Dock = DockStyle.Fill;
             _contentPanel.Controls.Add(view);
             _titleLabel.Text = headerText;
             _sidebar.SetActiveModule(key);
+        }
+
+        private void ShowComingSoon(string key)
+        {
+            MessageBox.Show(
+                $"'{key}' is coming soon.",
+                "Coming Soon",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+
+            _sidebar.SetActiveModule(_sidebar.ActiveModuleKey);
         }
     }
 }

@@ -2,9 +2,10 @@
 using System.Drawing;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using CarwashServices.Views;   // ← ADD THIS LINE
+using CarwashServices.Views;
 
 namespace CarwashServices
 {
@@ -26,6 +27,19 @@ namespace CarwashServices
         private ComboBox _sourceCombo;
 
         private HttpClient _http = new HttpClient { BaseAddress = new Uri("http://localhost:5180/") };
+
+        // ---- Validation patterns ----
+        private static readonly Regex PhoneRegex = new Regex(
+            @"^[0-9+\-\s()]{7,20}$",
+            RegexOptions.Compiled);
+
+        private static readonly Regex EmailRegex = new Regex(
+            @"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+            RegexOptions.Compiled);
+
+        private static readonly Regex PlateRegex = new Regex(
+            @"^[A-Za-z0-9\- ]{2,15}$",
+            RegexOptions.Compiled);
 
         public CustomerEditDialog(int? customerId)
         {
@@ -87,7 +101,7 @@ namespace CarwashServices
 
             Controls.Add(header);
 
-            // ---- Body (scrollable) ----
+            // ---- Body ----
             var body = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -100,27 +114,29 @@ namespace CarwashServices
 
             int y = 20;
 
-            // Section: CUSTOMERS FIELDS
             body.Controls.Add(SectionDivider("CUSTOMERS FIELDS", y, body.Width - 60));
             y += 40;
 
             // Row 1: FULL_NAME + PHONE
             body.Controls.Add(MakeLabel("FULL_NAME *", 30, y));
             _fullNameTxt = MakeTextBox(30, y + 20, 340);
+            _fullNameTxt.PlaceholderText = "e.g. Juan Dela Cruz";
             body.Controls.Add(_fullNameTxt);
 
             body.Controls.Add(MakeLabel("PHONE *", 400, y));
             _phoneTxt = MakeTextBox(400, y + 20, 340);
+            _phoneTxt.PlaceholderText = "e.g. 09171234567";
             body.Controls.Add(_phoneTxt);
             y += 70;
 
-            // Row 2: EMAIL (full width)
+            // Row 2: EMAIL
             body.Controls.Add(MakeLabel("EMAIL *", 30, y));
             _emailTxt = MakeTextBox(30, y + 20, 710);
+            _emailTxt.PlaceholderText = "e.g. juan@example.com";
             body.Controls.Add(_emailTxt);
             y += 70;
 
-            // Row 3: ADDRESS (multiline)
+            // Row 3: ADDRESS
             body.Controls.Add(MakeLabel("ADDRESS", 30, y));
             _addressTxt = new TextBox
             {
@@ -130,7 +146,8 @@ namespace CarwashServices
                 Multiline = true,
                 Font = new Font("Segoe UI", 10f),
                 BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.White
+                BackColor = Color.White,
+                PlaceholderText = "Street, City, Province"
             };
             body.Controls.Add(_addressTxt);
             y += 90;
@@ -139,27 +156,32 @@ namespace CarwashServices
             body.Controls.Add(SectionDivider("VEHICLE INFO (CARWASH EXTENSION)", y, body.Width - 60));
             y += 40;
 
-            // Row: PLATE_NUMBER + VEHICLE_MAKE + VEHICLE_MODEL
+            // Row: PLATE + MAKE + MODEL
             body.Controls.Add(MakeLabel("PLATE_NUMBER *", 30, y));
             _plateTxt = MakeTextBox(30, y + 20, 220);
+            _plateTxt.PlaceholderText = "e.g. ABC 1234";
             body.Controls.Add(_plateTxt);
 
             body.Controls.Add(MakeLabel("VEHICLE_MAKE", 270, y));
             _makeTxt = MakeTextBox(270, y + 20, 220);
+            _makeTxt.PlaceholderText = "e.g. Toyota";
             body.Controls.Add(_makeTxt);
 
             body.Controls.Add(MakeLabel("VEHICLE_MODEL", 510, y));
             _modelTxt = MakeTextBox(510, y + 20, 230);
+            _modelTxt.PlaceholderText = "e.g. Fortuner";
             body.Controls.Add(_modelTxt);
             y += 70;
 
-            // Row: VEHICLE_YEAR + VEHICLE_COLOR + VEHICLE_TYPE
+            // Row: YEAR + COLOR + TYPE
             body.Controls.Add(MakeLabel("VEHICLE_YEAR", 30, y));
             _yearTxt = MakeTextBox(30, y + 20, 220);
+            _yearTxt.PlaceholderText = "e.g. 2020";
             body.Controls.Add(_yearTxt);
 
             body.Controls.Add(MakeLabel("VEHICLE_COLOR", 270, y));
             _colorTxt = MakeTextBox(270, y + 20, 220);
+            _colorTxt.PlaceholderText = "e.g. White";
             body.Controls.Add(_colorTxt);
 
             body.Controls.Add(MakeLabel("VEHICLE_TYPE", 510, y));
@@ -173,7 +195,7 @@ namespace CarwashServices
             };
             _typeCombo.Items.AddRange(new object[]
             {
-                "Sedan", "SUV", "Pickup", "Hatchback", "Van", "Motorcycle"
+                "", "Sedan", "SUV", "Pickup", "Hatchback", "Van", "Motorcycle"
             });
             body.Controls.Add(_typeCombo);
             y += 70;
@@ -190,7 +212,7 @@ namespace CarwashServices
             };
             _sourceCombo.Items.AddRange(new object[]
             {
-                "Facebook", "Google", "Referral", "Walk-in", "Instagram", "Other"
+                "", "Facebook", "Google", "Referral", "Walk-in", "Instagram", "Other"
             });
             body.Controls.Add(_sourceCombo);
             y += 90;
@@ -282,21 +304,18 @@ namespace CarwashServices
             };
             p.Controls.Add(line);
 
-            var left = new Panel
+            p.Controls.Add(new Panel
             {
                 Location = new Point(0, 9),
                 Size = new Size(width / 2 - 100, 1),
                 BackColor = Color.FromArgb(0xE5, 0xE8, 0xEE)
-            };
-            p.Controls.Add(left);
-
-            var right = new Panel
+            });
+            p.Controls.Add(new Panel
             {
                 Location = new Point(width / 2 + 90, 9),
                 Size = new Size(width / 2 - 90, 1),
                 BackColor = Color.FromArgb(0xE5, 0xE8, 0xEE)
-            };
-            p.Controls.Add(right);
+            });
 
             return p;
         }
@@ -312,13 +331,11 @@ namespace CarwashServices
                 var c = list.Find(x => x.TenantCustomerId == id);
                 if (c == null) return;
 
-                // ---- Customer fields ----
                 _fullNameTxt.Text = c.CustomerName;
                 _phoneTxt.Text = c.ContactNumber ?? "";
                 _emailTxt.Text = c.EmailAddress ?? "";
                 _addressTxt.Text = c.Address ?? "";
 
-                // ---- Vehicle fields ----
                 _plateTxt.Text = c.PlateNumber ?? "";
                 _makeTxt.Text = c.VehicleMake ?? "";
                 _modelTxt.Text = c.VehicleModel ?? "";
@@ -339,21 +356,164 @@ namespace CarwashServices
             }
         }
 
-        // ============================================================
-        // SAVE — uses PUT for edit, POST for create
-        // ============================================================
+        // ================================================================
+        // VALIDATION
+        // ================================================================
+        private bool ValidateForm(out string errorMessage)
+        {
+            errorMessage = "";
+
+            // FULL_NAME
+            if (string.IsNullOrWhiteSpace(_fullNameTxt.Text))
+            {
+                errorMessage = "FULL_NAME is required.";
+                _fullNameTxt.Focus();
+                return false;
+            }
+            if (_fullNameTxt.Text.Trim().Length < 3)
+            {
+                errorMessage = "FULL_NAME must be at least 3 characters.";
+                _fullNameTxt.Focus();
+                return false;
+            }
+            if (_fullNameTxt.Text.Trim().Length > 200)
+            {
+                errorMessage = "FULL_NAME must be 200 characters or less.";
+                _fullNameTxt.Focus();
+                return false;
+            }
+
+            // PHONE
+            if (string.IsNullOrWhiteSpace(_phoneTxt.Text))
+            {
+                errorMessage = "PHONE is required.";
+                _phoneTxt.Focus();
+                return false;
+            }
+            if (!PhoneRegex.IsMatch(_phoneTxt.Text.Trim()))
+            {
+                errorMessage = "PHONE must be 7–20 digits. Only numbers, spaces, +, -, and ( ) are allowed.";
+                _phoneTxt.Focus();
+                return false;
+            }
+
+            // EMAIL
+            if (string.IsNullOrWhiteSpace(_emailTxt.Text))
+            {
+                errorMessage = "EMAIL is required.";
+                _emailTxt.Focus();
+                return false;
+            }
+            if (!EmailRegex.IsMatch(_emailTxt.Text.Trim()))
+            {
+                errorMessage = "EMAIL is not in a valid format. Example: name@example.com";
+                _emailTxt.Focus();
+                return false;
+            }
+            if (_emailTxt.Text.Trim().Length > 200)
+            {
+                errorMessage = "EMAIL must be 200 characters or less.";
+                _emailTxt.Focus();
+                return false;
+            }
+
+            // ADDRESS (optional, but enforce max length if provided)
+            if (_addressTxt.Text.Trim().Length > 500)
+            {
+                errorMessage = "ADDRESS must be 500 characters or less.";
+                _addressTxt.Focus();
+                return false;
+            }
+
+            // PLATE_NUMBER
+            if (string.IsNullOrWhiteSpace(_plateTxt.Text))
+            {
+                errorMessage = "PLATE_NUMBER is required.";
+                _plateTxt.Focus();
+                return false;
+            }
+            if (!PlateRegex.IsMatch(_plateTxt.Text.Trim()))
+            {
+                errorMessage = "PLATE_NUMBER must be 2–15 characters (letters, numbers, spaces, hyphens only).";
+                _plateTxt.Focus();
+                return false;
+            }
+
+            // VEHICLE_YEAR (optional, but must be a valid year if provided)
+            if (!string.IsNullOrWhiteSpace(_yearTxt.Text))
+            {
+                if (!int.TryParse(_yearTxt.Text.Trim(), out int yr))
+                {
+                    errorMessage = "VEHICLE_YEAR must be a number (e.g. 2020).";
+                    _yearTxt.Focus();
+                    return false;
+                }
+                int currentYear = DateTime.Now.Year + 1;
+                if (yr < 1900 || yr > currentYear)
+                {
+                    errorMessage = $"VEHICLE_YEAR must be between 1900 and {currentYear}.";
+                    _yearTxt.Focus();
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        // ================================================================
+        // CONFIRMATION DIALOG
+        // ================================================================
+        private bool ConfirmSave()
+        {
+            string action = _customerId.HasValue ? "save changes to" : "register";
+            string title = _customerId.HasValue ? "Confirm Save Changes" : "Confirm Registration";
+
+            string summary =
+                $"You are about to {action} this customer:\n\n" +
+                $"  Full Name : {_fullNameTxt.Text.Trim()}\n" +
+                $"  Phone     : {_phoneTxt.Text.Trim()}\n" +
+                $"  Email     : {_emailTxt.Text.Trim()}\n" +
+                $"  Address   : {(_addressTxt.Text.Trim() == "" ? "(none)" : _addressTxt.Text.Trim())}\n\n" +
+                $"  Plate #   : {_plateTxt.Text.Trim()}\n" +
+                $"  Make      : {(_makeTxt.Text.Trim() == "" ? "(none)" : _makeTxt.Text.Trim())}\n" +
+                $"  Model     : {(_modelTxt.Text.Trim() == "" ? "(none)" : _modelTxt.Text.Trim())}\n" +
+                $"  Year      : {(_yearTxt.Text.Trim() == "" ? "(none)" : _yearTxt.Text.Trim())}\n" +
+                $"  Color     : {(_colorTxt.Text.Trim() == "" ? "(none)" : _colorTxt.Text.Trim())}\n" +
+                $"  Type      : {(_typeCombo.SelectedItem?.ToString() ?? "(none)")}\n" +
+                $"  Source    : {(_sourceCombo.SelectedItem?.ToString() ?? "(none)")}\n\n" +
+                $"Proceed?";
+
+            var result = MessageBox.Show(
+                summary,
+                title,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);   // Default to No
+
+            return result == DialogResult.Yes;
+        }
+
+        // ================================================================
+        // SAVE
+        // ================================================================
         private async Task SaveAsync()
         {
-            if (string.IsNullOrWhiteSpace(_fullNameTxt.Text) ||
-                string.IsNullOrWhiteSpace(_phoneTxt.Text) ||
-                string.IsNullOrWhiteSpace(_emailTxt.Text))
+            // 1. Validate
+            if (!ValidateForm(out string error))
             {
-                MessageBox.Show("FULL_NAME, PHONE, and EMAIL are required.",
-                    "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(
+                    error,
+                    "Validation Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
                 return;
             }
 
-            // Parse vehicle year as nullable int
+            // 2. Confirm
+            if (!ConfirmSave())
+                return;
+
+            // 3. Parse vehicle year
             int? vehicleYear = null;
             if (int.TryParse(_yearTxt.Text.Trim(), out var yr))
                 vehicleYear = yr;
@@ -370,7 +530,6 @@ namespace CarwashServices
                 isActive = true,
                 createdAt = DateTime.UtcNow,
 
-                // ---- Vehicle + source fields ----
                 plateNumber = _plateTxt.Text.Trim(),
                 vehicleMake = _makeTxt.Text.Trim(),
                 vehicleModel = _modelTxt.Text.Trim(),
@@ -386,19 +545,26 @@ namespace CarwashServices
 
                 if (_customerId.HasValue)
                 {
-                    // ---- EDIT → PUT (update existing row) ----
                     resp = await _http.PutAsJsonAsync(
                         $"api/tenant/1/tenant-customers/{_customerId.Value}", dto);
                 }
                 else
                 {
-                    // ---- NEW → POST (insert new row) ----
                     resp = await _http.PostAsJsonAsync(
                         "api/tenant/1/tenant-customers", dto);
                 }
 
                 if (resp.IsSuccessStatusCode)
                 {
+                    // Success confirmation
+                    MessageBox.Show(
+                        _customerId.HasValue
+                            ? "Customer updated successfully."
+                            : "Customer registered successfully.",
+                        "Success",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+
                     DialogResult = DialogResult.OK;
                     Close();
                 }
