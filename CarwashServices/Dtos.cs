@@ -168,6 +168,95 @@ namespace CarwashServices.Views
         public string BestMonth { get; set; } = "";
         public decimal BestValue { get; set; }
     }
+    public class ReportsResponseDto
+    {
+        public int TotalTransactions { get; set; }
+        public int Completed { get; set; }
+        public int PendingOrCancelled { get; set; }
+        public decimal TotalRevenue { get; set; }
+        public decimal AvgTicket { get; set; }
+        public List<ReportMonthPointDto> Months { get; set; } = new();
+        public List<ReportServicePointDto> ByService { get; set; } = new();
+        public List<ReportTxnDto> Transactions { get; set; } = new();
+        public List<string> ServiceOptions { get; set; } = new();
+        public List<string> VehicleOptions { get; set; } = new();
+        public string GeneratedAt { get; set; } = "";
+    }
+
+    public class ReportMonthPointDto
+    {
+        public string Label { get; set; } = "";
+        public decimal Value { get; set; }
+    }
+
+    public class ReportServicePointDto
+    {
+        public string Label { get; set; } = "";
+        public decimal Value { get; set; }
+    }
+
+    public class ReportTxnDto
+    {
+        public string Txn { get; set; } = "";
+        public string Date { get; set; } = "";
+        public string Customer { get; set; } = "";
+        public string Vehicle { get; set; } = "";
+        public string Service { get; set; } = "";
+        public decimal Amount { get; set; }
+        public string Payment { get; set; } = "";
+        public string Status { get; set; } = "";
+    }
+    public class DashboardResponseDto
+    {
+        public int TotalCustomers { get; set; }
+        public int TodayJobs { get; set; }
+        public int InProgress { get; set; }
+        public int Pending { get; set; }
+        public decimal RevenueThisMonth { get; set; }
+        public List<DashboardRequestDto> RecentRequests { get; set; } = new();
+        public List<DashboardFollowUpDto> FollowUpQueue { get; set; } = new();
+        public int FollowUpPendingCount { get; set; }
+        public List<DashboardStaffDto> ServiceStaff { get; set; } = new();
+        public List<DashboardLogDto> RecentLogs { get; set; } = new();
+    }
+
+    public class DashboardRequestDto
+    {
+        public int RequestId { get; set; }
+        public string Customer { get; set; } = "";
+        public string Plate { get; set; } = "";
+        public string Service { get; set; } = "";
+        public string ScheduledDate { get; set; } = "";
+        public string AssignedStaff { get; set; } = "";
+        public string Status { get; set; } = "";
+    }
+
+    public class DashboardFollowUpDto
+    {
+        public int FollowUpId { get; set; }
+        public string Customer { get; set; } = "";
+        public string Type { get; set; } = "";
+        public string ScheduledDate { get; set; } = "";
+        public string Status { get; set; } = "";
+    }
+
+    public class DashboardStaffDto
+    {
+        public int UserId { get; set; }
+        public string FullName { get; set; } = "";
+        public string Role { get; set; } = "";
+        public bool IsOnDuty { get; set; }
+    }
+
+    public class DashboardLogDto
+    {
+        public int LogId { get; set; }
+        public int RequestId { get; set; }
+        public string Status { get; set; } = "";
+        public string UpdatedBy { get; set; } = "";
+        public string UpdatedAt { get; set; } = "";
+        public string Notes { get; set; } = "";
+    }
 
     // ============================================================
     // Combo helper

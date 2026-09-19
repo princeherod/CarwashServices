@@ -93,8 +93,9 @@ namespace CarwashServices
             switch (key)
             {
                 case "View Dashboard":
-                    ShowComingSoon(key);
-                    return;
+                    view = new DashboardView();
+                    headerText = "VIEW DASHBOARD";
+                    break;
 
                 case "Analytics":
                     view = new AnalyticsView();
@@ -102,8 +103,9 @@ namespace CarwashServices
                     break;
 
                 case "View Reports":
-                    ShowComingSoon(key);
-                    return;
+                    view = new ReportsView();
+                    headerText = "VIEW REPORTS";
+                    break;
 
                 case "Manage Users":
                     ShowComingSoon(key);
