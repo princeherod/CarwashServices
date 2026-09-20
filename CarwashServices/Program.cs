@@ -1,6 +1,8 @@
 using System;
 using System.Windows.Forms;
 
+using CarwashServices.Shell;
+
 namespace CarwashServices
 {
     internal static class Program

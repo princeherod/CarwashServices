@@ -11,26 +11,25 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace CarwashServices
+using CarwashServices.Auth;
+using CarwashServices.Dtos;
+
+namespace CarwashServices.Shell
 {
+    // =====================================================================
+    //  LOGIN UI THEME + HELPERS
+    // =====================================================================
     internal static class LoginUi
     {
-        // Brand panel (left)
         public static readonly Color BrandTop = Color.FromArgb(0x8F, 0xC5, 0xF8);
         public static readonly Color BrandBottom = Color.FromArgb(0xB4, 0xDA, 0xFC);
-
-        // Text
         public static readonly Color Navy = Color.FromArgb(0x0A, 0x1F, 0x44);
         public static readonly Color TextMuted = Color.FromArgb(0x6B, 0x7A, 0x9A);
         public static readonly Color Link = Color.FromArgb(0x1A, 0x62, 0xC9);
-
-        // Accent / button
         public static readonly Color Accent = Color.FromArgb(0x1E, 0x88, 0xE5);
         public static readonly Color AccentHover = Color.FromArgb(0x15, 0x6F, 0xC4);
         public static readonly Color AccentPressed = Color.FromArgb(0x0F, 0x5D, 0xA8);
         public static readonly Color AccentDisabled = Color.FromArgb(0x8F, 0xBF, 0xF0);
-
-        // Borders / misc
         public static readonly Color BorderSoft = Color.FromArgb(0xD9, 0xE0, 0xEA);
         public static readonly Color BorderStrong = Color.FromArgb(0xB8, 0xC2, 0xD3);
         public static readonly Color Dot = Color.FromArgb(0xB0, 0xB8, 0xC8);
@@ -38,7 +37,6 @@ namespace CarwashServices
 
         public enum IconKind { Mail, Lock, Eye, EyeOff }
 
-        // DPI helpers (design values are in 96-DPI pixels)
         public static int Px(this Control c, float v) => (int)Math.Round(v * c.DeviceDpi / 96f);
         public static float Pf(this Control c, float v) => v * c.DeviceDpi / 96f;
 
@@ -47,11 +45,7 @@ namespace CarwashServices
             radius = Math.Max(0f, Math.Min(radius, Math.Min(r.Width, r.Height) / 2f));
             float d = radius * 2f;
             var p = new GraphicsPath();
-            if (d <= 0f)
-            {
-                p.AddRectangle(r);
-                return p;
-            }
+            if (d <= 0f) { p.AddRectangle(r); return p; }
             p.AddArc(r.X, r.Y, d, d, 180, 90);
             p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
             p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
@@ -60,7 +54,6 @@ namespace CarwashServices
             return p;
         }
 
-        /// <summary>Crisp vector icons (drawn on a 24x24 grid) so we don't depend on emoji fonts.</summary>
         public static void DrawIcon(Graphics g, IconKind kind, RectangleF bounds, Color color)
         {
             GraphicsState state = g.Save();
@@ -117,15 +110,13 @@ namespace CarwashServices
     // =====================================================================
     //  LOGIN FORM
     // =====================================================================
-    [DesignerCategory("Code")]   // ← prevents the WinForms designer from trying to serialize this class
+    [DesignerCategory("Code")]
     public class LoginForm : Form
     {
-        // ---- Config ----
         private const string ApiBaseUrl = "http://localhost:5180/";
-        private const int FormW = 420;      // width of the login column
-        private const int ContentH = 408;   // height of the login column
+        private const int FormW = 420;
+        private const int ContentH = 408;
 
-        // One shared HttpClient for the app (creating one per form leaks sockets).
         private static readonly HttpClient Http = new HttpClient
         {
             BaseAddress = new Uri(ApiBaseUrl),
@@ -135,7 +126,6 @@ namespace CarwashServices
         private static readonly Regex EmailRegex = new Regex(
             @"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
 
-        // ---- Controls ----
         private readonly RoundedInput _email =
             new RoundedInput(LoginUi.IconKind.Mail, "Enter your email", false);
         private readonly RoundedInput _password =
@@ -152,9 +142,6 @@ namespace CarwashServices
             LoadRememberedEmail();
         }
 
-        // ================================================================
-        //  UI
-        // ================================================================
         private void BuildUi()
         {
             SuspendLayout();
@@ -172,16 +159,13 @@ namespace CarwashServices
             MinimizeBox = true;
             DoubleBuffered = true;
 
-            // ---------- LEFT: brand panel ----------
             var brand = new BrandPanel { Dock = DockStyle.Left, Width = 460 };
             Controls.Add(brand);
 
-            // ---------- RIGHT: login area ----------
             var right = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
             Controls.Add(right);
             right.BringToFront();
 
-            // Content column, kept centered whatever the panel size / DPI is.
             var content = new Panel
             {
                 Size = new Size(FormW, ContentH),
@@ -198,7 +182,6 @@ namespace CarwashServices
             right.Resize += (s, e) => CenterContent();
             Load += (s, e) => CenterContent();
 
-            // ---- Title ----
             content.Controls.Add(new Label
             {
                 Text = "Welcome back",
@@ -211,7 +194,6 @@ namespace CarwashServices
                 BackColor = Color.White
             });
 
-            // ---- Divider with dot ----
             content.Controls.Add(new Divider
             {
                 Location = new Point(0, 64),
@@ -219,19 +201,16 @@ namespace CarwashServices
                 BackColor = Color.White
             });
 
-            // ---- Email ----
             content.Controls.Add(MakeFieldLabel("Email", 108));
             _email.Location = new Point(0, 132);
             _email.Size = new Size(FormW, 52);
             content.Controls.Add(_email);
 
-            // ---- Password ----
             content.Controls.Add(MakeFieldLabel("Password", 200));
             _password.Location = new Point(0, 224);
             _password.Size = new Size(FormW, 52);
             content.Controls.Add(_password);
 
-            // ---- Inline error message (space is always reserved, so nothing jumps) ----
             _errorLbl.AutoSize = false;
             _errorLbl.AutoEllipsis = true;
             _errorLbl.Location = new Point(0, 282);
@@ -245,7 +224,6 @@ namespace CarwashServices
             _email.ValueChanged += (s, e) => _errorLbl.Text = string.Empty;
             _password.ValueChanged += (s, e) => _errorLbl.Text = string.Empty;
 
-            // ---- Remember me + Forgot password ----
             var row = new TableLayoutPanel
             {
                 Location = new Point(0, 314),
@@ -287,7 +265,6 @@ namespace CarwashServices
             row.Controls.Add(forgot, 1, 0);
             content.Controls.Add(row);
 
-            // ---- Log In button ----
             _loginBtn.Text = "Log In";
             _loginBtn.Font = new Font("Segoe UI", 11.5f, FontStyle.Bold);
             _loginBtn.Location = new Point(0, 356);
@@ -295,7 +272,6 @@ namespace CarwashServices
             _loginBtn.Click += async (s, e) => await DoLoginAsync();
             content.Controls.Add(_loginBtn);
 
-            // Enter key = click Log In
             AcceptButton = _loginBtn;
 
             ResumeLayout(false);
@@ -318,9 +294,6 @@ namespace CarwashServices
             else _email.FocusInput();
         }
 
-        // ================================================================
-        //  REMEMBER ME
-        // ================================================================
         private static string RememberFile =>
             Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -341,7 +314,7 @@ namespace CarwashServices
                     }
                 }
             }
-            catch { /* ignore */ }
+            catch { }
         }
 
         private void SaveRememberedEmail()
@@ -356,12 +329,9 @@ namespace CarwashServices
                 else if (File.Exists(RememberFile))
                     File.Delete(RememberFile);
             }
-            catch { /* ignore */ }
+            catch { }
         }
 
-        // ================================================================
-        //  LOGIN
-        // ================================================================
         private void Fail(string message, RoundedInput field)
         {
             _errorLbl.Text = message;
@@ -400,6 +370,19 @@ namespace CarwashServices
 
                 if (resp.IsSuccessStatusCode)
                 {
+                    try
+                    {
+                        var user = await resp.Content.ReadFromJsonAsync<AuthUserDto>();
+                        if (user != null)
+                        {
+                            SessionUser.UserId = user.UserId;
+                            SessionUser.FullName = user.FullName;
+                            SessionUser.Email = user.Email;
+                            SessionUser.Role = (UserRole)user.RoleId;
+                        }
+                    }
+                    catch { }
+
                     SaveRememberedEmail();
                     DialogResult = DialogResult.OK;
                     Close();
@@ -434,7 +417,7 @@ namespace CarwashServices
         }
 
         // ================================================================
-        //  CUSTOM CONTROLS
+        //  NESTED UI CONTROLS
         // ================================================================
 
         [DesignerCategory("Code")]
@@ -597,9 +580,7 @@ namespace CarwashServices
                 Controls.Add(_text);
             }
 
-            // ---- The fix ----
-            [System.ComponentModel.DesignerSerializationVisibility(
-                System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+            [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
             public string Value
             {
                 get => _text.Text;

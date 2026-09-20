@@ -16,6 +16,9 @@ public class TenantErpDbContext : DbContext
 
     public DbSet<Inventory> Inventories => Set<Inventory>();
 
+    // NEW — complaints / feedback recorded against a tenant customer
+    public DbSet<CustomerInteraction> CustomerInteractions => Set<CustomerInteraction>();
+
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -121,6 +124,40 @@ public class TenantErpDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(x => x.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // NEW — customer interactions (complaints & feedback)
+        builder.Entity<CustomerInteraction>(entity =>
+        {
+            entity.HasKey(x => x.InteractionId);
+
+            entity.Property(x => x.Kind)
+                .HasMaxLength(30)
+                .IsRequired();
+
+            entity.Property(x => x.Severity)
+                .HasMaxLength(20);
+
+            entity.Property(x => x.Title)
+                .HasMaxLength(200)
+                .IsRequired();
+
+            entity.Property(x => x.Details)
+                .HasMaxLength(2000);
+
+            entity.Property(x => x.Status)
+                .HasMaxLength(20)
+                .IsRequired();
+
+            entity.Property(x => x.RecordedBy)
+                .HasMaxLength(200);
+
+            // Index for the common query: fetch all interactions for one customer
+            entity.HasIndex(x => x.CustomerId);
+
+            // NOTE: no FK constraint to TenantCustomer on purpose.
+            // Interactions can outlive a customer deletion if you ever
+            // add soft-delete — the CustomerId is just a logical link.
         });
     }
 }

@@ -8,7 +8,10 @@ using System.Net.Http.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace CarwashServices.Views
+using CarwashServices.Dialogs;
+using CarwashServices.Dtos;
+
+namespace CarwashServices.Roles
 {
     public class FollowUpsView : UserControl
     {
@@ -48,7 +51,6 @@ namespace CarwashServices.Views
         private int _statsLayoutWidth = -1;
         private int _logRowCount = 0;
 
-        // FIX: a flag that tells us the UI is ready before we try to touch the grid
         private bool _uiReady = false;
 
         private const int MarginX = 40;
@@ -75,16 +77,25 @@ namespace CarwashServices.Views
         private static readonly Font FontStatTitle = new Font("Segoe UI", 10f);
         private static readonly Font FontStatValue = new Font("Segoe UI Semibold", 24f);
 
+        // Status is drawn as coloured words only (no pill / circle).
+        // Set to true if you also want a light, square highlight behind the words.
+        private static readonly bool TintBehindText = false;
+
         private static readonly string[] StatusOptions =
         {
             "Scheduled", "Due today", "Sent", "Redeemed", "Expired"
         };
+
+        // Terminal statuses — no more edits allowed once a follow-up reaches one of these
+        private static bool IsTerminalStatus(string status) =>
+            status == "Redeemed" || status == "Expired";
 
         public FollowUpsView()
         {
             Dock = DockStyle.Fill;
             BackColor = PageBg;
             Font = new Font("Segoe UI", 9.5f);
+            DoubleBuffered = true;
 
             _http = new HttpClient
             {
@@ -93,8 +104,6 @@ namespace CarwashServices.Views
             };
 
             InitializeUI();
-
-            // FIX: UI is built — safe to process filter changes now
             _uiReady = true;
         }
 
@@ -282,8 +291,6 @@ namespace CarwashServices.Views
                 "All statuses", "Scheduled", "Due today", "Sent", "Redeemed", "Expired"
             });
 
-            // Attach handler BEFORE setting SelectedIndex — the guard inside
-            // prevents it from running ApplyFilter before the grid exists
             _statusFilterCombo.SelectedIndexChanged += (s, e) =>
             {
                 if (!_uiReady) return;
@@ -639,6 +646,8 @@ namespace CarwashServices.Views
             _ => (Color.FromArgb(0xEE, 0xF1, 0xF6), Muted)
         };
 
+        // Status: coloured words only. No pill, no circle.
+        // (Name kept as PaintStatusPill so the existing calls keep working.)
         private static void PaintStatusPill(DataGridViewCellPaintingEventArgs e)
         {
             e.Paint(e.CellBounds, BaseParts);
@@ -647,35 +656,57 @@ namespace CarwashServices.Views
             if (text.Length == 0) { e.Handled = true; return; }
 
             var (bg, fg) = StatusColors(text);
-            var size = TextRenderer.MeasureText(e.Graphics, text, FontPill,
-                new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
 
-            int h = 26;
-            int w = Math.Min(size.Width + 26, Math.Max(20, e.CellBounds.Width - 24));
-            var rect = new Rectangle(
-                e.CellBounds.X + 16,
-                e.CellBounds.Y + (e.CellBounds.Height - h) / 2,
-                w, h);
+            var b = e.CellBounds;
+            var size = TextRenderer.MeasureText(e.Graphics, text, FontStrong,
+                new Size(int.MaxValue, int.MaxValue),
+                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
 
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = RoundedRect(new Rectangle(rect.X, rect.Y, rect.Width - 1, rect.Height - 1), h / 2))
-            using (var br = new SolidBrush(bg))
+            int x = b.X + 16;
+            int maxW = Math.Max(10, b.Width - 24);
+            int y = b.Y + (b.Height - size.Height) / 2;
+
+            if (TintBehindText)
             {
-                e.Graphics.FillPath(br, path);
+                int textW = Math.Min(size.Width, maxW);
+                using var br = new SolidBrush(bg);
+                e.Graphics.FillRectangle(br, new Rectangle(x - 6, y - 3, textW + 12, size.Height + 6));
             }
 
-            TextRenderer.DrawText(e.Graphics, text, FontPill, rect, fg,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            TextRenderer.DrawText(e.Graphics, text, FontStrong,
+                new Rectangle(x, y, maxW, size.Height), fg,
+                TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis |
+                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
 
             e.Handled = true;
         }
 
         private static void PaintActionButton(DataGridViewCellPaintingEventArgs e)
         {
+            var text = Convert.ToString(e.Value) ?? "";
+
+            // No action for terminal rows (Redeemed / Expired): paint an empty cell ourselves
+            // so the default button-cell paint can't leave a dark box behind.
+            if (string.IsNullOrEmpty(text))
+            {
+                var back = (e.State & DataGridViewElementStates.Selected) != 0
+                    ? e.CellStyle.SelectionBackColor
+                    : e.CellStyle.BackColor;
+
+                using (var br = new SolidBrush(back))
+                    e.Graphics.FillRectangle(br, e.CellBounds);
+
+                using (var pen = new Pen(CardBorder))
+                    e.Graphics.DrawLine(pen,
+                        e.CellBounds.Left, e.CellBounds.Bottom - 1,
+                        e.CellBounds.Right, e.CellBounds.Bottom - 1);
+
+                e.Handled = true;
+                return;
+            }
+
             e.Paint(e.CellBounds, BaseParts);
 
-            var text = Convert.ToString(e.Value) ?? "";
             bool primary = text == "Save";
 
             var rect = new Rectangle(e.CellBounds.X + 12, e.CellBounds.Y + 15, 80, e.CellBounds.Height - 30);
@@ -801,7 +832,6 @@ namespace CarwashServices.Views
                 return;
             }
 
-            // Guard: bail out if the UI hasn't been built yet.
             if (_grid == null || _pagerBar == null || _showingLbl == null)
                 return;
 
@@ -821,7 +851,6 @@ namespace CarwashServices.Views
                 }).ToList();
             }
 
-            // Treat both "All" and "All statuses" as no filter
             if (!string.IsNullOrWhiteSpace(_statusFilter)
                 && _statusFilter != "All"
                 && _statusFilter != "All statuses")
@@ -866,6 +895,9 @@ namespace CarwashServices.Views
                     _ => f.ContactMethod
                 };
 
+                // Terminal rows: no Edit button, no Save button
+                bool isTerminal = IsTerminalStatus(f.Status);
+
                 _grid.Rows.Add(
                     f.FollowUpId,
                     custCell,
@@ -874,7 +906,7 @@ namespace CarwashServices.Views
                     string.IsNullOrWhiteSpace(f.DiscountOffer) ? "—" : f.DiscountOffer,
                     method,
                     f.Status,
-                    "Edit");
+                    isTerminal ? "" : "Edit");
             }
 
             _grid.ResumeLayout();
@@ -894,26 +926,32 @@ namespace CarwashServices.Views
             if (e.RowIndex < 0) return;
 
             var col = _grid.Columns[e.ColumnIndex];
+            if (col.Name != "Actions") return;
 
-            if (col.Name == "Actions")
+            var actionText = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
+            if (string.IsNullOrEmpty(actionText)) return;   // terminal rows have no button
+
+            var rowId = Convert.ToInt32(_grid.Rows[e.RowIndex].Cells["FollowUpId"].Value);
+
+            if (_editingRowId == rowId)
             {
-                var rowId = Convert.ToInt32(_grid.Rows[e.RowIndex].Cells["FollowUpId"].Value);
-
-                if (_editingRowId == rowId)
-                {
-                    var btnText = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
-                    if (btnText == "Save")
-                        _ = SaveEditAsync(e.RowIndex, rowId);
-                }
-                else
-                {
-                    EnterEditMode(e.RowIndex, rowId);
-                }
+                var btnText = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
+                if (btnText == "Save")
+                    _ = SaveEditAsync(e.RowIndex, rowId);
+            }
+            else
+            {
+                EnterEditMode(e.RowIndex, rowId);
             }
         }
 
         private void EnterEditMode(int rowIndex, int rowId)
         {
+            // Safety: never enter edit mode for a Redeemed / Expired row
+            var currentStatus = _grid.Rows[rowIndex].Cells["Status"].Value?.ToString() ?? "";
+            if (IsTerminalStatus(currentStatus))
+                return;
+
             RemoveEditOverlays();
 
             _editingRowId = rowId;
@@ -968,7 +1006,6 @@ namespace CarwashServices.Views
 
         private void RepositionEditOverlays()
         {
-            // Guard against early calls during construction
             if (_grid == null) return;
             if (_editingRowIndex < 0 || _editingRowIndex >= _grid.RowCount) return;
 
@@ -993,8 +1030,6 @@ namespace CarwashServices.Views
 
         private void RemoveEditOverlays()
         {
-            // FIX: guard against a null grid (this method may be called
-            // before the grid has been created)
             if (_grid == null) return;
 
             var toRemove = new List<Control>();
@@ -1229,9 +1264,6 @@ namespace CarwashServices.Views
             }
         }
 
-        // ================================================================
-        //  PUBLIC — refresh from outside
-        // ================================================================
         public void RefreshData()
         {
             _ = ReloadAllAsync();

@@ -166,6 +166,38 @@ public class AnalyticsController : ControllerBase
             .Where(s => s.Segment == segment)
             .ToList();
 
+        if (rows.Count > 0)
+        {
+            var ids = rows.Select(r => r.CustomerId).ToHashSet();
+
+            // Latest follow-up per customer
+            var latestFollowUps = await _db.FollowUps
+                .AsNoTracking()
+                .Where(f => ids.Contains(f.CustomerId))
+                .GroupBy(f => f.CustomerId)
+                .Select(g => g.OrderByDescending(f => f.FollowUpId).First())
+                .ToListAsync();
+
+            var byCustomer = latestFollowUps.ToDictionary(f => f.CustomerId);
+
+            foreach (var r in rows)
+            {
+                if (!byCustomer.TryGetValue(r.CustomerId, out var f)) continue;
+
+                r.LastFollowUpId = f.FollowUpId;
+                r.LastFollowUpStatus = f.Status;
+                r.LastFollowUpType = f.Type;
+                r.LastFollowUpDate = f.ScheduledDate;
+
+                // Only Expired re-opens the Follow Up button.
+                // Pending / Scheduled / Due today / Sent / Contacted / Redeemed all block.
+                bool isBlockingStatus =
+                    !string.Equals(f.Status, "Expired", StringComparison.OrdinalIgnoreCase);
+
+                r.HasOpenFollowUp = isBlockingStatus;
+            }
+        }
+
         return Ok(rows);
     }
 
@@ -249,12 +281,18 @@ public class AnalyticsController : ControllerBase
         public int DaysSince { get; set; }
         public string Segment { get; set; } = "Active";
         public int DaysLeft { get; set; }
+
+        // Follow-up info
+        public bool HasOpenFollowUp { get; set; }
+        public string? LastFollowUpStatus { get; set; }
+        public string? LastFollowUpType { get; set; }
+        public DateTime? LastFollowUpDate { get; set; }
+        public int? LastFollowUpId { get; set; }
     }
 
     // NOTE the two different namespace casings below:
     //   - TenantCustomer lives in  CRM.Domain.Entities  (capital D)
     //   - ServiceRequest lives in  CRM.domain.Entities  (lowercase d)
-    // Match whatever each entity file actually declares.
     private static List<SegmentRow> SegmentCustomers(
         List<CRM.Domain.Entities.TenantCustomer> customers,
         List<CRM.domain.Entities.ServiceRequest> requests)

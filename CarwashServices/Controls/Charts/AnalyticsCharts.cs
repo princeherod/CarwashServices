@@ -6,7 +6,7 @@ using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace CarwashServices.Views
+namespace CarwashServices.Controls.Charts
 {
     // -------------------- DONUT CHART --------------------
     public class DonutChart : Control

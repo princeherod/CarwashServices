@@ -15,7 +15,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace CarwashServices.Views
+using CarwashServices.Controls.Charts;
+using CarwashServices.Dtos;
+
+namespace CarwashServices.Roles
 {
     public class ReportsView : UserControl
     {
@@ -80,8 +83,12 @@ namespace CarwashServices.Views
         private static readonly Font FSmall = new("Segoe UI", 8.5f);
         private static readonly Font FBtnBold = new("Segoe UI Semibold", 9.5f);
         private static readonly Font FItalic = new("Segoe UI", 9.5f, FontStyle.Italic);
-        private static readonly Font FBadge = new("Segoe UI Semibold", 8.5f);
+        private static readonly Font FStatus = new("Segoe UI Semibold", 9.5f);
         private static readonly Font FGridHeader = new("Segoe UI Semibold", 9f);
+
+        // Payment / Status are drawn as coloured words only (no pill / circle) — same as the other
+        // screens. Set to true if you also want a light, square highlight behind the words.
+        private static readonly bool TintBehindText = false;
 
         private const int MarginX = 40;
         private const int TopMargin = 20;
@@ -344,7 +351,8 @@ namespace CarwashServices.Views
                 ForeColor = Muted,
                 Font = FItalic,
                 Location = new Point(20, 14),
-                AutoSize = true
+                AutoSize = true,
+                UseMnemonic = false     // otherwise WinForms swallows the "&" ("Service  Revenue Report")
             };
             _tableCard.Controls.Add(_tableHeaderLbl);
 
@@ -628,6 +636,7 @@ namespace CarwashServices.Views
                     t.Amount,
                     t.Payment, t.Status);
             }
+            _grid.ClearSelection();     // don't leave the first row highlighted
             _grid.ResumeLayout();
 
             int rows = _grid.Rows.Count;
@@ -646,7 +655,7 @@ namespace CarwashServices.Views
         }
 
         // ================================================================
-        //  GRID: sorting + badge painting
+        //  GRID: sorting + status painting
         // ================================================================
         private void Grid_SortCompare(object? sender, DataGridViewSortCompareEventArgs e)
         {
@@ -659,6 +668,7 @@ namespace CarwashServices.Views
             }
         }
 
+        // Payment + Status: coloured words only. No pill, no circle.
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
@@ -671,25 +681,30 @@ namespace CarwashServices.Views
                                   DataGridViewPaintParts.SelectionBackground);
 
             var text = Convert.ToString(e.Value) ?? "";
+            if (text.Length == 0) { e.Handled = true; return; }
+
             var (bg, fg) = col == "Payment" ? PaymentColors(text) : StatusColors(text);
 
-            var size = TextRenderer.MeasureText(e.Graphics, text, FBadge,
-                new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
+            var b = e.CellBounds;
+            var size = TextRenderer.MeasureText(e.Graphics, text, FStatus,
+                new Size(int.MaxValue, int.MaxValue),
+                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
 
-            int h = 24;
-            int w = Math.Min(size.Width + 24, Math.Max(20, e.CellBounds.Width - 20));
-            var rect = new Rectangle(
-                e.CellBounds.X + 12,
-                e.CellBounds.Y + (e.CellBounds.Height - h) / 2, w, h);
+            int x = b.X + 12;                          // lines up with the column header text
+            int maxW = Math.Max(10, b.Width - 20);
+            int y = b.Y + (b.Height - size.Height) / 2;
 
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = ChartUtil.RoundedRect(new RectangleF(rect.X, rect.Y, rect.Width - 1, rect.Height - 1), h / 2f))
-            using (var br = new SolidBrush(bg))
-                e.Graphics.FillPath(br, path);
+            if (TintBehindText)
+            {
+                int textW = Math.Min(size.Width, maxW);
+                using var br = new SolidBrush(bg);
+                e.Graphics.FillRectangle(br, new Rectangle(x - 6, y - 3, textW + 12, size.Height + 6));
+            }
 
-            TextRenderer.DrawText(e.Graphics, text, FBadge, rect, fg,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            TextRenderer.DrawText(e.Graphics, text, FStatus,
+                new Rectangle(x, y, maxW, size.Height), fg,
+                TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis |
+                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
 
             e.Handled = true;
         }

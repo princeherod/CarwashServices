@@ -1,17 +1,24 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace CarwashServices
+using CarwashServices.Auth;
+
+namespace CarwashServices.Shell
 {
     public class Sidebar : Panel
     {
         public event EventHandler<string>? ModuleSelected;
 
-        private string _activeModule = "Manage Customers";
+        private string _activeModule = "";
 
         public string ActiveModuleKey => _activeModule;
+
+        // Kept so we can just toggle colours on click instead of rebuilding the whole sidebar.
+        private readonly Dictionary<string, Button> _moduleButtons = new();
+        private readonly Dictionary<string, Panel> _moduleAccents = new();
 
         // ---- Palette ----
         private static readonly Color NavyBg = Color.FromArgb(0x0A, 0x14, 0x28);
@@ -29,15 +36,42 @@ namespace CarwashServices
             BackColor = NavyBg;
             Padding = new Padding(0);
             DoubleBuffered = true;
+            SetStyle(ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.UserPaint, true);
 
+            _moduleButtons.Clear();
+            _moduleAccents.Clear();
             Build();
         }
 
+        /// <summary>
+        /// Just updates the visual highlight — does NOT rebuild the sidebar.
+        /// </summary>
         public void SetActiveModule(string moduleKey)
         {
+            if (_activeModule == moduleKey) return;
+
+            // Dim the previously active item
+            if (!string.IsNullOrEmpty(_activeModule) &&
+                _moduleButtons.TryGetValue(_activeModule, out var oldBtn))
+            {
+                oldBtn.BackColor = NavyBg;
+                oldBtn.FlatAppearance.MouseOverBackColor = NavyHover;
+                if (_moduleAccents.TryGetValue(_activeModule, out var oldAccent))
+                    oldAccent.Visible = false;
+            }
+
             _activeModule = moduleKey;
-            Controls.Clear();
-            Build();
+
+            // Highlight the newly active item
+            if (_moduleButtons.TryGetValue(moduleKey, out var newBtn))
+            {
+                newBtn.BackColor = NavyActive;
+                newBtn.FlatAppearance.MouseOverBackColor = NavyActive;
+                if (_moduleAccents.TryGetValue(moduleKey, out var newAccent))
+                    newAccent.Visible = true;
+            }
         }
 
         private void Build()
@@ -58,12 +92,10 @@ namespace CarwashServices
                 var g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
 
-                // Blue rounded square background
                 using var bg = new SolidBrush(Color.FromArgb(0x1E, 0x88, 0xE5));
                 using var path = RoundedRect(new Rectangle(0, 0, 38, 38), 10);
                 g.FillPath(bg, path);
 
-                // Paper plane glyph
                 using var pen = new Pen(Color.White, 1.8f);
                 pen.StartCap = LineCap.Round;
                 pen.EndCap = LineCap.Round;
@@ -105,12 +137,21 @@ namespace CarwashServices
             y += 68;
 
             // ============================================================
-            // ADMIN PILL
+            // ROLE PILL
             // ============================================================
+            string roleLabel = SessionUser.Role switch
+            {
+                UserRole.SuperAdmin => "Super Admin",
+                UserRole.Admin => "Admin",
+                UserRole.Manager => "Manager",
+                UserRole.ServiceStaff => "Service Staff",
+                _ => "Unknown"
+            };
+
             var adminPill = new Panel
             {
                 Location = new Point(24, y),
-                Size = new Size(92, 30),
+                Size = new Size(140, 30),
                 BackColor = Color.FromArgb(0x1A, 0x2A, 0x48)
             };
             adminPill.Paint += (s, e) =>
@@ -137,7 +178,7 @@ namespace CarwashServices
 
             var adminLabel = new Label
             {
-                Text = "Admin",
+                Text = roleLabel,
                 ForeColor = TextMain,
                 Font = new Font("Segoe UI Semibold", 9f),
                 Location = new Point(28, 6),
@@ -150,25 +191,22 @@ namespace CarwashServices
             y += 54;
 
             // ============================================================
-            // OVERVIEW
+            // MENU — driven by RoleRouter
             // ============================================================
+            var modules = RoleRouter.ModulesFor(SessionUser.Role);
+            var overviewKeys = new[] { "View Dashboard", "Analytics", "View Reports" };
+
             y = AddGroupLabel("OVERVIEW", y);
-            y = AddItem("View Dashboard", "dashboard", y, "View Dashboard");
-            y = AddItem("Analytics", "analytics", y, "Analytics");
-            y = AddItem("View Reports", "reports", y, "View Reports");
+            foreach (var key in modules)
+                if (Array.IndexOf(overviewKeys, key) >= 0)
+                    y = AddItem(key, IconKeyFor(key), y, key);
 
             y += 22;
 
-            // ============================================================
-            // ADMIN MODULES
-            // ============================================================
-            y = AddGroupLabel("ADMIN MODULES", y);
-            y = AddItem("Manage Users", "users", y, "Manage Users");
-            y = AddItem("Manage Customers", "customers", y, "Manage Customers");
-            y = AddItem("Manage Services", "services", y, "Manage Services");
-            y = AddItem("Manage Service Requests", "requests", y, "Manage Service Requests");
-            y = AddItem("Follow-Ups / Reminders", "reminders", y, "Follow-Ups / Reminders");
-            y = AddItem("Manage Admin Accounts", "admin", y, "Manage Admin Accounts");
+            y = AddGroupLabel("MODULES", y);
+            foreach (var key in modules)
+                if (Array.IndexOf(overviewKeys, key) < 0)
+                    y = AddItem(key, IconKeyFor(key), y, key);
 
             // ============================================================
             // BOTTOM USER CARD
@@ -202,7 +240,7 @@ namespace CarwashServices
             };
             var avatarLbl = new Label
             {
-                Text = "LP",
+                Text = Initials(SessionUser.FullName),
                 ForeColor = TextMain,
                 Font = new Font("Segoe UI Semibold", 10f),
                 Dock = DockStyle.Fill,
@@ -214,7 +252,7 @@ namespace CarwashServices
 
             card.Controls.Add(new Label
             {
-                Text = "Lena Park",
+                Text = string.IsNullOrWhiteSpace(SessionUser.FullName) ? "Not signed in" : SessionUser.FullName,
                 ForeColor = TextMain,
                 Font = new Font("Segoe UI Semibold", 10f),
                 Location = new Point(58, 16),
@@ -224,7 +262,7 @@ namespace CarwashServices
 
             card.Controls.Add(new Label
             {
-                Text = "Admin",
+                Text = roleLabel,
                 ForeColor = TextDim,
                 Font = new Font("Segoe UI", 8.5f),
                 Location = new Point(58, 34),
@@ -245,11 +283,48 @@ namespace CarwashServices
             };
             signOutBtn.FlatAppearance.BorderSize = 0;
             signOutBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(0x1A, 0x2A, 0x48);
+            signOutBtn.Click += (s, e) => SignOut();
             card.Controls.Add(signOutBtn);
 
             Controls.Add(card);
             card.BringToFront();
         }
+
+        private void SignOut()
+        {
+            SessionUser.Clear();
+            var main = FindForm();
+            main?.Hide();
+
+            using var login = new LoginForm();
+            if (login.ShowDialog() == DialogResult.OK)
+                Application.Restart();
+            else
+                main?.Close();
+        }
+
+        private static string Initials(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "?";
+            var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 1)
+                return parts[0].Length >= 2 ? parts[0].Substring(0, 2).ToUpper() : parts[0].ToUpper();
+            return (parts[0][0].ToString() + parts[parts.Length - 1][0].ToString()).ToUpper();
+        }
+
+        private static string IconKeyFor(string moduleKey) => moduleKey switch
+        {
+            "View Dashboard" => "dashboard",
+            "Analytics" => "analytics",
+            "View Reports" => "reports",
+            "Manage Users" => "users",
+            "Manage Customers" => "customers",
+            "Manage Services" => "services",
+            "Manage Service Requests" => "requests",
+            "Follow-Ups / Reminders" => "reminders",
+            "Manage Admin Accounts" => "admin",
+            _ => "dashboard"
+        };
 
         // ================================================================
         // GROUP LABEL
@@ -270,7 +345,7 @@ namespace CarwashServices
         }
 
         // ================================================================
-        // MENU ITEM (with drawn icon)
+        // MENU ITEM — always creates the accent bar, just toggles visibility
         // ================================================================
         private int AddItem(string label, string iconKey, int y, string? key = null)
         {
@@ -278,7 +353,7 @@ namespace CarwashServices
 
             var btn = new Button
             {
-                Text = "        " + label,                       // indent for the icon
+                Text = "        " + label,
                 TextAlign = ContentAlignment.MiddleLeft,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 9.5f),
@@ -295,18 +370,16 @@ namespace CarwashServices
             btn.FlatAppearance.BorderSize = 0;
             btn.FlatAppearance.MouseOverBackColor = isActive ? NavyActive : NavyHover;
 
-            if (isActive)
+            // Accent bar — always created, just hidden when inactive
+            var accent = new Panel
             {
-                var accent = new Panel
-                {
-                    Location = new Point(0, 0),
-                    Size = new Size(4, 42),
-                    BackColor = AccentBlue
-                };
-                btn.Controls.Add(accent);
-            }
+                Location = new Point(0, 0),
+                Size = new Size(4, 42),
+                BackColor = AccentBlue,
+                Visible = isActive
+            };
+            btn.Controls.Add(accent);
 
-            // Draw icon on top of the button
             var icon = new Panel
             {
                 Location = new Point(20, 11),
@@ -320,6 +393,8 @@ namespace CarwashServices
             {
                 var capturedKey = key;
                 btn.Click += (s, e) => ModuleSelected?.Invoke(this, capturedKey);
+                _moduleButtons[capturedKey] = btn;
+                _moduleAccents[capturedKey] = accent;
             }
 
             Controls.Add(btn);
@@ -327,7 +402,7 @@ namespace CarwashServices
         }
 
         // ================================================================
-        // ICON DRAWING (no emojis — pure GDI+)
+        // ICON DRAWING
         // ================================================================
         private static void DrawIcon(Graphics g, string key, Color color)
         {
@@ -340,32 +415,25 @@ namespace CarwashServices
 
             switch (key)
             {
-                // ---- Dashboard: 4-square grid ----
                 case "dashboard":
                     g.DrawRectangle(pen, 2, 2, 7, 7);
                     g.DrawRectangle(pen, 11, 2, 7, 7);
                     g.DrawRectangle(pen, 2, 11, 7, 7);
                     g.DrawRectangle(pen, 11, 11, 7, 7);
                     break;
-
-                // ---- Analytics: bar chart ----
                 case "analytics":
-                    g.DrawLine(pen, 2, 18, 2, 3);   // y-axis
-                    g.DrawLine(pen, 2, 18, 18, 18); // x-axis
+                    g.DrawLine(pen, 2, 18, 2, 3);
+                    g.DrawLine(pen, 2, 18, 18, 18);
                     g.FillRectangle(brush, 5, 11, 3, 7);
                     g.FillRectangle(brush, 10, 7, 3, 11);
                     g.FillRectangle(brush, 15, 4, 3, 14);
                     break;
-
-                // ---- Reports: document with lines ----
                 case "reports":
                     g.DrawRectangle(pen, 3, 2, 14, 17);
                     g.DrawLine(pen, 6, 7, 14, 7);
                     g.DrawLine(pen, 6, 11, 14, 11);
                     g.DrawLine(pen, 6, 15, 12, 15);
                     break;
-
-                // ---- Users: person + key ----
                 case "users":
                     g.DrawEllipse(pen, 2, 3, 6, 6);
                     g.DrawArc(pen, 0, 9, 10, 10, 180, 180);
@@ -373,23 +441,17 @@ namespace CarwashServices
                     g.DrawLine(pen, 15, 14, 15, 19);
                     g.DrawLine(pen, 15, 17, 18, 17);
                     break;
-
-                // ---- Customers: group of people ----
                 case "customers":
                     g.DrawEllipse(pen, 3, 2, 5, 5);
                     g.DrawArc(pen, 1, 8, 9, 9, 180, 180);
                     g.DrawEllipse(pen, 12, 3, 5, 5);
                     g.DrawArc(pen, 10, 9, 9, 9, 180, 180);
                     break;
-
-                // ---- Services: wrench ----
                 case "services":
                     g.DrawArc(pen, 1, 1, 10, 10, 30, 300);
                     g.DrawLine(pen, 9, 9, 17, 17);
                     g.DrawEllipse(pen, 15, 15, 4, 4);
                     break;
-
-                // ---- Service Requests: truck ----
                 case "requests":
                     g.DrawRectangle(pen, 1, 8, 11, 8);
                     g.DrawLine(pen, 12, 10, 18, 10);
@@ -397,8 +459,6 @@ namespace CarwashServices
                     g.DrawEllipse(pen, 3, 14, 4, 4);
                     g.DrawEllipse(pen, 13, 14, 4, 4);
                     break;
-
-                // ---- Follow-Ups: bell ----
                 case "reminders":
                     g.DrawArc(pen, 4, 3, 12, 12, 180, 180);
                     g.DrawLine(pen, 4, 11, 4, 15);
@@ -406,8 +466,6 @@ namespace CarwashServices
                     g.DrawLine(pen, 3, 15, 17, 15);
                     g.DrawEllipse(pen, 8, 16, 4, 3);
                     break;
-
-                // ---- Admin: shield ----
                 case "admin":
                     PointF[] shield =
                     {
@@ -420,16 +478,12 @@ namespace CarwashServices
                     };
                     g.DrawPolygon(pen, shield);
                     break;
-
                 default:
                     g.DrawEllipse(pen, 4, 4, 12, 12);
                     break;
             }
         }
 
-        // ================================================================
-        // ROUNDED RECTANGLE HELPER
-        // ================================================================
         private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
         {
             int d = radius * 2;

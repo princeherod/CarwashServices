@@ -5,10 +5,12 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using CarwashServices.Views;
 
-namespace CarwashServices
+using CarwashServices.Dtos;
+
+namespace CarwashServices.Dialogs
 {
+    
     public class ServiceRequestEditDialog : Form
     {
         private readonly int? _requestId;

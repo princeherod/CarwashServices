@@ -4,9 +4,9 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using CarwashServices.Views;   // ← ADD THIS (makes ProductDto resolvable without the full path)
+using CarwashServices.Dtos;
 
-namespace CarwashServices
+namespace CarwashServices.Dialogs
 {
     public class ServiceEditDialog : Form
     {

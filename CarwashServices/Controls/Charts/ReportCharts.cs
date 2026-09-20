@@ -7,7 +7,7 @@ using System.Drawing.Text;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace CarwashServices.Views
+namespace CarwashServices.Controls.Charts
 {
     // ============================================================
     //  Shared helpers

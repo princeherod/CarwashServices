@@ -1,4 +1,5 @@
 ﻿#nullable disable
+
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -9,20 +10,13 @@ using System.Net.Http.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace CarwashServices.Views
+using CarwashServices.Dialogs;
+using CarwashServices.Dtos;
+using CarwashServices.Shell;
+
+namespace CarwashServices.Roles
 {
-    /// <summary>
-    /// Analytics dashboard (redesigned).
-    ///
-    /// What changed vs. the old version:
-    ///  - Layout uses TableLayoutPanel + Dock instead of manual Location/Width math + Anchors,
-    ///    so nothing is clipped or misplaced when the window size changes.
-    ///  - Every pixel size goes through S() so it scales with Windows display scaling (125% / 150%).
-    ///  - Cards, charts, icons and text are self-painted (no per-label controls, no emoji glyphs),
-    ///    text is drawn with NoPrefix so "&" no longer turns into an underline.
-    ///  - The UI is built once; data refreshes just update the existing controls (no flicker).
-    ///  - The six API calls run in parallel.
-    /// </summary>
+   
     public class AnalyticsView : UserControl
     {
         private HttpClient _http;
@@ -35,8 +29,6 @@ namespace CarwashServices.Views
         private List<ServiceRequestDto> _recent = new();
         private List<TenantCustomerDto> _customers = new();
 
-        // TODO: this is still hard-coded in your old code. Replace with a real endpoint
-        // (for example api/analytics/wash-frequency) that returns average washes per month per tier.
         private List<(string Label, double Value)> _washFrequency = new List<(string Label, double Value)>
         {
             ("New", 1), ("Occasional", 2.8), ("Regular", 5), ("Loyal", 12.1)
@@ -97,10 +89,9 @@ namespace CarwashServices.Views
                 AutoScroll = true,
                 Padding = new Padding(S(32), S(20), S(32), S(28))
             };
-            _root.AutoScrollMinSize = new Size(S(1020), 0);   // horizontal scroll instead of squashing below this width
+            _root.AutoScrollMinSize = new Size(S(1020), 0);
             Controls.Add(_root);
 
-            // ---- rows: header | KPIs | charts row 1 | charts row 2 | actions ----
             int hHeader = S(100), hKpi = S(142), hRow1 = S(378), hRow2 = S(358), hActions = S(412);
 
             _page = new TableLayoutPanel
@@ -121,12 +112,10 @@ namespace CarwashServices.Views
             _page.RowStyles.Add(new RowStyle(SizeType.Absolute, hActions));
             _root.Controls.Add(_page);
 
-            // ---- header ----
             _header = new PageHeader { Dock = DockStyle.Fill, Margin = Padding.Empty };
             _header.RefreshButton.Click += async (s, e) => await ReloadAsync();
             _page.Controls.Add(_header, 0, 0);
 
-            // ---- KPI row (6 equal columns) ----
             var kpiGrid = MakeGrid(16.66f, 16.66f, 16.66f, 16.66f, 16.66f, 16.7f);
             _kpis = new[]
             {
@@ -140,7 +129,6 @@ namespace CarwashServices.Views
             for (int i = 0; i < _kpis.Length; i++) AddCell(kpiGrid, _kpis[i], i, i == _kpis.Length - 1);
             _page.Controls.Add(kpiGrid, 0, 1);
 
-            // ---- row 1: retention | wash frequency | recent activity ----
             var row1 = MakeGrid(36f, 28f, 36f);
 
             _retentionCard = new ChartCard { Title = "Customer Retention Rate", Subtitle = "Monthly retention — active visitors / total seen" };
@@ -166,7 +154,6 @@ namespace CarwashServices.Views
             AddCell(row1, _recentCard, 2, true);
             _page.Controls.Add(row1, 0, 2);
 
-            // ---- row 2: customer status | monthly revenue ----
             var row2 = MakeGrid(42f, 58f);
 
             _statusCard = new ChartCard
@@ -215,7 +202,6 @@ namespace CarwashServices.Views
             AddCell(row2, _revenueCard, 1, true);
             _page.Controls.Add(row2, 0, 3);
 
-            // ---- actions card ----
             _actionsCard = new ChartCard
             {
                 Title = "Customer Retention Actions",
@@ -254,7 +240,7 @@ namespace CarwashServices.Views
             _rowRetention = new ActionRow { Tone = Ui.Accent, Icon = IconKind.TrendDown, ShowTopBorder = true, Dock = DockStyle.Fill, Margin = Padding.Empty };
             _rowRetention.Ghost.Text = "View Analysis";
             _rowRetention.Solid.Text = "Take Action";
-            _rowRetention.Ghost.Click += (s, e) => { _root.AutoScrollPosition = new Point(0, 0); };   // retention chart is at the top
+            _rowRetention.Ghost.Click += (s, e) => { _root.AutoScrollPosition = new Point(0, 0); };
             _rowRetention.Solid.Click += (s, e) => FollowUpSegment("AtRisk");
 
             rows.Controls.Add(_rowAtRisk, 0, 0);
@@ -289,11 +275,10 @@ namespace CarwashServices.Views
         private void AddCell(TableLayoutPanel grid, Control c, int col, bool last)
         {
             c.Dock = DockStyle.Fill;
-            c.Margin = new Padding(0, 0, last ? 0 : S(16), S(18));   // 16px gap between cards, 18px below the row
+            c.Margin = new Padding(0, 0, last ? 0 : S(16), S(18));
             grid.Controls.Add(c, col, 0);
         }
 
-        // Mouse wheel goes to the focused control; make sure the scroll panel has focus when hovering cards.
         private void HookWheelFocus(Control parent)
         {
             foreach (Control child in parent.Controls)
@@ -310,7 +295,6 @@ namespace CarwashServices.Views
         {
             if (_kpis == null) return;
 
-            // ---- KPI cards ----
             string[] values =
             {
                 _summary.TotalCustomers.ToString(),
@@ -323,23 +307,19 @@ namespace CarwashServices.Views
             for (int i = 0; i < _kpis.Length; i++)
             {
                 _kpis[i].Value = values[i];
-                // TODO: your DTO has no "previous period" values yet, so this shows a neutral dash
-                // instead of a fake "↑ 0%". When the API returns deltas, set DeltaText/DeltaColor here.
                 _kpis[i].DeltaText = "–";
                 _kpis[i].DeltaColor = Ui.Muted;
             }
 
-            // ---- charts ----
             _retentionChart.Points = _retention.Select(p => (p.Month, Convert.ToDouble(p.Value))).ToList();
             _washChart.Bars = _washFrequency;
             _revenueChart.Bars = _revenue.Months.Select(m => (m.Label, Convert.ToDouble(m.Value))).ToList();
-            _revenueChart.HighlightIndex = _revenueChart.Bars.Count - 1;   // current (partial) month
+            _revenueChart.HighlightIndex = _revenueChart.Bars.Count - 1;
 
             _revenueCard.Subtitle = "Jan – " + DateTime.Today.ToString("MMM yyyy") + " · Completed & paid transactions";
             _revenueCard.FooterLeftValue = "₱" + Convert.ToDouble(_revenue.Ytd).ToString("N0");
             _revenueCard.FooterRightValue = _revenue.BestMonth + " — ₱" + Convert.ToDouble(_revenue.BestValue).ToString("N0");
 
-            // ---- customer status ----
             int total = Convert.ToInt32(_segments.Total);
             int active = Convert.ToInt32(_segments.Active);
             int atRisk = Convert.ToInt32(_segments.AtRisk);
@@ -363,7 +343,6 @@ namespace CarwashServices.Views
                 ("Lost", lost, lostPct, Ui.Red)
             };
 
-            // ---- recent activity ----
             _activity.Items = _recent.Take(8).Select(req =>
             {
                 var cust = _customers.FirstOrDefault(c => c.TenantCustomerId == req.CustomerId);
@@ -379,7 +358,6 @@ namespace CarwashServices.Views
                 };
             }).ToList();
 
-            // ---- action rows ----
             double avgSpend = Convert.ToDouble(_summary.AvgSpendPerCustomer);
 
             _rowAtRisk.Title = atRisk + " At-Risk Customers";
@@ -500,7 +478,7 @@ namespace CarwashServices.Views
         }
 
         // ================================================================
-        //  SEGMENT ACTIONS (unchanged behaviour)
+        //  SEGMENT ACTIONS
         // ================================================================
         private async void ShowSegmentDialog(string title, string segment)
         {
@@ -537,7 +515,20 @@ namespace CarwashServices.Views
 
                 Cursor = Cursors.Default;
 
-                var ids = rows.Select(r => r.CustomerId).ToList();
+                // Only send customers who don't already have an open follow-up.
+                var eligible = rows.Where(r => !r.HasOpenFollowUp).ToList();
+
+                if (eligible.Count == 0)
+                {
+                    MessageBox.Show(
+                        "Everyone in this segment already has an open follow-up.\n\n" +
+                        "Wait for them to respond, or wait for the offers to expire.",
+                        "Nothing to do",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var ids = eligible.Select(r => r.CustomerId).ToList();
                 JumpToFollowUp(ids);
             }
             catch (Exception ex)
@@ -565,11 +556,8 @@ namespace CarwashServices.Views
         }
 
         // ================================================================
+        //  DRAWING CODE
         // ================================================================
-        //  EVERYTHING BELOW IS DRAWING CODE (theme, cards, charts, icons)
-        // ================================================================
-        // ================================================================
-
         private enum IconKind { Users, Repeat, TrendDown, Card, Car, Coin, Check, Alert, UserX }
 
         private sealed class ActivityItem
@@ -578,9 +566,6 @@ namespace CarwashServices.Views
             public bool Completed;
         }
 
-        // ----------------------------------------------------------------
-        //  Theme + helpers
-        // ----------------------------------------------------------------
         private static class Ui
         {
             public static readonly Color Navy = Color.FromArgb(0x0A, 0x16, 0x33);
@@ -620,7 +605,6 @@ namespace CarwashServices.Views
             public const TextFormatFlags RightF = TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
             public const TextFormatFlags CenterF = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
 
-            /// <summary>Scales a 96-dpi pixel value to the control's current display scaling.</summary>
             public static int S(Control c, double px)
             {
                 return (int)Math.Round(px * c.DeviceDpi / 96.0);
@@ -673,7 +657,6 @@ namespace CarwashServices.Views
                 return p;
             }
 
-            /// <summary>Dark rounded tooltip pill sitting above (cx, bottomY), kept inside bounds.</summary>
             public static void Pill(Graphics g, Control c, string text, float cx, float bottomY, Rectangle bounds)
             {
                 Size sz = Measure(g, text, FSemi9);
@@ -689,7 +672,6 @@ namespace CarwashServices.Views
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
             }
 
-            /// <summary>"Nice" axis maximum + step (about 4 intervals).</summary>
             public static void NiceScale(double dataMax, double emptyMax, out double max, out double step)
             {
                 if (dataMax <= 0)
@@ -707,9 +689,6 @@ namespace CarwashServices.Views
             }
         }
 
-        // ----------------------------------------------------------------
-        //  Vector icons (no emoji fonts, so they stay crisp and coloured)
-        // ----------------------------------------------------------------
         private static class Icons
         {
             public static void Draw(Graphics g, IconKind kind, RectangleF b, Color fg, Color bg)
@@ -727,82 +706,64 @@ namespace CarwashServices.Views
                     switch (kind)
                     {
                         case IconKind.Users:
-                            {
-                                g.FillEllipse(br, x + 0.14f * w, y + 0.14f * h, 0.30f * w, 0.30f * h);
-                                g.FillPie(br, x + 0.04f * w, y + 0.50f * h, 0.50f * w, 0.60f * h, 180, 180);
-                                g.FillEllipse(br, x + 0.54f * w, y + 0.22f * h, 0.26f * w, 0.26f * h);
-                                g.FillPie(br, x + 0.50f * w, y + 0.54f * h, 0.44f * w, 0.52f * h, 180, 180);
-                                break;
-                            }
+                            g.FillEllipse(br, x + 0.14f * w, y + 0.14f * h, 0.30f * w, 0.30f * h);
+                            g.FillPie(br, x + 0.04f * w, y + 0.50f * h, 0.50f * w, 0.60f * h, 180, 180);
+                            g.FillEllipse(br, x + 0.54f * w, y + 0.22f * h, 0.26f * w, 0.26f * h);
+                            g.FillPie(br, x + 0.50f * w, y + 0.54f * h, 0.44f * w, 0.52f * h, 180, 180);
+                            break;
                         case IconKind.Repeat:
+                            using (var cap = new AdjustableArrowCap(3f, 3f))
+                            using (var ap = new Pen(fg, lw) { StartCap = LineCap.Round })
                             {
-                                using (var cap = new AdjustableArrowCap(3f, 3f))
-                                using (var ap = new Pen(fg, lw) { StartCap = LineCap.Round })
-                                {
-                                    ap.CustomEndCap = cap;
-                                    var rc = new RectangleF(x + 0.16f * w, y + 0.16f * h, 0.68f * w, 0.68f * h);
-                                    g.DrawArc(ap, rc, 200, 140);
-                                    g.DrawArc(ap, rc, 20, 140);
-                                }
-                                break;
+                                ap.CustomEndCap = cap;
+                                var rc = new RectangleF(x + 0.16f * w, y + 0.16f * h, 0.68f * w, 0.68f * h);
+                                g.DrawArc(ap, rc, 200, 140);
+                                g.DrawArc(ap, rc, 20, 140);
                             }
+                            break;
                         case IconKind.TrendDown:
-                            {
-                                g.DrawLines(pen, new[] { P(0.10f, 0.28f), P(0.38f, 0.56f), P(0.56f, 0.40f), P(0.90f, 0.74f) });
-                                g.DrawLines(pen, new[] { P(0.90f, 0.50f), P(0.90f, 0.74f), P(0.66f, 0.74f) });
-                                break;
-                            }
+                            g.DrawLines(pen, new[] { P(0.10f, 0.28f), P(0.38f, 0.56f), P(0.56f, 0.40f), P(0.90f, 0.74f) });
+                            g.DrawLines(pen, new[] { P(0.90f, 0.50f), P(0.90f, 0.74f), P(0.66f, 0.74f) });
+                            break;
                         case IconKind.Card:
-                            {
-                                using (var path = Ui.Round(new RectangleF(x + 0.08f * w, y + 0.22f * h, 0.84f * w, 0.56f * h), w * 0.10f))
-                                    g.DrawPath(pen, path);
-                                g.FillRectangle(br, x + 0.08f * w, y + 0.38f * h, 0.84f * w, 0.12f * h);
-                                break;
-                            }
+                            using (var path = Ui.Round(new RectangleF(x + 0.08f * w, y + 0.22f * h, 0.84f * w, 0.56f * h), w * 0.10f))
+                                g.DrawPath(pen, path);
+                            g.FillRectangle(br, x + 0.08f * w, y + 0.38f * h, 0.84f * w, 0.12f * h);
+                            break;
                         case IconKind.Car:
+                            g.FillPolygon(br, new[] { P(0.22f, 0.46f), P(0.32f, 0.26f), P(0.68f, 0.26f), P(0.78f, 0.46f) });
+                            using (var body = Ui.Round(new RectangleF(x + 0.06f * w, y + 0.42f * h, 0.88f * w, 0.30f * h), w * 0.08f))
+                                g.FillPath(br, body);
+                            using (var wb = new SolidBrush(bg))
                             {
-                                g.FillPolygon(br, new[] { P(0.22f, 0.46f), P(0.32f, 0.26f), P(0.68f, 0.26f), P(0.78f, 0.46f) });
-                                using (var body = Ui.Round(new RectangleF(x + 0.06f * w, y + 0.42f * h, 0.88f * w, 0.30f * h), w * 0.08f))
-                                    g.FillPath(br, body);
-                                using (var wb = new SolidBrush(bg))
-                                {
-                                    g.FillEllipse(wb, x + 0.16f * w, y + 0.60f * h, 0.26f * w, 0.26f * h);
-                                    g.FillEllipse(wb, x + 0.58f * w, y + 0.60f * h, 0.26f * w, 0.26f * h);
-                                }
-                                g.FillEllipse(br, x + 0.20f * w, y + 0.64f * h, 0.18f * w, 0.18f * h);
-                                g.FillEllipse(br, x + 0.62f * w, y + 0.64f * h, 0.18f * w, 0.18f * h);
-                                break;
+                                g.FillEllipse(wb, x + 0.16f * w, y + 0.60f * h, 0.26f * w, 0.26f * h);
+                                g.FillEllipse(wb, x + 0.58f * w, y + 0.60f * h, 0.26f * w, 0.26f * h);
                             }
+                            g.FillEllipse(br, x + 0.20f * w, y + 0.64f * h, 0.18f * w, 0.18f * h);
+                            g.FillEllipse(br, x + 0.62f * w, y + 0.64f * h, 0.18f * w, 0.18f * h);
+                            break;
                         case IconKind.Coin:
-                            {
-                                g.DrawEllipse(pen, x + 0.10f * w, y + 0.10f * h, 0.80f * w, 0.80f * h);
-                                using (var f = new Font("Segoe UI", w * 0.52f, FontStyle.Bold, GraphicsUnit.Pixel))
-                                using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                                    g.DrawString("₱", f, br, new RectangleF(x, y, w, h), sf);
-                                break;
-                            }
+                            g.DrawEllipse(pen, x + 0.10f * w, y + 0.10f * h, 0.80f * w, 0.80f * h);
+                            using (var f = new Font("Segoe UI", w * 0.52f, FontStyle.Bold, GraphicsUnit.Pixel))
+                            using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                                g.DrawString("₱", f, br, new RectangleF(x, y, w, h), sf);
+                            break;
                         case IconKind.Check:
-                            {
-                                g.FillEllipse(br, x + 0.06f * w, y + 0.06f * h, 0.88f * w, 0.88f * h);
-                                using (var wp = new Pen(bg, lw) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
-                                    g.DrawLines(wp, new[] { P(0.30f, 0.52f), P(0.45f, 0.66f), P(0.72f, 0.36f) });
-                                break;
-                            }
+                            g.FillEllipse(br, x + 0.06f * w, y + 0.06f * h, 0.88f * w, 0.88f * h);
+                            using (var wp = new Pen(bg, lw) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                                g.DrawLines(wp, new[] { P(0.30f, 0.52f), P(0.45f, 0.66f), P(0.72f, 0.36f) });
+                            break;
                         case IconKind.Alert:
-                            {
-                                g.DrawPolygon(pen, new[] { P(0.50f, 0.12f), P(0.92f, 0.84f), P(0.08f, 0.84f) });
-                                g.DrawLine(pen, P(0.50f, 0.40f), P(0.50f, 0.60f));
-                                g.FillEllipse(br, x + 0.50f * w - lw * 0.5f, y + 0.72f * h - lw * 0.5f, lw, lw);
-                                break;
-                            }
+                            g.DrawPolygon(pen, new[] { P(0.50f, 0.12f), P(0.92f, 0.84f), P(0.08f, 0.84f) });
+                            g.DrawLine(pen, P(0.50f, 0.40f), P(0.50f, 0.60f));
+                            g.FillEllipse(br, x + 0.50f * w - lw * 0.5f, y + 0.72f * h - lw * 0.5f, lw, lw);
+                            break;
                         case IconKind.UserX:
-                            {
-                                g.FillEllipse(br, x + 0.14f * w, y + 0.14f * h, 0.34f * w, 0.34f * h);
-                                g.FillPie(br, x + 0.04f * w, y + 0.52f * h, 0.54f * w, 0.66f * h, 180, 180);
-                                g.DrawLine(pen, P(0.66f, 0.30f), P(0.90f, 0.54f));
-                                g.DrawLine(pen, P(0.90f, 0.30f), P(0.66f, 0.54f));
-                                break;
-                            }
+                            g.FillEllipse(br, x + 0.14f * w, y + 0.14f * h, 0.34f * w, 0.34f * h);
+                            g.FillPie(br, x + 0.04f * w, y + 0.52f * h, 0.54f * w, 0.66f * h, 180, 180);
+                            g.DrawLine(pen, P(0.66f, 0.30f), P(0.90f, 0.54f));
+                            g.DrawLine(pen, P(0.90f, 0.30f), P(0.66f, 0.54f));
+                            break;
                     }
                 }
 
@@ -810,9 +771,6 @@ namespace CarwashServices.Views
             }
         }
 
-        // ----------------------------------------------------------------
-        //  Base controls
-        // ----------------------------------------------------------------
         private abstract class BufferedControl : Control
         {
             protected BufferedControl()
@@ -825,7 +783,6 @@ namespace CarwashServices.Views
             protected int S(double px) { return Ui.S(this, px); }
         }
 
-        /// <summary>White rounded card with a soft border + shadow.</summary>
         private class RoundedCard : Panel
         {
             public RoundedCard()
@@ -865,15 +822,14 @@ namespace CarwashServices.Views
             protected virtual void PaintCard(Graphics g) { }
         }
 
-        /// <summary>Card with a title, subtitle and optional footer; child control docks inside.</summary>
         private sealed class ChartCard : RoundedCard
         {
             public string Title = "", Subtitle = "";
             public string FooterNote = "";
             public string FooterLeftLabel = "", FooterLeftValue = "", FooterRightLabel = "", FooterRightValue = "";
-            public int TextInset = 20;   // left/right inset of the title + footer text
-            public int BodyPad = 20;     // padding around the docked child
-            public bool HeaderRule;      // thin line under the title block
+            public int TextInset = 20;
+            public int BodyPad = 20;
+            public bool HeaderRule;
 
             public void ApplyPadding()
             {
@@ -924,9 +880,6 @@ namespace CarwashServices.Views
             }
         }
 
-        // ----------------------------------------------------------------
-        //  Header + buttons
-        // ----------------------------------------------------------------
         private sealed class RoundedButton : Button
         {
             public bool Solid;
@@ -1018,9 +971,6 @@ namespace CarwashServices.Views
             }
         }
 
-        // ----------------------------------------------------------------
-        //  KPI card
-        // ----------------------------------------------------------------
         private sealed class KpiCard : RoundedCard
         {
             public string Title = "", Value = "–", DeltaText = "–";
@@ -1051,9 +1001,6 @@ namespace CarwashServices.Views
             }
         }
 
-        // ----------------------------------------------------------------
-        //  Charts
-        // ----------------------------------------------------------------
         private sealed class AreaLineChart : BufferedControl
         {
             public List<(string Label, double Value)> Points = new List<(string Label, double Value)>();
@@ -1421,9 +1368,6 @@ namespace CarwashServices.Views
             }
         }
 
-        // ----------------------------------------------------------------
-        //  Retention action row
-        // ----------------------------------------------------------------
         private sealed class ActionRow : BufferedControl
         {
             public Color Tone = Ui.Accent;
@@ -1462,7 +1406,6 @@ namespace CarwashServices.Views
                 if (ShowTopBorder)
                     using (var pen = new Pen(Ui.Line)) g.DrawLine(pen, pad, 0, Width - pad, 0);
 
-                // icon tile
                 int tile = S(46);
                 int ty = (Height - tile) / 2;
                 Color tint = Ui.Tint(Tone, 0.16);
@@ -1472,7 +1415,6 @@ namespace CarwashServices.Views
                 int gi = S(22);
                 Icons.Draw(g, Icon, new RectangleF(pad + (tile - gi) / 2f, ty + (tile - gi) / 2f, gi, gi), Tone, tint);
 
-                // horizontal layout
                 int tx = pad + tile + S(18);
                 int meterW = S(210);
                 bool showMeter = Width >= S(940);
@@ -1480,7 +1422,6 @@ namespace CarwashServices.Views
                 int textRight = (showMeter ? meterLeft : Ghost.Left) - S(20);
                 int textW = Math.Max(40, textRight - tx);
 
-                // text block
                 bool hasImpact = !string.IsNullOrEmpty(Impact);
                 int lineH = S(20);
                 int titleH = S(26);
@@ -1508,7 +1449,6 @@ namespace CarwashServices.Views
                     Ui.Text(g, Impact, Ui.FSub, Ui.Body, new Rectangle(tx + labelW, y, Math.Max(10, textW - labelW), lineH));
                 }
 
-                // meter
                 if (showMeter)
                 {
                     int my = Height / 2 - S(10);

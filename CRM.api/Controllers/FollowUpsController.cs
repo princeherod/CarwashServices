@@ -83,7 +83,6 @@ public class FollowUpsController : ControllerBase
         req.CreatedAt = DateTime.UtcNow;
         if (req.ScheduledDate == default) req.ScheduledDate = DateTime.Now;
 
-        // Auto-mark expired if valid until is in the past
         if (req.ValidUntil.HasValue
             && req.ValidUntil.Value.Date < DateTime.Today
             && req.Status != "Redeemed")
@@ -96,7 +95,7 @@ public class FollowUpsController : ControllerBase
     }
 
     // POST: api/follow-ups/bulk
-    // Send a single follow-up to multiple customers
+    // Rejects any customer who already has an open follow-up (anything except Expired).
     [HttpPost("bulk")]
     public async Task<IActionResult> BulkCreate([FromBody] BulkFollowUpRequest req)
     {
@@ -104,9 +103,32 @@ public class FollowUpsController : ControllerBase
             return BadRequest(new { message = "At least one customer is required." });
 
         var today = DateTime.Today;
+
+        // Customers who already have a non-expired follow-up cannot receive another.
+        var blockedIds = await _db.FollowUps
+            .Where(f => req.CustomerIds.Contains(f.CustomerId)
+                     && f.Status != "Expired")
+            .Select(f => f.CustomerId)
+            .Distinct()
+            .ToListAsync();
+
+        var allowedIds = req.CustomerIds.Except(blockedIds).ToList();
+
+        if (allowedIds.Count == 0)
+        {
+            return Conflict(new
+            {
+                message = "All selected customers already have an open follow-up. " +
+                          "Wait for it to expire or resolve before contacting again.",
+                blockedIds,
+                skipped = blockedIds.Count,
+                count = 0
+            });
+        }
+
         var created = new List<FollowUp>();
 
-        foreach (var cid in req.CustomerIds)
+        foreach (var cid in allowedIds)
         {
             var f = new FollowUp
             {
@@ -132,7 +154,15 @@ public class FollowUpsController : ControllerBase
 
         await _db.SaveChangesAsync();
 
-        return Ok(new { count = created.Count });
+        return Ok(new
+        {
+            count = created.Count,
+            skipped = blockedIds.Count,
+            skippedIds = blockedIds,
+            message = blockedIds.Count > 0
+                ? $"{created.Count} created, {blockedIds.Count} skipped (already had an open follow-up)."
+                : $"{created.Count} created."
+        });
     }
 
     // PUT: api/follow-ups/5
