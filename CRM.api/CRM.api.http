@@ -248,3 +248,9 @@ GET {{CRM.api_HostAddress}}/api/tenant/1/suppliers
 Accept: application/json
 
 ###
+
+  ### Seed 200 fake transactions
+POST {{CRM.api_HostAddress}}/api/dev/seed/transactions?companyId=1&count=200&seed=42
+Accept: application/json
+
+###

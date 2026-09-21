@@ -25,5 +25,7 @@ namespace CRM.domain.Entities
         public ICollection<ServiceStatusLog> StatusLogs { get; set; } = new List<ServiceStatusLog>();
         public ICollection<FollowUp> FollowUps { get; set; } = new List<FollowUp>();
         public ICollection<BillingTransaction> BillingTransactions { get; set; } = new List<BillingTransaction>();
+
+
     }
 }
