@@ -16,6 +16,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using CarwashServices.Controls.Charts;
+using CarwashServices.Controls.Reports;
 using CarwashServices.Dtos;
 
 namespace CarwashServices.Roles
@@ -30,7 +31,7 @@ namespace CarwashServices.Roles
         private ReportsResponseDto _data = new();
         private string _lastSubtitle = "";
 
-        // Layout
+        // ---- Layout ----
         private SmoothFlowPanel _flow;
         private CardPanel _filterCard;
         private Panel _kpiRow;
@@ -38,7 +39,7 @@ namespace CarwashServices.Roles
         private CardPanel _tableCard;
         private readonly List<Control> _kpiCards = new();
 
-        // Filter controls
+        // ---- Filters ----
         private ComboBox _reportTypeCombo;
         private ComboBox _dateRangeCombo;
         private ComboBox _serviceCombo;
@@ -50,31 +51,42 @@ namespace CarwashServices.Roles
         private Button _modeChartBtn;
         private Button _modeTableBtn;
 
-        // KPI labels
+        // ---- Revenue KPIs ----
         private Label _kpiTxn, _kpiTxnSub;
         private Label _kpiRev, _kpiRevSub;
         private Label _kpiTicket, _kpiTicketSub;
         private Label _kpiPending, _kpiPendingSub;
 
-        // Charts + table
+        // ---- Revenue charts + table ----
         private ReportLineChart _lineChart;
         private ReportBarChart _barChart;
         private DataGridView _grid;
         private Label _tableHeaderLbl;
         private Label _emptyLbl;
 
+        // ---- Sub-view hosting (for the new report types) ----
+        private Panel _extraHost;
+        private UserControl _currentExtra;
+        private string _currentReportType = "Service & Revenue Report";
+
+        private const string RevenueReport = "Service & Revenue Report";
+        private const string ComplaintReport = "Complaint & Feedback Report";
+        private const string CustomerActivityReport = "Customer Activity Report";
+        private const string RetentionReport = "Retention Summary Report";
+
         private enum ViewMode { ChartAndTable, ChartOnly, TableOnly }
         private ViewMode _mode = ViewMode.ChartAndTable;
 
-        // Palette
+        // ---- Palette ----
         private static readonly Color Navy = Color.FromArgb(0x0A, 0x16, 0x33);
         private static readonly Color Muted = Color.FromArgb(0x6B, 0x7A, 0x9A);
+        private static readonly Color Faint = Color.FromArgb(0x9A, 0xA7, 0xBF);
         private static readonly Color PageBg = Color.FromArgb(0xF0, 0xF4, 0xFA);
         private static readonly Color CardBorder = Color.FromArgb(0xE1, 0xE7, 0xF0);
         private static readonly Color Blue = Color.FromArgb(0x1E, 0x88, 0xE5);
         private static readonly Color Amber = Color.FromArgb(0xC8, 0x6D, 0x00);
 
-        // Shared fonts
+        // ---- Fonts ----
         private static readonly Font FBody = new("Segoe UI", 9.5f);
         private static readonly Font FCombo = new("Segoe UI", 10f);
         private static readonly Font FCaption = new("Segoe UI Semibold", 8f);
@@ -86,15 +98,11 @@ namespace CarwashServices.Roles
         private static readonly Font FStatus = new("Segoe UI Semibold", 9.5f);
         private static readonly Font FGridHeader = new("Segoe UI Semibold", 9f);
 
-        // Payment / Status are drawn as coloured words only (no pill / circle) — same as the other
-        // screens. Set to true if you also want a light, square highlight behind the words.
         private static readonly bool TintBehindText = false;
 
         private const int MarginX = 40;
         private const int TopMargin = 20;
         private const int SectionGap = 20;
-
-        // ---- KPI card sizing (taller so the subtitle fits at any DPI) ----
         private const int KpiRowHeight = 130;
 
         public ReportsView()
@@ -120,6 +128,7 @@ namespace CarwashServices.Roles
                 _cts.Cancel();
                 _cts.Dispose();
                 _http.Dispose();
+                _currentExtra?.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -145,6 +154,7 @@ namespace CarwashServices.Roles
             BuildKpiRow();
             BuildChartsRow();
             BuildTableCard();
+            BuildExtraHost();
 
             SetMode(ViewMode.ChartAndTable);
 
@@ -185,15 +195,22 @@ namespace CarwashServices.Roles
         {
             _filterCard = Section(new CardPanel(), 150);
 
-            _reportTypeCombo = AddFilter("REPORT TYPE", 20, 320, "Service & Revenue Report");
+            _reportTypeCombo = AddFilter("REPORT TYPE", 20, 320,
+                RevenueReport,
+                ComplaintReport,
+                CustomerActivityReport,
+                RetentionReport);
+            _reportTypeCombo.SelectedIndexChanged += (s, e) => SwitchReportType();
+
             _dateRangeCombo = AddFilter("DATE RANGE", 360, 180,
                 "This Week", "This Month", "Last Month", "This Year", "Last Year", "All Time");
             _dateRangeCombo.SelectedIndex = 3; // This Year
+
             _serviceCombo = AddFilter("SERVICE", 560, 180, "All Services");
             _vehicleCombo = AddFilter("VEHICLE TYPE", 760, 180, "All Types");
 
             _runBtn = MakePrimaryButton("▶  Run Report", 20, 90);
-            _runBtn.Click += async (s, e) => await LoadAsync();
+            _runBtn.Click += async (s, e) => await RunReportAsync();
             _filterCard.Controls.Add(_runBtn);
 
             _csvBtn = MakeSecondaryButton("⬇  Export CSV", 170, 90);
@@ -296,7 +313,7 @@ namespace CarwashServices.Roles
                 Text = "",
                 ForeColor = Muted,
                 Font = FSmall,
-                Location = new Point(20, 96),   // ← below the value with safe padding
+                Location = new Point(20, 96),
                 AutoSize = true
             };
             card.Controls.Add(subtitle);
@@ -352,7 +369,7 @@ namespace CarwashServices.Roles
                 Font = FItalic,
                 Location = new Point(20, 14),
                 AutoSize = true,
-                UseMnemonic = false     // otherwise WinForms swallows the "&" ("Service  Revenue Report")
+                UseMnemonic = false
             };
             _tableCard.Controls.Add(_tableHeaderLbl);
 
@@ -459,6 +476,102 @@ namespace CarwashServices.Roles
                 Math.Max(90, (_tableCard.Height - _emptyLbl.Height) / 2 + 20));
         }
 
+        // ---------------- Extra host for sub-views ----------------
+        private void BuildExtraHost()
+        {
+            _extraHost = new Panel
+            {
+                Dock = DockStyle.Top,
+                BackColor = PageBg,
+                Margin = new Padding(0, 0, 0, SectionGap),
+                Height = 900,
+                Visible = false
+            };
+            _flow.Controls.Add(_extraHost);
+        }
+
+        // ================================================================
+        //  REPORT TYPE SWITCHING
+        // ================================================================
+        private void SwitchReportType()
+        {
+            var selected = _reportTypeCombo.SelectedItem?.ToString() ?? RevenueReport;
+            if (selected == _currentReportType) return;
+
+            _currentReportType = selected;
+
+            bool revenueMode = selected == RevenueReport;
+
+            // Show / hide revenue widgets
+            _kpiRow.Visible = revenueMode;
+            _chartsRow.Visible = revenueMode;
+            _tableCard.Visible = revenueMode;
+
+            // Show / hide the extra host
+            _extraHost.Visible = !revenueMode;
+
+            // Toggle mode buttons — they only make sense for the revenue report
+            _modeChartTableBtn.Enabled = revenueMode;
+            _modeChartBtn.Enabled = revenueMode;
+            _modeTableBtn.Enabled = revenueMode;
+
+            // Dispose the previous sub-view
+            if (_currentExtra != null)
+            {
+                _extraHost.Controls.Remove(_currentExtra);
+                _currentExtra.Dispose();
+                _currentExtra = null;
+            }
+
+            if (revenueMode)
+            {
+                // Restore the revenue report (charts + table as configured)
+                SetMode(_mode);
+                _ = LoadAsync();
+                return;
+            }
+
+            // Build the correct sub-view
+            UserControl sub = selected switch
+            {
+                ComplaintReport => new ComplaintFeedbackReportView(),
+                CustomerActivityReport => new CustomerActivityReportView(),
+                RetentionReport => new RetentionSummaryReportView(),
+                _ => null
+            };
+
+            if (sub != null)
+            {
+                sub.Dock = DockStyle.Fill;
+                _extraHost.Controls.Add(sub);
+                _currentExtra = sub;
+
+                // Push the current filters into the sub-view
+                if (sub is IReportView rv)
+                    rv.ApplyFilters(
+                        _dateRangeCombo.SelectedItem?.ToString() ?? "This Year",
+                        _serviceCombo.SelectedItem?.ToString() ?? "All Services",
+                        _vehicleCombo.SelectedItem?.ToString() ?? "All Types");
+            }
+        }
+
+        private async Task RunReportAsync()
+        {
+            if (_currentReportType == RevenueReport)
+            {
+                await LoadAsync();
+                return;
+            }
+
+            if (_currentExtra is IReportView rv)
+            {
+                rv.ApplyFilters(
+                    _dateRangeCombo.SelectedItem?.ToString() ?? "This Year",
+                    _serviceCombo.SelectedItem?.ToString() ?? "All Services",
+                    _vehicleCombo.SelectedItem?.ToString() ?? "All Types");
+            }
+        }
+
         // ================================================================
         //  HELPERS
         // ================================================================
@@ -510,8 +623,8 @@ namespace CarwashServices.Roles
             HighlightMode(_modeChartBtn, m == ViewMode.ChartOnly);
             HighlightMode(_modeTableBtn, m == ViewMode.TableOnly);
 
-            _chartsRow.Visible = m != ViewMode.TableOnly;
-            _tableCard.Visible = m != ViewMode.ChartOnly;
+            _chartsRow.Visible = m != ViewMode.TableOnly && _currentReportType == RevenueReport;
+            _tableCard.Visible = m != ViewMode.ChartOnly && _currentReportType == RevenueReport;
         }
 
         private static void HighlightMode(Button b, bool active)
@@ -522,7 +635,7 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  DATA LOAD
+        //  DATA LOAD (revenue report only)
         // ================================================================
         private async Task LoadAsync()
         {
@@ -598,7 +711,6 @@ namespace CarwashServices.Roles
             double pending = Convert.ToDouble(_data.PendingOrCancelled);
             var months = _data.Months.ToList();
 
-            // ---- KPIs ----
             _kpiTxn.Text = $"{_data.TotalTransactions:N0}";
             _kpiTxnSub.Text = total > 0
                 ? $"{_data.Completed:N0} completed ({done / total:P0})"
@@ -622,21 +734,18 @@ namespace CarwashServices.Roles
                 ? $"{pending / total:P0} of all jobs not completed"
                 : "Jobs not completed";
 
-            // ---- Charts ----
             _lineChart.Points = months.Select(m => (m.Label, m.Value)).ToList();
             _barChart.Bars = _data.ByService.Select(s => (s.Label, s.Value)).ToList();
 
-            // ---- Table ----
             _grid.SuspendLayout();
             _grid.Rows.Clear();
             foreach (var t in _data.Transactions)
             {
                 _grid.Rows.Add(
                     t.Txn, t.Date, t.Customer, t.Vehicle, t.Service,
-                    t.Amount,
-                    t.Payment, t.Status);
+                    t.Amount, t.Payment, t.Status);
             }
-            _grid.ClearSelection();     // don't leave the first row highlighted
+            _grid.ClearSelection();
             _grid.ResumeLayout();
 
             int rows = _grid.Rows.Count;
@@ -655,7 +764,7 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  GRID: sorting + status painting
+        //  GRID paint + sort
         // ================================================================
         private void Grid_SortCompare(object? sender, DataGridViewSortCompareEventArgs e)
         {
@@ -668,7 +777,6 @@ namespace CarwashServices.Roles
             }
         }
 
-        // Payment + Status: coloured words only. No pill, no circle.
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
@@ -690,7 +798,7 @@ namespace CarwashServices.Roles
                 new Size(int.MaxValue, int.MaxValue),
                 TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
 
-            int x = b.X + 12;                          // lines up with the column header text
+            int x = b.X + 12;
             int maxW = Math.Max(10, b.Width - 20);
             int y = b.Y + (b.Height - size.Height) / 2;
 
@@ -728,12 +836,19 @@ namespace CarwashServices.Roles
         };
 
         // ================================================================
-        //  EXPORT
+        //  EXPORT (revenue report)
         // ================================================================
         private bool HasRows => _data.Transactions.Any();
 
         private void ExportCsv()
         {
+            if (_currentReportType != RevenueReport)
+            {
+                MessageBox.Show("Export is only available for the Service & Revenue Report right now.",
+                    "Export CSV", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             if (!HasRows)
             {
                 MessageBox.Show("There is nothing to export. Run a report that returns transactions first.",
@@ -780,6 +895,13 @@ namespace CarwashServices.Roles
 
         private void ExportPdf()
         {
+            if (_currentReportType != RevenueReport)
+            {
+                MessageBox.Show("Export is only available for the Service & Revenue Report right now.",
+                    "Export PDF", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             if (!HasRows)
             {
                 MessageBox.Show("There is nothing to export. Run a report that returns transactions first.",
