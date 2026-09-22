@@ -1,9 +1,13 @@
 ﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Printing;
+using System.Drawing.Text;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -11,8 +15,9 @@ using CarwashServices.Dtos;
 
 namespace CarwashServices.Controls.Reports
 {
-    public class ComplaintFeedbackReportView : UserControl, IReportView
+    public class ComplaintFeedbackReportView : UserControl, IReportView, IExportableReport
     {
+        // ---- Palette ----
         private static readonly Color Navy = Color.FromArgb(0x0A, 0x16, 0x33);
         private static readonly Color Muted = Color.FromArgb(0x6B, 0x7A, 0x9A);
         private static readonly Color PageBg = Color.FromArgb(0xF0, 0xF4, 0xFA);
@@ -31,6 +36,11 @@ namespace CarwashServices.Controls.Reports
             Timeout = TimeSpan.FromSeconds(15)
         };
 
+        // ---- Current data ----
+        private ComplaintsFeedbackReportDto _data = new();
+        private string _currentRange = "This Year";
+
+        // ---- KPI labels ----
         private readonly Label _kTotalFeedback = new() { AutoSize = true };
         private readonly Label _kTotalFeedbackSub = new() { AutoSize = true };
         private readonly Label _kAvgRating = new() { AutoSize = true };
@@ -40,13 +50,15 @@ namespace CarwashServices.Controls.Reports
         private readonly Label _kResolution = new() { AutoSize = true };
         private readonly Label _kResolutionSub = new() { AutoSize = true };
 
-        // No Dock here on purpose: MakeCard() docks these under the card title.
-        // Docking them here too made them cover the whole card and slide
-        // underneath the title.
         private readonly DonutChartSimple _donut = new();
         private readonly BarChartSimple _bar = new() { BarColor = Red };
         private readonly DataGridView _grid = new();
         private readonly Label _subtitle = new();
+
+        // ---- Layout rows ----
+        private TableLayoutPanel _page;
+        private Panel _chartsRowPanel;    // row 2 — holds the two chart cards
+        private Panel _tableRowPanel;     // row 3 — holds the table card
 
         public ComplaintFeedbackReportView()
         {
@@ -54,58 +66,158 @@ namespace CarwashServices.Controls.Reports
             BackColor = PageBg;
             DoubleBuffered = true;
 
-            // If the window gets very small, scroll instead of squashing the cards.
             AutoScroll = true;
-            AutoScrollMinSize = new Size(900, 130 + 340 + 400);
+            AutoScrollMinSize = new Size(900, 100 + 130 + 340 + 400);
 
             BuildUi();
         }
 
         public void ApplyFilters(string dateRange, string service, string vehicleType)
-            => _ = LoadAsync(dateRange);
+        {
+            _currentRange = dateRange ?? "This Year";
+            _ = LoadAsync(_currentRange);
+        }
+
+        // ---- View modes ----
+        // Row layout: 0=header (always)  1=KPI (always)  2=charts  3=table
+        //
+        // IMPORTANT: setting a RowStyle to Absolute 0 does NOT stop a Dock=Fill
+        // child from being laid out somewhere — WinForms will squeeze it into
+        // whatever rectangle remains, which is why the "hidden" row could appear
+        // below the visible one. We therefore ALSO hide the row-host panel.
+        public void ShowChartOnly()
+        {
+            if (_page == null) return;
+            _page.RowStyles[2] = new RowStyle(SizeType.Absolute, 340);
+            _page.RowStyles[3] = new RowStyle(SizeType.Absolute, 0);
+
+            if (_chartsRowPanel != null) _chartsRowPanel.Visible = true;
+            if (_tableRowPanel != null) _tableRowPanel.Visible = false;
+
+            _page.PerformLayout();
+        }
+
+        public void ShowTableOnly()
+        {
+            if (_page == null) return;
+            _page.RowStyles[2] = new RowStyle(SizeType.Absolute, 0);
+            _page.RowStyles[3] = new RowStyle(SizeType.Percent, 100f);
+
+            if (_chartsRowPanel != null) _chartsRowPanel.Visible = false;
+            if (_tableRowPanel != null) _tableRowPanel.Visible = true;
+
+            _page.PerformLayout();
+        }
+
+        public void ShowChartAndTable()
+        {
+            if (_page == null) return;
+            _page.RowStyles[2] = new RowStyle(SizeType.Absolute, 340);
+            _page.RowStyles[3] = new RowStyle(SizeType.Percent, 100f);
+
+            if (_chartsRowPanel != null) _chartsRowPanel.Visible = true;
+            if (_tableRowPanel != null) _tableRowPanel.Visible = true;
+
+            _page.PerformLayout();
+        }
 
         // ------------------------------------------------------------------
         //  Layout
         // ------------------------------------------------------------------
         private void BuildUi()
         {
-            // KPI row (fixed) / charts row (fixed) / table row (takes the rest)
-            var page = new TableLayoutPanel
+            _page = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 4,
                 BackColor = PageBg,
                 Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
-            page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            page.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));
-            page.RowStyles.Add(new RowStyle(SizeType.Absolute, 340));
-            page.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            Controls.Add(page);
+            _page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));   // row 0: header
+            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));   // row 1: KPI
+            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 340));   // row 2: charts
+            _page.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // row 3: table
+            Controls.Add(_page);
 
-            // KPI cards
+            // ---- Row 0: header ----
+            var header = MakePageHeader(
+                "Complaint & Feedback Report",
+                "Customer complaints and feedback recorded against service visits.");
+            header.Dock = DockStyle.Fill;
+            header.Margin = Padding.Empty;
+            _page.Controls.Add(header, 0, 0);
+
+            // ---- Row 1: KPI row ----
             var kpiGrid = MakeGrid(25f, 25f, 25f, 25f);
             AddKpi(kpiGrid, 0, "Total Feedback", "", _kTotalFeedback, _kTotalFeedbackSub, Blue);
             AddKpi(kpiGrid, 1, "Avg. Rating", "Customer satisfaction", _kAvgRating, _kAvgRatingSub, Amber);
             AddKpi(kpiGrid, 2, "Total Complaints", "", _kTotalComplaints, _kTotalComplaintsSub, Red);
             AddKpi(kpiGrid, 3, "Resolution Rate", "", _kResolution, _kResolutionSub, Green);
-            page.Controls.Add(kpiGrid, 0, 0);
+            _page.Controls.Add(MakeRowHost(kpiGrid), 0, 1);
 
-            // Charts
+            // ---- Row 2: charts ----
             var chartsGrid = MakeGrid(40f, 60f);
             chartsGrid.Controls.Add(
                 MakeCard("Feedback Sentiment", _donut, new Padding(0, 0, 8, 16)), 0, 0);
             chartsGrid.Controls.Add(
                 MakeCard("Complaints by Category", _bar, new Padding(8, 0, 0, 16)), 1, 0);
-            page.Controls.Add(chartsGrid, 0, 1);
+            _chartsRowPanel = MakeRowHost(chartsGrid);
+            _page.Controls.Add(_chartsRowPanel, 0, 2);
 
-            // Table
-            page.Controls.Add(MakeTableCard(), 0, 2);
+            // ---- Row 3: table ----
+            _tableRowPanel = MakeRowHost(MakeTableCard());
+            _page.Controls.Add(_tableRowPanel, 0, 3);
         }
 
-        /// <summary>White bordered card: title on top, content fills the rest.</summary>
+        private static Panel MakeRowHost(Control content)
+        {
+            var host = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = PageBg,
+                Margin = Padding.Empty
+            };
+            content.Dock = DockStyle.Fill;
+            host.Controls.Add(content);
+            return host;
+        }
+
+        internal static Control MakePageHeader(string title, string subtitle)
+        {
+            var header = new Panel
+            {
+                BackColor = PageBg
+            };
+            header.Controls.Add(new Label
+            {
+                Text = "Overview  ›  View Reports",
+                ForeColor = Muted,
+                Font = new Font("Segoe UI", 9f),
+                Location = new Point(0, 0),
+                AutoSize = true
+            });
+            header.Controls.Add(new Label
+            {
+                Text = title,
+                ForeColor = Navy,
+                Font = new Font("Segoe UI Semibold", 22f),
+                Location = new Point(0, 22),
+                AutoSize = true
+            });
+            header.Controls.Add(new Label
+            {
+                Text = subtitle,
+                ForeColor = Muted,
+                Font = new Font("Segoe UI", 10f),
+                Location = new Point(0, 66),
+                AutoSize = true
+            });
+            return header;
+        }
+
         private static Card MakeCard(string title, Control content, Padding margin)
         {
             var card = new Card
@@ -115,8 +227,8 @@ namespace CarwashServices.Controls.Reports
             };
 
             content.Dock = DockStyle.Fill;
-            card.Controls.Add(content);              // Fill control must be added first...
-            card.Controls.Add(new Label              // ...so the Top-docked title is laid out before it.
+            card.Controls.Add(content);
+            card.Controls.Add(new Label
             {
                 Text = title,
                 Dock = DockStyle.Top,
@@ -166,7 +278,7 @@ namespace CarwashServices.Controls.Reports
             {
                 BackColor = headerBg,
                 ForeColor = Muted,
-                SelectionBackColor = headerBg,   // no blue flash when a header is clicked
+                SelectionBackColor = headerBg,
                 SelectionForeColor = Muted,
                 Font = new Font("Segoe UI Semibold", 9f),
                 Alignment = DataGridViewContentAlignment.MiddleLeft,
@@ -194,9 +306,6 @@ namespace CarwashServices.Controls.Reports
             _grid.AllowUserToDeleteRows = false;
             _grid.AllowUserToResizeRows = false;
             _grid.RowHeadersVisible = false;
-
-            // Columns share the full width. Details gets the most room; long text
-            // is cut with an ellipsis and shows in full as a tooltip on hover.
             _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
 
             AddCol("Type", "Type", 11);
@@ -244,15 +353,12 @@ namespace CarwashServices.Controls.Reports
         private void AddKpi(TableLayoutPanel grid, int col, string title, string sub,
                             Label valueLbl, Label subLbl, Color accent)
         {
-            // Card is Dock = Fill, so it stretches to its column. Before, each
-            // card kept its default 200x100 size and left big gaps.
             var count = grid.ColumnCount;
             var card = new Card
             {
                 Margin = new Padding(col == 0 ? 0 : 8, 0, col == count - 1 ? 0 : 8, 16)
             };
 
-            // thin accent stripe on the left edge
             card.Controls.Add(new Panel { Dock = DockStyle.Left, Width = 4, BackColor = accent });
 
             card.Controls.Add(new Label
@@ -296,11 +402,11 @@ namespace CarwashServices.Controls.Reports
                     $"api/reports/complaints-feedback?companyId=1&range={Uri.EscapeDataString(r)}")
                     ?? new ComplaintsFeedbackReportDto();
 
-                // KPIs
+                _data = data;
+
                 _kTotalFeedback.Text = data.TotalFeedback.ToString();
                 _kTotalFeedbackSub.Text = $"{data.Sentiment.Positive} positive";
 
-                // "0 / 5" reads like a terrible score when there are simply no ratings yet.
                 if (data.AvgRating > 0)
                 {
                     _kAvgRating.Text = data.AvgRating.ToString("0.#") + " / 5";
@@ -318,7 +424,6 @@ namespace CarwashServices.Controls.Reports
                 _kResolution.Text = data.ResolutionRate.ToString("0") + "%";
                 _kResolutionSub.Text = $"{data.ResolvedComplaints} of {data.TotalComplaints} resolved";
 
-                // Charts
                 _donut.Segments = new()
                 {
                     ("Negative", data.Sentiment.Negative, Red),
@@ -332,7 +437,6 @@ namespace CarwashServices.Controls.Reports
                     .Select(x => (x.Label, (double)x.Value))
                     .ToList();
 
-                // Table
                 _grid.SuspendLayout();
                 _grid.Rows.Clear();
                 foreach (var row in data.Rows)
@@ -345,7 +449,6 @@ namespace CarwashServices.Controls.Reports
                         Or(row.RatingOrCategory),
                         row.Status);
 
-                    // grey out "—" placeholders
                     foreach (DataGridViewCell cell in _grid.Rows[idx].Cells)
                     {
                         if (cell.Value as string == "—")
@@ -379,7 +482,7 @@ namespace CarwashServices.Controls.Reports
         }
 
         // ------------------------------------------------------------------
-        //  Type / Status pills
+        //  Pills
         // ------------------------------------------------------------------
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
@@ -406,7 +509,6 @@ namespace CarwashServices.Controls.Reports
 
         private static void PaintPill(DataGridViewCellPaintingEventArgs e, string text, Color fg, Color bg)
         {
-            // background, borders and selection highlight — but not the text
             e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
 
             if (!string.IsNullOrEmpty(text))
@@ -450,8 +552,125 @@ namespace CarwashServices.Controls.Reports
         }
 
         // ------------------------------------------------------------------
-        //  Card panel: white, 1px border, repaints cleanly on resize
+        //  Export
         // ------------------------------------------------------------------
+        public bool HasData => _data.Rows.Count > 0;
+
+        public string BuildCsv()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("Type,Date,Customer,Details,Rating / Category,Status");
+            foreach (var row in _data.Rows)
+            {
+                sb.AppendLine(string.Join(",",
+                    Csv(row.Type), Csv(row.Date), Csv(row.Customer),
+                    Csv(row.Details), Csv(row.RatingOrCategory), Csv(row.Status)));
+            }
+            return sb.ToString();
+        }
+
+        public PrintDocument BuildPrintDocument()
+        {
+            var rows = _data.Rows;
+            var rangeLabel = _currentRange;
+            var generated = _data.GeneratedAt;
+
+            var doc = new PrintDocument { DocumentName = "Complaint & Feedback Report" };
+            doc.DefaultPageSettings.Landscape = true;
+            doc.DefaultPageSettings.Margins = new Margins(50, 50, 50, 50);
+
+            const float rowH = 22f;
+            string[] heads = { "Type", "Date", "Customer", "Details", "Rating / Category", "Status" };
+            float[] weights = { 1.0f, 1.0f, 1.8f, 3.4f, 1.6f, 1.2f };
+            int next = 0, page = 0;
+
+            doc.BeginPrint += (s, e) => { next = 0; page = 0; };
+
+            doc.PrintPage += (s, e) =>
+            {
+                var g = e.Graphics!;
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                var area = e.MarginBounds;
+                float y = area.Top;
+                page++;
+
+                using var titleFont = new Font("Segoe UI Semibold", 16f);
+                using var subFont = new Font("Segoe UI", 9f);
+                using var headFont = new Font("Segoe UI Semibold", 9f);
+                using var bodyFont = new Font("Segoe UI", 9f);
+                using var ink = new SolidBrush(Navy);
+                using var gray = new SolidBrush(Muted);
+                using var headBg = new SolidBrush(Color.FromArgb(0xF3, 0xF6, 0xFB));
+                using var linePen = new Pen(CardBorder);
+                using var fmt = new StringFormat
+                {
+                    Trimming = StringTrimming.EllipsisCharacter,
+                    FormatFlags = StringFormatFlags.NoWrap,
+                    LineAlignment = StringAlignment.Center
+                };
+
+                g.DrawString("Complaint & Feedback Report", page == 1 ? titleFont : headFont, ink, area.Left, y);
+                y += (page == 1 ? titleFont : headFont).GetHeight(g) + 2;
+
+                if (page == 1)
+                {
+                    g.DrawString($"{rangeLabel} · Generated at {generated}", subFont, gray, area.Left, y);
+                    y += subFont.GetHeight(g) + 8;
+                }
+                else y += 8;
+
+                float sum = weights.Sum();
+                var xs = new float[weights.Length + 1];
+                xs[0] = area.Left;
+                for (int i = 0; i < weights.Length; i++)
+                    xs[i + 1] = xs[i] + area.Width * weights[i] / sum;
+
+                void DrawCells(string[] cells, Font f, Brush b, float top)
+                {
+                    for (int i = 0; i < cells.Length; i++)
+                    {
+                        var r = new RectangleF(xs[i] + 6, top, xs[i + 1] - xs[i] - 12, rowH);
+                        g.DrawString(cells[i], f, b, r, fmt);
+                    }
+                }
+
+                g.FillRectangle(headBg, area.Left, y, area.Width, rowH);
+                DrawCells(heads, headFont, gray, y);
+                y += rowH;
+
+                float bottom = area.Bottom - 24f;
+                while (next < rows.Count && y + rowH <= bottom)
+                {
+                    var r = rows[next];
+                    DrawCells(new[]
+                    {
+                        r.Type ?? "", r.Date ?? "", r.Customer ?? "",
+                        r.Details ?? "", r.RatingOrCategory ?? "", r.Status ?? ""
+                    }, bodyFont, ink, y);
+                    g.DrawLine(linePen, area.Left, y + rowH, area.Right, y + rowH);
+                    y += rowH;
+                    next++;
+                }
+
+                g.DrawString($"Page {page}", subFont, gray,
+                    new RectangleF(area.Left, area.Bottom - 14f, area.Width, 16f),
+                    new StringFormat { Alignment = StringAlignment.Far });
+
+                e.HasMorePages = next < rows.Count;
+            };
+
+            return doc;
+        }
+
+        private static string Csv(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            if ("=+-@".IndexOf(s[0]) >= 0) s = "'" + s;
+            if (s.Contains(',') || s.Contains('"') || s.Contains('\n'))
+                return "\"" + s.Replace("\"", "\"\"") + "\"";
+            return s;
+        }
+
         private sealed class Card : Panel
         {
             public Card()

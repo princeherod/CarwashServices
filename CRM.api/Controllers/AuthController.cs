@@ -31,20 +31,25 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "Email and password are required." });
         }
 
-        // Find user by email
+        var email = req.Email.Trim().ToLowerInvariant();
+
+        // Case-insensitive email lookup so "Manager@x.com" and "manager@x.com" both work.
         var user = await _db.Users
             .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Email == req.Email);
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == email);
 
         if (user is null)
             return Unauthorized(new { message = "Invalid email or password." });
 
-        // NOTE: your seeded users have empty PasswordHash.
-        // For the demo, accept any non-empty password for seeded users.
-        // Replace with real password verification later.
+        // Inactive accounts cannot log in
+        if (!string.Equals(user.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            return Unauthorized(new { message = "This account is inactive. Contact your administrator." });
+
+        // Seeded users may have an empty hash — accept any non-empty password for them.
+        // Users created via Manage Users store the password in PasswordHash.
+        // TODO: replace with proper hashing + verification.
         if (!string.IsNullOrWhiteSpace(user.PasswordHash))
         {
-            // TODO: hash + compare
             if (user.PasswordHash != req.Password)
                 return Unauthorized(new { message = "Invalid email or password." });
         }

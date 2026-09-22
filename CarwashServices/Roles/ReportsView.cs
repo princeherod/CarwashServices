@@ -64,10 +64,11 @@ namespace CarwashServices.Roles
         private Label _tableHeaderLbl;
         private Label _emptyLbl;
 
-        // ---- Sub-view hosting (for the new report types) ----
+        // ---- Sub-view hosting ----
         private Panel _extraHost;
         private UserControl _currentExtra;
         private string _currentReportType = "Service & Revenue Report";
+        private readonly List<Control> _revenueWidgets = new();
 
         private const string RevenueReport = "Service & Revenue Report";
         private const string ComplaintReport = "Complaint & Feedback Report";
@@ -148,7 +149,11 @@ namespace CarwashServices.Roles
                 Padding = new Padding(MarginX, TopMargin, MarginX, TopMargin)
             };
             Controls.Add(_flow);
-            _flow.ClientSizeChanged += (s, e) => FitSections();
+            _flow.ClientSizeChanged += (s, e) =>
+            {
+                FitSections();
+                ResizeExtraHost();
+            };
 
             BuildFilterCard();
             BuildKpiRow();
@@ -476,18 +481,30 @@ namespace CarwashServices.Roles
                 Math.Max(90, (_tableCard.Height - _emptyLbl.Height) / 2 + 20));
         }
 
-        // ---------------- Extra host for sub-views ----------------
+        // ---------------- Extra host ----------------
         private void BuildExtraHost()
         {
             _extraHost = new Panel
             {
-                Dock = DockStyle.Top,
                 BackColor = PageBg,
                 Margin = new Padding(0, 0, 0, SectionGap),
-                Height = 900,
-                Visible = false
+                Visible = false,
+                AutoScroll = false
             };
             _flow.Controls.Add(_extraHost);
+        }
+
+        private void ResizeExtraHost()
+        {
+            if (_extraHost == null || !_extraHost.Visible) return;
+            int w = Math.Max(760, _flow.ClientSize.Width - _flow.Padding.Horizontal);
+            // REMOVED the 600px floor — that was forcing the host taller than the
+            // visible flow area, which pushed the sub-view's KPI row up under its
+            // own header. The sub-views have their own AutoScroll, so let the host
+            // take whatever space is actually available.
+            int h = Math.Max(200, _flow.ClientSize.Height - _flow.Padding.Vertical - 40);
+            if (_extraHost.Width != w) _extraHost.Width = w;
+            if (_extraHost.Height != h) _extraHost.Height = h;
         }
 
         // ================================================================
@@ -499,23 +516,16 @@ namespace CarwashServices.Roles
             if (selected == _currentReportType) return;
 
             _currentReportType = selected;
-
             bool revenueMode = selected == RevenueReport;
 
-            // Show / hide revenue widgets
-            _kpiRow.Visible = revenueMode;
-            _chartsRow.Visible = revenueMode;
-            _tableCard.Visible = revenueMode;
+            if (_revenueWidgets.Count == 0)
+            {
+                _revenueWidgets.Add(_kpiRow);
+                _revenueWidgets.Add(_chartsRow);
+                _revenueWidgets.Add(_tableCard);
+            }
 
-            // Show / hide the extra host
-            _extraHost.Visible = !revenueMode;
-
-            // Toggle mode buttons — they only make sense for the revenue report
-            _modeChartTableBtn.Enabled = revenueMode;
-            _modeChartBtn.Enabled = revenueMode;
-            _modeTableBtn.Enabled = revenueMode;
-
-            // Dispose the previous sub-view
+            // Dispose previous sub-view
             if (_currentExtra != null)
             {
                 _extraHost.Controls.Remove(_currentExtra);
@@ -525,13 +535,34 @@ namespace CarwashServices.Roles
 
             if (revenueMode)
             {
-                // Restore the revenue report (charts + table as configured)
+                _flow.Controls.Remove(_extraHost);
+                _extraHost.Visible = false;
+
+                int idx = _flow.Controls.IndexOf(_filterCard) + 1;
+                foreach (var w in _revenueWidgets)
+                {
+                    if (!_flow.Controls.Contains(w))
+                    {
+                        _flow.Controls.Add(w);
+                        _flow.Controls.SetChildIndex(w, idx++);
+                    }
+                }
+
                 SetMode(_mode);
                 _ = LoadAsync();
                 return;
             }
 
-            // Build the correct sub-view
+            foreach (var w in _revenueWidgets)
+                _flow.Controls.Remove(w);
+
+            if (!_flow.Controls.Contains(_extraHost))
+            {
+                _flow.Controls.Add(_extraHost);
+                _flow.Controls.SetChildIndex(_extraHost, _flow.Controls.IndexOf(_filterCard) + 1);
+            }
+            _extraHost.Visible = true;
+
             UserControl sub = selected switch
             {
                 ComplaintReport => new ComplaintFeedbackReportView(),
@@ -546,13 +577,24 @@ namespace CarwashServices.Roles
                 _extraHost.Controls.Add(sub);
                 _currentExtra = sub;
 
-                // Push the current filters into the sub-view
                 if (sub is IReportView rv)
+                {
                     rv.ApplyFilters(
                         _dateRangeCombo.SelectedItem?.ToString() ?? "This Year",
                         _serviceCombo.SelectedItem?.ToString() ?? "All Services",
                         _vehicleCombo.SelectedItem?.ToString() ?? "All Types");
+
+                    switch (_mode)
+                    {
+                        case ViewMode.ChartAndTable: rv.ShowChartAndTable(); break;
+                        case ViewMode.ChartOnly: rv.ShowChartOnly(); break;
+                        case ViewMode.TableOnly: rv.ShowTableOnly(); break;
+                    }
+                }
             }
+
+            FitSections();
+            ResizeExtraHost();
         }
 
         private async Task RunReportAsync()
@@ -623,8 +665,20 @@ namespace CarwashServices.Roles
             HighlightMode(_modeChartBtn, m == ViewMode.ChartOnly);
             HighlightMode(_modeTableBtn, m == ViewMode.TableOnly);
 
-            _chartsRow.Visible = m != ViewMode.TableOnly && _currentReportType == RevenueReport;
-            _tableCard.Visible = m != ViewMode.ChartOnly && _currentReportType == RevenueReport;
+            if (_currentReportType == RevenueReport)
+            {
+                _chartsRow.Visible = m != ViewMode.TableOnly;
+                _tableCard.Visible = m != ViewMode.ChartOnly;
+            }
+            else if (_currentExtra is IReportView rv)
+            {
+                switch (m)
+                {
+                    case ViewMode.ChartAndTable: rv.ShowChartAndTable(); break;
+                    case ViewMode.ChartOnly: rv.ShowChartOnly(); break;
+                    case ViewMode.TableOnly: rv.ShowTableOnly(); break;
+                }
+            }
         }
 
         private static void HighlightMode(Button b, bool active)
@@ -635,7 +689,7 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  DATA LOAD (revenue report only)
+        //  DATA LOAD (revenue only)
         // ================================================================
         private async Task LoadAsync()
         {
@@ -836,22 +890,23 @@ namespace CarwashServices.Roles
         };
 
         // ================================================================
-        //  EXPORT (revenue report)
+        //  EXPORT
         // ================================================================
-        private bool HasRows => _data.Transactions.Any();
+        private bool HasRows
+        {
+            get
+            {
+                if (_currentReportType == RevenueReport) return _data.Transactions.Any();
+                if (_currentExtra is IExportableReport er) return er.HasData;
+                return false;
+            }
+        }
 
         private void ExportCsv()
         {
-            if (_currentReportType != RevenueReport)
-            {
-                MessageBox.Show("Export is only available for the Service & Revenue Report right now.",
-                    "Export CSV", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
             if (!HasRows)
             {
-                MessageBox.Show("There is nothing to export. Run a report that returns transactions first.",
+                MessageBox.Show("There is nothing to export. Run a report that returns data first.",
                     "Export CSV", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -861,18 +916,26 @@ namespace CarwashServices.Roles
                 using var sfd = new SaveFileDialog
                 {
                     Filter = "CSV files (*.csv)|*.csv",
-                    FileName = $"ServiceRevenue_{DateTime.Now:yyyyMMdd_HHmm}.csv"
+                    FileName = MakeFileName("csv")
                 };
                 if (sfd.ShowDialog() != DialogResult.OK) return;
 
-                var inv = CultureInfo.InvariantCulture;
                 var sb = new StringBuilder();
-                sb.AppendLine("Txn #,Date,Customer,Vehicle,Service,Amount,Payment,Status");
-                foreach (var t in _data.Transactions)
+
+                if (_currentReportType == RevenueReport)
                 {
-                    sb.AppendLine(
-                        $"{Csv(t.Txn)},{Csv(t.Date)},{Csv(t.Customer)},{Csv(t.Vehicle)}," +
-                        $"{Csv(t.Service)},{t.Amount.ToString("0.##", inv)},{Csv(t.Payment)},{Csv(t.Status)}");
+                    var inv = CultureInfo.InvariantCulture;
+                    sb.AppendLine("Txn #,Date,Customer,Vehicle,Service,Amount,Payment,Status");
+                    foreach (var t in _data.Transactions)
+                    {
+                        sb.AppendLine(
+                            $"{Csv(t.Txn)},{Csv(t.Date)},{Csv(t.Customer)},{Csv(t.Vehicle)}," +
+                            $"{Csv(t.Service)},{t.Amount.ToString("0.##", inv)},{Csv(t.Payment)},{Csv(t.Status)}");
+                    }
+                }
+                else if (_currentExtra is IExportableReport er)
+                {
+                    sb.Append(er.BuildCsv());
                 }
 
                 File.WriteAllText(sfd.FileName, sb.ToString(), new UTF8Encoding(true));
@@ -893,25 +956,31 @@ namespace CarwashServices.Roles
             return s;
         }
 
+        private string MakeFileName(string ext)
+        {
+            string tag = _currentReportType.Replace(" ", "");
+            return $"{tag}_{DateTime.Now:yyyyMMdd_HHmm}.{ext}";
+        }
+
         private void ExportPdf()
         {
-            if (_currentReportType != RevenueReport)
-            {
-                MessageBox.Show("Export is only available for the Service & Revenue Report right now.",
-                    "Export PDF", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
             if (!HasRows)
             {
-                MessageBox.Show("There is nothing to export. Run a report that returns transactions first.",
+                MessageBox.Show("There is nothing to export. Run a report that returns data first.",
                     "Export PDF", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             try
             {
-                using var doc = BuildPrintDocument();
+                PrintDocument doc;
+                if (_currentReportType == RevenueReport)
+                    doc = BuildPrintDocument();
+                else if (_currentExtra is IExportableReport er)
+                    doc = er.BuildPrintDocument();
+                else
+                    return;
+
                 doc.PrinterSettings.PrinterName = "Microsoft Print to PDF";
 
                 if (!doc.PrinterSettings.IsValid)
@@ -929,7 +998,7 @@ namespace CarwashServices.Roles
                 using var sfd = new SaveFileDialog
                 {
                     Filter = "PDF files (*.pdf)|*.pdf",
-                    FileName = $"ServiceRevenue_{DateTime.Now:yyyyMMdd_HHmm}.pdf"
+                    FileName = MakeFileName("pdf")
                 };
                 if (sfd.ShowDialog() != DialogResult.OK) return;
 

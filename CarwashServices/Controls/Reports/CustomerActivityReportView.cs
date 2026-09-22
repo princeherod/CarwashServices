@@ -2,9 +2,13 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Printing;
+using System.Drawing.Text;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -12,7 +16,7 @@ using CarwashServices.Dtos;
 
 namespace CarwashServices.Controls.Reports
 {
-    public class CustomerActivityReportView : UserControl, IReportView
+    public class CustomerActivityReportView : UserControl, IReportView, IExportableReport
     {
         private static readonly Color Navy = Color.FromArgb(0x0A, 0x16, 0x33);
         private static readonly Color Muted = Color.FromArgb(0x6B, 0x7A, 0x9A);
@@ -32,6 +36,9 @@ namespace CarwashServices.Controls.Reports
             Timeout = TimeSpan.FromSeconds(15)
         };
 
+        private CustomerActivityReportDto _data = new();
+        private string _currentRange = "This Year";
+
         private readonly Label _kTotal = new() { AutoSize = true };
         private readonly Label _kTotalSub = new() { AutoSize = true };
         private readonly Label _kActive = new() { AutoSize = true };
@@ -41,13 +48,15 @@ namespace CarwashServices.Controls.Reports
         private readonly Label _kAvg = new() { AutoSize = true };
         private readonly Label _kAvgSub = new() { AutoSize = true };
 
-        // NOTE: no Dock here on purpose. MakeCard() docks the charts inside the
-        // card's padded body, below the title. Docking them here as well made
-        // them cover the whole card and slide underneath the title.
         private readonly BarChartSimple _bySource = new() { BarColor = Blue };
         private readonly DonutChartSimple _byVehicle = new();
         private readonly DataGridView _grid = new();
         private readonly Label _subtitle = new();
+
+        // ---- Layout rows ----
+        private TableLayoutPanel _page;
+        private Panel _chartsRowPanel;    // row 2
+        private Panel _tableRowPanel;     // row 3
 
         public CustomerActivityReportView()
         {
@@ -55,58 +64,117 @@ namespace CarwashServices.Controls.Reports
             BackColor = PageBg;
             DoubleBuffered = true;
 
-            // If the window gets very small, scroll instead of squashing the cards.
             AutoScroll = true;
-            AutoScrollMinSize = new Size(900, 130 + 340 + 420);
+            AutoScrollMinSize = new Size(900, 100 + 130 + 340 + 420);
 
             BuildUi();
         }
 
         public void ApplyFilters(string dateRange, string service, string vehicleType)
-            => _ = LoadAsync(dateRange);
+        {
+            _currentRange = dateRange ?? "This Year";
+            _ = LoadAsync(_currentRange);
+        }
 
-        // ------------------------------------------------------------------
-        //  Layout
-        // ------------------------------------------------------------------
+        // ---- View modes ----
+        // Row layout: 0=header (always)  1=KPI (always)  2=charts  3=table
+        public void ShowChartOnly()
+        {
+            if (_page == null) return;
+            _page.RowStyles[2] = new RowStyle(SizeType.Absolute, 340);
+            _page.RowStyles[3] = new RowStyle(SizeType.Absolute, 0);
+
+            if (_chartsRowPanel != null) _chartsRowPanel.Visible = true;
+            if (_tableRowPanel != null) _tableRowPanel.Visible = false;
+
+            _page.PerformLayout();
+        }
+
+        public void ShowTableOnly()
+        {
+            if (_page == null) return;
+            _page.RowStyles[2] = new RowStyle(SizeType.Absolute, 0);
+            _page.RowStyles[3] = new RowStyle(SizeType.Percent, 100f);
+
+            if (_chartsRowPanel != null) _chartsRowPanel.Visible = false;
+            if (_tableRowPanel != null) _tableRowPanel.Visible = true;
+
+            _page.PerformLayout();
+        }
+
+        public void ShowChartAndTable()
+        {
+            if (_page == null) return;
+            _page.RowStyles[2] = new RowStyle(SizeType.Absolute, 340);
+            _page.RowStyles[3] = new RowStyle(SizeType.Percent, 100f);
+
+            if (_chartsRowPanel != null) _chartsRowPanel.Visible = true;
+            if (_tableRowPanel != null) _tableRowPanel.Visible = true;
+
+            _page.PerformLayout();
+        }
+
         private void BuildUi()
         {
-            // KPI row (fixed) / charts row (fixed) / table row (takes the rest)
-            var page = new TableLayoutPanel
+            _page = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 4,
                 BackColor = PageBg,
                 Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
-            page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            page.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));
-            page.RowStyles.Add(new RowStyle(SizeType.Absolute, 340));
-            page.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            Controls.Add(page);
+            _page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));   // row 0: header
+            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));   // row 1: KPI
+            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 340));   // row 2: charts
+            _page.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // row 3: table
+            Controls.Add(_page);
 
-            // KPI cards
+            // ---- Row 0: header ----
+            var header = ComplaintFeedbackReportView.MakePageHeader(
+                "Customer Activity Report",
+                "How often each customer visits and how much they spend.");
+            header.Dock = DockStyle.Fill;
+            header.Margin = Padding.Empty;
+            _page.Controls.Add(header, 0, 0);
+
+            // ---- Row 1: KPI ----
             var kpiGrid = MakeGrid(25f, 25f, 25f, 25f);
             AddKpi(kpiGrid, 0, "Total Customers", "", _kTotal, _kTotalSub, Blue);
             AddKpi(kpiGrid, 1, "Active Customers", "Visited within 60 days", _kActive, _kActiveSub, Green);
             AddKpi(kpiGrid, 2, "Returning Rate", "2+ visits", _kReturning, _kReturningSub, Purple);
             AddKpi(kpiGrid, 3, "Avg Services / Customer", "", _kAvg, _kAvgSub, Orange);
-            page.Controls.Add(kpiGrid, 0, 0);
+            _page.Controls.Add(MakeRowHost(kpiGrid), 0, 1);
 
-            // Charts
+            // ---- Row 2: charts ----
             var chartsGrid = MakeGrid(50f, 50f);
             chartsGrid.Controls.Add(
                 MakeCard("Customers by Acquisition Source", _bySource, new Padding(0, 0, 8, 16)), 0, 0);
             chartsGrid.Controls.Add(
                 MakeCard("Customers by Vehicle Type", _byVehicle, new Padding(8, 0, 0, 16)), 1, 0);
-            page.Controls.Add(chartsGrid, 0, 1);
+            _chartsRowPanel = MakeRowHost(chartsGrid);
+            _page.Controls.Add(_chartsRowPanel, 0, 2);
 
-            // Table
-            page.Controls.Add(MakeTableCard(), 0, 2);
+            // ---- Row 3: table ----
+            _tableRowPanel = MakeRowHost(MakeTableCard());
+            _page.Controls.Add(_tableRowPanel, 0, 3);
         }
 
-        /// <summary>White bordered card: title on top, content fills the rest.</summary>
+        private static Panel MakeRowHost(Control content)
+        {
+            var host = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = PageBg,
+                Margin = Padding.Empty
+            };
+            content.Dock = DockStyle.Fill;
+            host.Controls.Add(content);
+            return host;
+        }
+
         private static Card MakeCard(string title, Control content, Padding margin)
         {
             var card = new Card
@@ -116,8 +184,8 @@ namespace CarwashServices.Controls.Reports
             };
 
             content.Dock = DockStyle.Fill;
-            card.Controls.Add(content);              // Fill control must be added first...
-            card.Controls.Add(new Label              // ...so the Top-docked title is laid out before it.
+            card.Controls.Add(content);
+            card.Controls.Add(new Label
             {
                 Text = title,
                 Dock = DockStyle.Top,
@@ -167,7 +235,7 @@ namespace CarwashServices.Controls.Reports
             {
                 BackColor = headerBg,
                 ForeColor = Muted,
-                SelectionBackColor = headerBg,   // no blue flash when a header is clicked
+                SelectionBackColor = headerBg,
                 SelectionForeColor = Muted,
                 Font = new Font("Segoe UI Semibold", 9f),
                 Alignment = DataGridViewContentAlignment.MiddleLeft,
@@ -195,9 +263,6 @@ namespace CarwashServices.Controls.Reports
             _grid.AllowUserToDeleteRows = false;
             _grid.AllowUserToResizeRows = false;
             _grid.RowHeadersVisible = false;
-
-            // Columns share the full width, so there is no dead space on the right
-            // and no horizontal scrollbar.
             _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
 
             AddCol("Customer", "Customer", 19, bold: true);
@@ -262,15 +327,12 @@ namespace CarwashServices.Controls.Reports
         private void AddKpi(TableLayoutPanel grid, int col, string title, string sub,
                             Label valueLbl, Label subLbl, Color accent)
         {
-            // Dock = Fill (via Card) makes the card stretch to its column.
-            // Before, each card kept its default 200x100 size and left big gaps.
             var count = grid.ColumnCount;
             var card = new Card
             {
                 Margin = new Padding(col == 0 ? 0 : 8, 0, col == count - 1 ? 0 : 8, 16)
             };
 
-            // thin accent stripe on the left edge
             card.Controls.Add(new Panel { Dock = DockStyle.Left, Width = 4, BackColor = accent });
 
             card.Controls.Add(new Label
@@ -300,9 +362,6 @@ namespace CarwashServices.Controls.Reports
             grid.Controls.Add(card, col, 0);
         }
 
-        // ------------------------------------------------------------------
-        //  Data
-        // ------------------------------------------------------------------
         private async Task LoadAsync(string range)
         {
             try
@@ -314,7 +373,8 @@ namespace CarwashServices.Controls.Reports
                     $"api/reports/customer-activity?companyId=1&range={Uri.EscapeDataString(r)}")
                     ?? new CustomerActivityReportDto();
 
-                // KPIs
+                _data = data;
+
                 _kTotal.Text = data.TotalCustomers.ToString();
                 _kTotalSub.Text = $"{data.Rows.Count} listed below";
                 _kActive.Text = data.ActiveCustomers.ToString();
@@ -324,8 +384,6 @@ namespace CarwashServices.Controls.Reports
                 _kAvg.Text = data.AvgServicesPerCustomer.ToString("0.#");
                 _kAvgSub.Text = "Per customer";
 
-                // Bar chart. Customers with no source are added as "Not specified" so
-                // the chart adds up to the Total Customers KPI.
                 var sourceItems = data.BySource
                     .Select(x => (x.Label, (double)x.Value))
                     .ToList();
@@ -333,7 +391,6 @@ namespace CarwashServices.Controls.Reports
                 if (noSource > 0) sourceItems.Add(("Not specified", noSource));
                 _bySource.Items = sourceItems;
 
-                // Donut chart (same idea for vehicle type)
                 var palette = new[]
                 {
                     Blue, Green, Orange, Purple,
@@ -351,7 +408,6 @@ namespace CarwashServices.Controls.Reports
                 _byVehicle.CenterTop = data.TotalCustomers.ToString();
                 _byVehicle.CenterBottom = "Customers";
 
-                // Table
                 _grid.SuspendLayout();
                 _grid.Rows.Clear();
                 foreach (var row in data.Rows)
@@ -363,11 +419,10 @@ namespace CarwashServices.Controls.Reports
                         Or(row.Source),
                         row.TotalVisits,
                         Or(row.LastVisit),
-                        row.LifetimeValue,   // formatted by the column style (₱#,##0)
+                        row.LifetimeValue,
                         row.AvgSpend,
                         row.Status);
 
-                    // grey out "—" placeholders
                     foreach (DataGridViewCell cell in _grid.Rows[idx].Cells)
                     {
                         if (cell.Value as string == "—")
@@ -397,15 +452,11 @@ namespace CarwashServices.Controls.Reports
         private static string Or(string? value)
             => string.IsNullOrWhiteSpace(value) ? "—" : value;
 
-        // ------------------------------------------------------------------
-        //  Status pill
-        // ------------------------------------------------------------------
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
             if (_grid.Columns[e.ColumnIndex].Name != "Status") return;
 
-            // background, borders and selection highlight — but not the text
             e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
 
             var text = e.FormattedValue?.ToString() ?? "";
@@ -420,8 +471,7 @@ namespace CarwashServices.Controls.Reports
                 var pill = new Rectangle(
                     e.CellBounds.X + 12,
                     e.CellBounds.Y + (e.CellBounds.Height - h) / 2,
-                    textSize.Width + 20,
-                    h);
+                    textSize.Width + 20, h);
 
                 var oldMode = e.Graphics.SmoothingMode;
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -450,8 +500,134 @@ namespace CarwashServices.Controls.Reports
         }
 
         // ------------------------------------------------------------------
-        //  Card panel: white, 1px border, repaints cleanly on resize
+        //  Export
         // ------------------------------------------------------------------
+        public bool HasData => _data.Rows.Count > 0;
+
+        public string BuildCsv()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("Customer,Phone,Vehicle Type,Source,Total Visits,Last Visit,Lifetime Value,Avg Spend,Status");
+            var inv = CultureInfo.InvariantCulture;
+            foreach (var row in _data.Rows)
+            {
+                sb.AppendLine(string.Join(",",
+                    Csv(row.Customer), Csv(row.Phone), Csv(row.VehicleType), Csv(row.Source),
+                    row.TotalVisits.ToString(inv),
+                    Csv(row.LastVisit),
+                    row.LifetimeValue.ToString("0.##", inv),
+                    row.AvgSpend.ToString("0.##", inv),
+                    Csv(row.Status)));
+            }
+            return sb.ToString();
+        }
+
+        public PrintDocument BuildPrintDocument()
+        {
+            var rows = _data.Rows;
+            var rangeLabel = _currentRange;
+            var generated = _data.GeneratedAt;
+
+            var doc = new PrintDocument { DocumentName = "Customer Activity Report" };
+            doc.DefaultPageSettings.Landscape = true;
+            doc.DefaultPageSettings.Margins = new Margins(50, 50, 50, 50);
+
+            const float rowH = 22f;
+            string[] heads = { "Customer", "Phone", "Vehicle", "Source", "Visits", "Last Visit", "LTV", "Avg Spend", "Status" };
+            float[] weights = { 1.6f, 1.3f, 1.0f, 1.0f, 0.8f, 1.0f, 1.1f, 1.0f, 0.9f };
+            int next = 0, page = 0;
+
+            doc.BeginPrint += (s, e) => { next = 0; page = 0; };
+
+            doc.PrintPage += (s, e) =>
+            {
+                var g = e.Graphics!;
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                var area = e.MarginBounds;
+                float y = area.Top;
+                page++;
+
+                using var titleFont = new Font("Segoe UI Semibold", 16f);
+                using var subFont = new Font("Segoe UI", 9f);
+                using var headFont = new Font("Segoe UI Semibold", 9f);
+                using var bodyFont = new Font("Segoe UI", 9f);
+                using var ink = new SolidBrush(Navy);
+                using var gray = new SolidBrush(Muted);
+                using var headBg = new SolidBrush(Color.FromArgb(0xF3, 0xF6, 0xFB));
+                using var linePen = new Pen(CardBorder);
+                using var fmt = new StringFormat
+                {
+                    Trimming = StringTrimming.EllipsisCharacter,
+                    FormatFlags = StringFormatFlags.NoWrap,
+                    LineAlignment = StringAlignment.Center
+                };
+
+                g.DrawString("Customer Activity Report", page == 1 ? titleFont : headFont, ink, area.Left, y);
+                y += (page == 1 ? titleFont : headFont).GetHeight(g) + 2;
+
+                if (page == 1)
+                {
+                    g.DrawString($"{rangeLabel} · Generated at {generated}", subFont, gray, area.Left, y);
+                    y += subFont.GetHeight(g) + 8;
+                }
+                else y += 8;
+
+                float sum = weights.Sum();
+                var xs = new float[weights.Length + 1];
+                xs[0] = area.Left;
+                for (int i = 0; i < weights.Length; i++)
+                    xs[i + 1] = xs[i] + area.Width * weights[i] / sum;
+
+                void DrawCells(string[] cells, Font f, Brush b, float top)
+                {
+                    for (int i = 0; i < cells.Length; i++)
+                    {
+                        var r = new RectangleF(xs[i] + 6, top, xs[i + 1] - xs[i] - 12, rowH);
+                        g.DrawString(cells[i], f, b, r, fmt);
+                    }
+                }
+
+                g.FillRectangle(headBg, area.Left, y, area.Width, rowH);
+                DrawCells(heads, headFont, gray, y);
+                y += rowH;
+
+                float bottom = area.Bottom - 24f;
+                while (next < rows.Count && y + rowH <= bottom)
+                {
+                    var r = rows[next];
+                    DrawCells(new[]
+                    {
+                        r.Customer ?? "", r.Phone ?? "", r.VehicleType ?? "", r.Source ?? "",
+                        r.TotalVisits.ToString(),
+                        r.LastVisit ?? "",
+                        "₱" + r.LifetimeValue.ToString("N0"),
+                        "₱" + r.AvgSpend.ToString("N0"),
+                        r.Status ?? ""
+                    }, bodyFont, ink, y);
+                    g.DrawLine(linePen, area.Left, y + rowH, area.Right, y + rowH);
+                    y += rowH;
+                    next++;
+                }
+
+                g.DrawString($"Page {page}", subFont, gray,
+                    new RectangleF(area.Left, area.Bottom - 14f, area.Width, 16f),
+                    new StringFormat { Alignment = StringAlignment.Far });
+
+                e.HasMorePages = next < rows.Count;
+            };
+
+            return doc;
+        }
+
+        private static string Csv(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            if ("=+-@".IndexOf(s[0]) >= 0) s = "'" + s;
+            if (s.Contains(',') || s.Contains('"') || s.Contains('\n'))
+                return "\"" + s.Replace("\"", "\"\"") + "\"";
+            return s;
+        }
+
         private sealed class Card : Panel
         {
             public Card()
