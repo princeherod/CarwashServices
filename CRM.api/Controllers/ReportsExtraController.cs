@@ -20,7 +20,6 @@ public class ReportsExtraController : ControllerBase
 
     // ================================================================
     //  COMPLAINTS & FEEDBACK
-    //  GET  api/reports/complaints-feedback?companyId=1&range=ThisYear
     // ================================================================
     [HttpGet("complaints-feedback")]
     public async Task<IActionResult> GetComplaintsFeedback(
@@ -30,7 +29,13 @@ public class ReportsExtraController : ControllerBase
         var (from, to) = ResolveRange(range, DateTime.Today);
 
         var tenant = await _tenantFactory.CreateAsync(companyId);
-        var customers = await tenant.TenantCustomers.AsNoTracking().ToListAsync();
+
+        // Only active customers are counted.
+        var customers = await tenant.TenantCustomers
+            .AsNoTracking()
+            .Where(c => !c.IsArchived)
+            .ToListAsync();
+
         var custById = customers.ToDictionary(c => c.TenantCustomerId, c => c.CustomerName);
 
         var interactions = await tenant.CustomerInteractions.AsNoTracking()
@@ -38,19 +43,21 @@ public class ReportsExtraController : ControllerBase
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync();
 
+        // Exclude interactions that belong to archived customers.
+        var activeIds = custById.Keys.ToHashSet();
+        interactions = interactions.Where(x => activeIds.Contains(x.CustomerId)).ToList();
+
         int totalFeedback = interactions.Count(x => x.Kind == "Feedback");
         int totalComplaints = interactions.Count(x => x.Kind == "Complaint");
         int resolvedComplaints = interactions.Count(x => x.Kind == "Complaint" && x.Status == "Resolved");
         double resolutionRate = totalComplaints == 0 ? 0 : Math.Round(resolvedComplaints * 100.0 / totalComplaints, 0);
 
-        // Sentiment: Positive = Feedback / Resolved, Negative = Complaint / Unresolved, Neutral = the rest
         int positive = interactions.Count(x => x.Kind == "Feedback" && x.Status == "Resolved");
         int negative = interactions.Count(x => x.Kind == "Complaint" && x.Status == "Open");
         int neutral = interactions.Count - positive - negative;
         int neutralTotal = positive + negative + neutral;
         double avgRating = 0;
 
-        // Complaints by category (we use Title as category in this example)
         var complaintsByCat = interactions
             .Where(x => x.Kind == "Complaint")
             .GroupBy(x => string.IsNullOrWhiteSpace(x.Title) ? "Other" : x.Title)
@@ -84,7 +91,6 @@ public class ReportsExtraController : ControllerBase
 
     // ================================================================
     //  CUSTOMER ACTIVITY
-    //  GET  api/reports/customer-activity?companyId=1&range=ThisYear
     // ================================================================
     [HttpGet("customer-activity")]
     public async Task<IActionResult> GetCustomerActivity(
@@ -94,12 +100,24 @@ public class ReportsExtraController : ControllerBase
         var (from, to) = ResolveRange(range, DateTime.Today);
 
         var tenant = await _tenantFactory.CreateAsync(companyId);
-        var customers = await tenant.TenantCustomers.AsNoTracking().ToListAsync();
-        var products = await tenant.Products.AsNoTracking().ToListAsync();
+
+        var customers = await tenant.TenantCustomers
+            .AsNoTracking()
+            .Where(c => !c.IsArchived)
+            .ToListAsync();
+
+        var products = await tenant.Products
+            .AsNoTracking()
+            .Where(p => !p.IsArchived)
+            .ToListAsync();
+
         var priceById = products.GroupBy(p => p.ProductId).ToDictionary(g => g.Key, g => g.First().UnitPrice);
 
-        var requests = await _db.ServiceRequests.AsNoTracking()
-            .Where(r => r.RequestedDate >= from && r.RequestedDate <= to)
+        var requests = await _db.ServiceRequests
+            .AsNoTracking()
+            .Where(r => !r.IsArchived
+                     && r.RequestedDate >= from
+                     && r.RequestedDate <= to)
             .ToListAsync();
 
         var byCustomer = requests.GroupBy(r => r.CustomerId).ToDictionary(g => g.Key, g => g.ToList());
@@ -169,7 +187,6 @@ public class ReportsExtraController : ControllerBase
 
     // ================================================================
     //  RETENTION SUMMARY
-    //  GET  api/reports/retention-summary?companyId=1&range=ThisYear
     // ================================================================
     [HttpGet("retention-summary")]
     public async Task<IActionResult> GetRetentionSummary(
@@ -179,12 +196,31 @@ public class ReportsExtraController : ControllerBase
         var (from, to) = ResolveRange(range, DateTime.Today);
 
         var tenant = await _tenantFactory.CreateAsync(companyId);
-        var customers = await tenant.TenantCustomers.AsNoTracking().ToListAsync();
-        var products = await tenant.Products.AsNoTracking().ToListAsync();
+
+        var customers = await tenant.TenantCustomers
+            .AsNoTracking()
+            .Where(c => !c.IsArchived)
+            .ToListAsync();
+
+        var products = await tenant.Products
+            .AsNoTracking()
+            .Where(p => !p.IsArchived)
+            .ToListAsync();
+
         var priceById = products.GroupBy(p => p.ProductId).ToDictionary(g => g.Key, g => g.First().UnitPrice);
 
-        var requests = await _db.ServiceRequests.AsNoTracking().ToListAsync();
-        var interactions = await tenant.CustomerInteractions.AsNoTracking().ToListAsync();
+        var requests = await _db.ServiceRequests
+            .AsNoTracking()
+            .Where(r => !r.IsArchived)
+            .ToListAsync();
+
+        var interactions = await tenant.CustomerInteractions
+            .AsNoTracking()
+            .ToListAsync();
+
+        // Exclude interactions that belong to archived customers.
+        var activeIds = customers.Select(c => c.TenantCustomerId).ToHashSet();
+        interactions = interactions.Where(x => activeIds.Contains(x.CustomerId)).ToList();
 
         var byCustomer = requests.GroupBy(r => r.CustomerId).ToDictionary(g => g.Key, g => g.ToList());
         var complaintsByCustomer = interactions

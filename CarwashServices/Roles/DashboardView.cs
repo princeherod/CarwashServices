@@ -45,7 +45,6 @@ namespace CarwashServices.Roles
 
         private static readonly bool TintBehindText = false;
 
-        // ---- Layout constants ----
         private const int MarginX = 32;
         private const int TopMargin = 20;
         private const int SectionGap = 16;
@@ -79,31 +78,33 @@ namespace CarwashServices.Roles
             DoubleBuffered = true;
 
             InitializeUI();
+
+            Sidebar.EnableDoubleBuffering(this);
+
             Load += async (s, e) => await LoadAsync();
         }
 
         // ================================================================
-        //  NAVIGATION
+        //  NAVIGATION HELPERS
         // ================================================================
-        private void Navigate(string moduleKey)
+        private void NavigateServiceRequests(string status)
         {
-            (FindForm() as MainForm)?.NavigateToModule(moduleKey);
+            (FindForm() as MainForm)?.NavigateToServiceRequests(status);
         }
 
-        /// <summary>
-        /// Attaches a click handler to a control and every descendant, so the
-        /// whole surface is clickable. Prevents the designer complaining about
-        /// serialisable properties.
-        /// </summary>
-        private void BindClick(Control root, Action onClick)
+        private void NavigateCustomers(string segment)
         {
-            if (root == null || onClick == null) return;
+            (FindForm() as MainForm)?.NavigateToCustomers(segment);
+        }
 
-            root.Cursor = Cursors.Hand;
-            root.Click += (s, e) => onClick();
+        private void NavigateFollowUps(string status)
+        {
+            (FindForm() as MainForm)?.NavigateToFollowUps(status);
+        }
 
-            foreach (Control child in root.Controls)
-                BindClick(child, onClick);
+        private void NavigateReports()
+        {
+            (FindForm() as MainForm)?.NavigateToModule("View Reports");
         }
 
         // ================================================================
@@ -125,10 +126,17 @@ namespace CarwashServices.Roles
             _kpiRow = new Panel { Height = KpiHeight, BackColor = Color.Transparent };
             _root.Controls.Add(_kpiRow);
 
-            _kpiCustomers = AddKpiCard(_kpiRow, "TOTAL CUSTOMERS", out _kpiCustomersSub, "Manage Customers");
-            _kpiToday = AddKpiCard(_kpiRow, "TODAY'S JOBS", out _kpiTodaySub, "Manage Service Requests");
-            _kpiInProgress = AddKpiCard(_kpiRow, "IN PROGRESS", out _kpiInProgressSub, "Manage Service Requests");
-            _kpiRevenue = AddKpiCard(_kpiRow, "REVENUE (THIS MONTH)", out _kpiRevenueSub, "View Reports");
+            _kpiCustomers = AddKpiCard(_kpiRow, "TOTAL CUSTOMERS", out _kpiCustomersSub,
+                () => NavigateCustomers("All"));
+
+            _kpiToday = AddKpiCard(_kpiRow, "TODAY'S JOBS", out _kpiTodaySub,
+                () => NavigateServiceRequests("All"));
+
+            _kpiInProgress = AddKpiCard(_kpiRow, "IN PROGRESS", out _kpiInProgressSub,
+                () => NavigateServiceRequests("InProgress"));
+
+            _kpiRevenue = AddKpiCard(_kpiRow, "REVENUE (THIS MONTH)", out _kpiRevenueSub,
+                () => NavigateReports());
 
             // -------- Middle row --------
             _middleRow = new Panel { BackColor = Color.Transparent };
@@ -149,27 +157,24 @@ namespace CarwashServices.Roles
             _recentGrid.CellMouseClick += (s, e) =>
             {
                 if (e.RowIndex < 0) return;
-                Navigate("Manage Service Requests");
+                // Route by the row's status.
+                var status = _recentGrid.Rows[e.RowIndex].Cells["Status"].Value?.ToString() ?? "All";
+                NavigateServiceRequests(status);
             };
             recentCard.Controls.Add(_recentGrid);
             Inset(recentCard, _recentGrid, CardPad, CardTitleStrip, CardPad, CardPad);
-
-            // The card title itself should be clickable too
-            BindClick(recentCard, () => Navigate("Manage Service Requests"));
 
             // RIGHT TOP: Follow-Up Queue
             var followCard = MakeCard(_middleRow, "Follow-Up Queue");
             _followUpList = new Panel { BackColor = Color.White, AutoScroll = true };
             followCard.Controls.Add(_followUpList);
             Inset(followCard, _followUpList, CardPad, CardTitleStrip, CardPad, CardPad);
-            BindClick(followCard, () => Navigate("Follow-Ups / Reminders"));
 
             // RIGHT BOTTOM: Service Staff
             var staffCard = MakeCard(_middleRow, "Service Staff on Duty");
             _staffList = new Panel { BackColor = Color.White, AutoScroll = true };
             staffCard.Controls.Add(_staffList);
             Inset(staffCard, _staffList, CardPad, CardTitleStrip, CardPad, CardPad);
-            BindClick(staffCard, () => Navigate("Manage Users"));
 
             // -------- Bottom row: Status Logs --------
             _bottomRow = new Panel { BackColor = Color.Transparent };
@@ -188,11 +193,12 @@ namespace CarwashServices.Roles
             _logsGrid.CellMouseClick += (s, e) =>
             {
                 if (e.RowIndex < 0) return;
-                Navigate("Manage Service Requests");
+                // Route by the log row's status.
+                var status = _logsGrid.Rows[e.RowIndex].Cells["Status"].Value?.ToString() ?? "All";
+                NavigateServiceRequests(status);
             };
             logsCard.Controls.Add(_logsGrid);
             Inset(logsCard, _logsGrid, CardPad, CardTitleStrip, CardPad, CardPad);
-            BindClick(logsCard, () => Navigate("Manage Service Requests"));
 
             _logsEmpty = new Label
             {
@@ -211,7 +217,7 @@ namespace CarwashServices.Roles
             Relayout();
         }
 
-        private Label AddKpiCard(Panel parent, string title, out Label subtitle, string clickModule)
+        private Label AddKpiCard(Panel parent, string title, out Label subtitle, Action onClick = null)
         {
             var card = new BorderPanel
             {
@@ -249,11 +255,17 @@ namespace CarwashServices.Roles
             };
             card.Controls.Add(subtitle);
 
-            // Make the whole KPI card clickable.
-            if (!string.IsNullOrEmpty(clickModule))
+            if (onClick != null)
             {
-                string captured = clickModule;
-                BindClick(card, () => Navigate(captured));
+                card.Cursor = Cursors.Hand;
+                card.Click += (s, e) => onClick();
+
+                // Also wire children so clicking a KPI's value or subtitle works.
+                foreach (Control child in card.Controls)
+                {
+                    child.Cursor = Cursors.Hand;
+                    child.Click += (s, e) => onClick();
+                }
             }
 
             return val;
@@ -518,7 +530,7 @@ namespace CarwashServices.Roles
 
                 int textW = Math.Max(60, row.Width - status.Width - 16);
 
-                row.Controls.Add(new Label
+                var nameLbl = new Label
                 {
                     Text = f.Customer,
                     ForeColor = Navy,
@@ -527,10 +539,12 @@ namespace CarwashServices.Roles
                     AutoSize = false,
                     AutoEllipsis = true,
                     Size = new Size(textW, 20),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-                });
+                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                    Cursor = Cursors.Hand
+                };
+                row.Controls.Add(nameLbl);
 
-                row.Controls.Add(new Label
+                var metaLbl = new Label
                 {
                     Text = $"{f.Type} · {f.ScheduledDate}",
                     ForeColor = Muted,
@@ -539,10 +553,18 @@ namespace CarwashServices.Roles
                     AutoSize = false,
                     AutoEllipsis = true,
                     Size = new Size(textW, 16),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-                });
+                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                    Cursor = Cursors.Hand
+                };
+                row.Controls.Add(metaLbl);
 
-                BindClick(row, () => Navigate("Follow-Ups / Reminders"));
+                // Clicking a queue row drills down by that row's status.
+                string capturedStatus = f.Status;
+                row.Click += (s, e) => NavigateFollowUps(capturedStatus);
+                nameLbl.Click += (s, e) => NavigateFollowUps(capturedStatus);
+                metaLbl.Click += (s, e) => NavigateFollowUps(capturedStatus);
+                status.Click += (s, e) => NavigateFollowUps(capturedStatus);
+
                 _followUpList.Controls.Add(row);
                 y += 52;
             }
@@ -632,7 +654,10 @@ namespace CarwashServices.Roles
                 };
                 row.Controls.Add(dot);
 
-                BindClick(row, () => Navigate("Manage Users"));
+                // Staff rows route to Manage Users.
+                row.Click += (s, e) =>
+                    (FindForm() as MainForm)?.NavigateToModule("Manage Users");
+
                 _staffList.Controls.Add(row);
                 y += 50;
             }
@@ -695,6 +720,7 @@ namespace CarwashServices.Roles
                 Font = FontStatus,
                 TextAlign = TintBehindText ? ContentAlignment.MiddleCenter : ContentAlignment.MiddleRight,
                 AutoSize = false,
+                Cursor = Cursors.Hand,
                 Size = new Size(size.Width + 12 + 2 * padX, size.Height + 6 + 2 * padY)
             };
         }

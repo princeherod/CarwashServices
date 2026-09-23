@@ -12,18 +12,12 @@ namespace CarwashServices.Shell
     {
         public event EventHandler<string>? ModuleSelected;
 
-        /// <summary>
-        /// Raised when the user clicks Sign Out. MainForm listens for this and
-        /// closes itself so the outer loop in Program.Main can re-show the
-        /// login screen without restarting the process.
-        /// </summary>
         public event EventHandler? SignOutRequested;
 
         private string _activeModule = "";
 
         public string ActiveModuleKey => _activeModule;
 
-        // Kept so we can toggle highlights on click without rebuilding the whole sidebar.
         private readonly Dictionary<string, SidebarButton> _moduleButtons = new();
 
         // ---- Palette ----
@@ -48,11 +42,11 @@ namespace CarwashServices.Shell
 
             _moduleButtons.Clear();
             Build();
+
+            // FIX: turn on double-buffering for every child control recursively.
+            EnableDoubleBuffering(this);
         }
 
-        /// <summary>
-        /// Just updates the visual highlight — does NOT rebuild the sidebar.
-        /// </summary>
         public void SetActiveModule(string moduleKey)
         {
             if (_activeModule == moduleKey) return;
@@ -287,9 +281,6 @@ namespace CarwashServices.Shell
             card.BringToFront();
         }
 
-        // ================================================================
-        //  SIGN OUT — raises the event so MainForm can close itself
-        // ================================================================
         private void SignOut()
         {
             var confirm = MessageBox.Show(
@@ -347,9 +338,7 @@ namespace CarwashServices.Shell
         }
 
         // ================================================================
-        // MENU ITEM — a single double-buffered control paints its own
-        // background, accent bar, icon, and label. No child controls, no
-        // transparent-panel flicker.
+        // MENU ITEM
         // ================================================================
         private int AddItem(string label, string iconKey, int y, string? key = null)
         {
@@ -390,7 +379,7 @@ namespace CarwashServices.Shell
         }
 
         // ================================================================
-        //  SidebarButton — double-buffered, owns its own icon + accent bar
+        //  SidebarButton
         // ================================================================
         private sealed class SidebarButton : Button
         {
@@ -422,7 +411,7 @@ namespace CarwashServices.Shell
                 BackColor = BgNormal;
                 ForeColor = TextMain;
                 Font = new Font("Segoe UI", 9.5f);
-                Text = "";  // painted manually
+                Text = "";
             }
 
             public void SetActive(bool active)
@@ -451,24 +440,20 @@ namespace CarwashServices.Shell
                 var g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
 
-                // Background
                 Color bg = _active ? BgActive : (_hover ? BgHover : BgNormal);
                 using (var b = new SolidBrush(bg))
                     g.FillRectangle(b, ClientRectangle);
 
-                // Accent bar (left edge) when active
                 if (_active)
                 {
                     using var accent = new SolidBrush(Accent);
                     g.FillRectangle(accent, 0, 0, 4, Height);
                 }
 
-                // Icon
                 Color iconColor = _active ? Accent : IconIdle;
                 var iconRect = new RectangleF(20, (Height - 20) / 2f, 20, 20);
                 DrawIcon(g, _iconKey, iconRect, iconColor);
 
-                // Label
                 var textRect = new Rectangle(52, 0, Width - 56, Height);
                 TextRenderer.DrawText(
                     g, _label, Font, textRect, TextMain,
@@ -564,6 +549,23 @@ namespace CarwashServices.Shell
                 }
 
                 g.Restore(state);
+            }
+        }
+
+        // ================================================================
+        //  DOUBLE-BUFFERING HELPER
+        // ================================================================
+        internal static void EnableDoubleBuffering(Control parent)
+        {
+            var dbProp = typeof(Control).GetProperty(
+                "DoubleBuffered",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+
+            foreach (Control child in parent.Controls)
+            {
+                dbProp?.SetValue(child, true);
+                EnableDoubleBuffering(child);
             }
         }
     }

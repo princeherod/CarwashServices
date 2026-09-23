@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -15,11 +16,6 @@ namespace CarwashServices.Shell
         private Label _titleLabel;
         private Panel _contentPanel;
 
-        /// <summary>
-        /// Set to true by the sidebar when the user clicks Sign Out, so the
-        /// outer loop in Program.Main can show the login screen again without
-        /// restarting the process.
-        /// </summary>
         public bool SignOutRequested { get; private set; }
 
         protected override CreateParams CreateParams
@@ -27,7 +23,7 @@ namespace CarwashServices.Shell
             get
             {
                 var cp = base.CreateParams;
-                cp.ExStyle |= 0x02000000;   // WS_EX_COMPOSITED
+                cp.ExStyle |= 0x02000000;
                 return cp;
             }
         }
@@ -41,6 +37,11 @@ namespace CarwashServices.Shell
             Font = new Font("Segoe UI", 9.5f);
             MinimumSize = new Size(1200, 700);
 
+            SetStyle(ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.UserPaint, true);
+            DoubleBuffered = true;
+
             SuspendLayout();
 
             _sidebar = new Sidebar();
@@ -50,6 +51,13 @@ namespace CarwashServices.Shell
                 SignOutRequested = true;
                 Close();
             };
+
+            typeof(Sidebar)
+                .GetProperty("DoubleBuffered",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)
+                ?.SetValue(_sidebar, true);
+
             Controls.Add(_sidebar);
 
             _headerPanel = new Panel
@@ -101,6 +109,64 @@ namespace CarwashServices.Shell
         public void NavigateToModule(string key)
         {
             NavigateTo(key);
+        }
+
+        // ================================================================
+        //  DRILL-DOWN NAVIGATION
+        // ================================================================
+
+        /// <summary>
+        /// Navigate to Manage Service Requests and apply a status filter.
+        /// Pass "All" to show everything.
+        /// </summary>
+        public void NavigateToServiceRequests(string status)
+        {
+            NavigateTo("Manage Service Requests");
+
+            foreach (Control c in _contentPanel.Controls)
+            {
+                if (c is ServiceRequestsView srv)
+                {
+                    srv.ApplyDrillDown(status);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Navigate to Manage Customers and apply a segment filter.
+        /// Valid segments: "All", "Active", "AtRisk", "Lost", "Returning".
+        /// </summary>
+        public void NavigateToCustomers(string segment)
+        {
+            NavigateTo("Manage Customers");
+
+            foreach (Control c in _contentPanel.Controls)
+            {
+                if (c is CustomersView cv)
+                {
+                    cv.ApplyDrillDown(segment);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Navigate to Follow-Ups / Reminders and apply a status filter.
+        /// Pass "All" to show everything.
+        /// </summary>
+        public void NavigateToFollowUps(string status)
+        {
+            NavigateTo("Follow-Ups / Reminders");
+
+            foreach (Control c in _contentPanel.Controls)
+            {
+                if (c is FollowUpsView fuv)
+                {
+                    fuv.ApplyDrillDown(status);
+                    break;
+                }
+            }
         }
 
         public void NavigateToFollowUpsWithCustomers(System.Collections.Generic.List<int> customerIds)

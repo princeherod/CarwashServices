@@ -18,10 +18,7 @@ public class ReportsController : ControllerBase
         _tenantFactory = tenantFactory;
     }
 
-    // ================================================================
-    //  GET: api/reports/service-revenue?companyId=1&range=ThisYear&service=All&vehicle=All
-    //  Returns KPIs + revenue-by-month + revenue-by-service + transactions
-    // ================================================================
+    // GET: api/reports/service-revenue?companyId=1&range=ThisYear&service=All&vehicle=All
     [HttpGet("service-revenue")]
     public async Task<IActionResult> GetServiceRevenueReport(
         [FromQuery] int companyId = 1,
@@ -33,8 +30,17 @@ public class ReportsController : ControllerBase
         var (from, to) = ResolveRange(range, today);
 
         var tenant = await _tenantFactory.CreateAsync(companyId);
-        var customers = await tenant.TenantCustomers.AsNoTracking().ToListAsync();
-        var products = await tenant.Products.AsNoTracking().ToListAsync();
+
+        // Only active customers and active services.
+        var customers = await tenant.TenantCustomers
+            .AsNoTracking()
+            .Where(c => !c.IsArchived)
+            .ToListAsync();
+
+        var products = await tenant.Products
+            .AsNoTracking()
+            .Where(p => !p.IsArchived)
+            .ToListAsync();
 
         var custById = customers.ToDictionary(c => c.TenantCustomerId);
         var priceById = products.GroupBy(p => p.ProductId)
@@ -42,10 +48,12 @@ public class ReportsController : ControllerBase
         var nameById = products.GroupBy(p => p.ProductId)
                                .ToDictionary(g => g.Key, g => g.First().ProductName);
 
-        // Filter requests by range + service + vehicle
+        // Only active requests within the range.
         var requests = await _db.ServiceRequests
             .AsNoTracking()
-            .Where(r => r.RequestedDate >= from && r.RequestedDate <= to)
+            .Where(r => !r.IsArchived
+                     && r.RequestedDate >= from
+                     && r.RequestedDate <= to)
             .ToListAsync();
 
         if (service != "All")
@@ -61,7 +69,7 @@ public class ReportsController : ControllerBase
             requests = requests.Where(r => custIds.Contains(r.CustomerId)).ToList();
         }
 
-        // ---- KPIs ----
+        // KPIs
         int totalTransactions = requests.Count;
         int completed = requests.Count(r => r.Status == "Completed");
         int pendingOrCancelled = requests.Count(r => r.Status == "Pending"
@@ -74,7 +82,7 @@ public class ReportsController : ControllerBase
 
         decimal avgTicket = completed > 0 ? totalRevenue / completed : 0m;
 
-        // ---- Revenue by month (within the range) ----
+        // Revenue by month
         var months = new List<object>();
         var cursor = new DateTime(from.Year, from.Month, 1);
         var last = new DateTime(to.Year, to.Month, 1);
@@ -93,7 +101,7 @@ public class ReportsController : ControllerBase
             cursor = cursor.AddMonths(1);
         }
 
-        // ---- Revenue by service ----
+        // Revenue by service
         var byService = new List<object>();
         foreach (var g in requests.Where(r => r.Status == "Completed").GroupBy(r => r.ServiceId))
         {
@@ -107,7 +115,7 @@ public class ReportsController : ControllerBase
         }
         byService = byService.OrderByDescending(x => ((dynamic)x).value).Cast<object>().ToList();
 
-        // ---- Transactions (top 200) ----
+        // Transactions (top 200)
         var txns = requests
             .OrderByDescending(r => r.RequestedDate)
             .Take(200)
@@ -117,7 +125,6 @@ public class ReportsController : ControllerBase
                 string sname = nameById.TryGetValue(r.ServiceId, out var nn) ? nn : $"Service {r.ServiceId}";
                 decimal amount = priceById.TryGetValue(r.ServiceId, out var pp) ? pp : 0m;
 
-                // Payment status logic — reuse completed
                 string payment = r.Status switch
                 {
                     "Completed" => "Paid",
@@ -141,7 +148,7 @@ public class ReportsController : ControllerBase
             })
             .ToList();
 
-        // ---- Dropdown options ----
+        // Dropdown options
         var serviceOptions = new List<string> { "All" };
         serviceOptions.AddRange(products.OrderBy(p => p.ProductName).Select(p => p.ProductName));
 

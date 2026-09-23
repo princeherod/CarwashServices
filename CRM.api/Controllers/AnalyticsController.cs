@@ -26,10 +26,20 @@ public class AnalyticsController : ControllerBase
         var monthStart = new DateTime(today.Year, today.Month, 1);
 
         var tenant = await _tenantFactory.CreateAsync(companyId);
-        var customers = await tenant.TenantCustomers.AsNoTracking().ToListAsync();
+
+        // Only active customers count toward the metrics.
+        var customers = await tenant.TenantCustomers
+            .AsNoTracking()
+            .Where(c => !c.IsArchived)
+            .ToListAsync();
+
         var totalCustomers = customers.Count;
 
-        var requests = await _db.ServiceRequests.AsNoTracking().ToListAsync();
+        // Only active service requests count.
+        var requests = await _db.ServiceRequests
+            .AsNoTracking()
+            .Where(r => !r.IsArchived)
+            .ToListAsync();
 
         var byCustomer = requests
             .Where(r => r.CustomerId > 0)
@@ -44,7 +54,12 @@ public class AnalyticsController : ControllerBase
             && r.CompletedDate.HasValue
             && r.CompletedDate.Value >= monthStart);
 
-        var tenantProducts = await tenant.Products.AsNoTracking().ToListAsync();
+        // Only active services are used for pricing.
+        var tenantProducts = await tenant.Products
+            .AsNoTracking()
+            .Where(p => !p.IsArchived)
+            .ToListAsync();
+
         var priceLookup = tenantProducts
             .GroupBy(p => p.ProductId)
             .ToDictionary(g => g.Key, g => g.First().UnitPrice);
@@ -63,6 +78,7 @@ public class AnalyticsController : ControllerBase
             if (priceLookup.TryGetValue(r.ServiceId, out var price))
                 totalRevenue += price;
         }
+
         decimal avgSpend = totalCustomers == 0 ? 0m : Math.Round(totalRevenue / totalCustomers, 2);
 
         var segments = SegmentCustomers(customers, requests);
@@ -87,8 +103,16 @@ public class AnalyticsController : ControllerBase
         var today = DateTime.Today;
 
         var tenant = await _tenantFactory.CreateAsync(companyId);
-        var customers = await tenant.TenantCustomers.AsNoTracking().ToListAsync();
-        var requests = await _db.ServiceRequests.AsNoTracking().ToListAsync();
+
+        var customers = await tenant.TenantCustomers
+            .AsNoTracking()
+            .Where(c => !c.IsArchived)
+            .ToListAsync();
+
+        var requests = await _db.ServiceRequests
+            .AsNoTracking()
+            .Where(r => !r.IsArchived)
+            .ToListAsync();
 
         var months = new List<object>();
         for (int i = 8; i >= 0; i--)
@@ -126,8 +150,16 @@ public class AnalyticsController : ControllerBase
     public async Task<IActionResult> GetSegments([FromQuery] int companyId = 1)
     {
         var tenant = await _tenantFactory.CreateAsync(companyId);
-        var customers = await tenant.TenantCustomers.AsNoTracking().ToListAsync();
-        var requests = await _db.ServiceRequests.AsNoTracking().ToListAsync();
+
+        var customers = await tenant.TenantCustomers
+            .AsNoTracking()
+            .Where(c => !c.IsArchived)
+            .ToListAsync();
+
+        var requests = await _db.ServiceRequests
+            .AsNoTracking()
+            .Where(r => !r.IsArchived)
+            .ToListAsync();
 
         var segments = SegmentCustomers(customers, requests);
 
@@ -159,8 +191,16 @@ public class AnalyticsController : ControllerBase
         [FromQuery] string segment = "AtRisk")
     {
         var tenant = await _tenantFactory.CreateAsync(companyId);
-        var customers = await tenant.TenantCustomers.AsNoTracking().ToListAsync();
-        var requests = await _db.ServiceRequests.AsNoTracking().ToListAsync();
+
+        var customers = await tenant.TenantCustomers
+            .AsNoTracking()
+            .Where(c => !c.IsArchived)
+            .ToListAsync();
+
+        var requests = await _db.ServiceRequests
+            .AsNoTracking()
+            .Where(r => !r.IsArchived)
+            .ToListAsync();
 
         var rows = SegmentCustomers(customers, requests)
             .Where(s => s.Segment == segment)
@@ -170,10 +210,9 @@ public class AnalyticsController : ControllerBase
         {
             var ids = rows.Select(r => r.CustomerId).ToHashSet();
 
-            // Latest follow-up per customer
             var latestFollowUps = await _db.FollowUps
                 .AsNoTracking()
-                .Where(f => ids.Contains(f.CustomerId))
+                .Where(f => ids.Contains(f.CustomerId) && !f.IsArchived)
                 .GroupBy(f => f.CustomerId)
                 .Select(g => g.OrderByDescending(f => f.FollowUpId).First())
                 .ToListAsync();
@@ -189,8 +228,6 @@ public class AnalyticsController : ControllerBase
                 r.LastFollowUpType = f.Type;
                 r.LastFollowUpDate = f.ScheduledDate;
 
-                // Only Expired re-opens the Follow Up button.
-                // Pending / Scheduled / Due today / Sent / Contacted / Redeemed all block.
                 bool isBlockingStatus =
                     !string.Equals(f.Status, "Expired", StringComparison.OrdinalIgnoreCase);
 
@@ -207,12 +244,29 @@ public class AnalyticsController : ControllerBase
     {
         var today = DateTime.Today;
         var tenant = await _tenantFactory.CreateAsync(companyId);
-        var products = await tenant.Products.AsNoTracking().ToListAsync();
-        var priceLookup = products.GroupBy(p => p.ProductId)
+
+        var products = await tenant.Products
+            .AsNoTracking()
+            .Where(p => !p.IsArchived)
+            .ToListAsync();
+
+        var archivedServiceIds = await tenant.Products
+            .AsNoTracking()
+            .Where(p => p.IsArchived)
+            .Select(p => p.ProductId)
+            .ToHashSetAsync();
+
+        var priceLookup = products
+            .GroupBy(p => p.ProductId)
             .ToDictionary(g => g.Key, g => g.First().UnitPrice);
 
-        var requests = await _db.ServiceRequests.AsNoTracking()
-            .Where(r => r.Status == "Completed" && r.CompletedDate != null)
+        // Only non-archived completed requests whose service is still active.
+        var requests = await _db.ServiceRequests
+            .AsNoTracking()
+            .Where(r => !r.IsArchived
+                     && r.Status == "Completed"
+                     && r.CompletedDate != null
+                     && !archivedServiceIds.Contains(r.ServiceId))
             .ToListAsync();
 
         var rows = new List<object>();
@@ -259,6 +313,7 @@ public class AnalyticsController : ControllerBase
     {
         var list = await _db.ServiceRequests
             .AsNoTracking()
+            .Where(r => !r.IsArchived)
             .OrderByDescending(r => r.RequestId)
             .Take(8)
             .ToListAsync();
@@ -282,7 +337,6 @@ public class AnalyticsController : ControllerBase
         public string Segment { get; set; } = "Active";
         public int DaysLeft { get; set; }
 
-        // Follow-up info
         public bool HasOpenFollowUp { get; set; }
         public string? LastFollowUpStatus { get; set; }
         public string? LastFollowUpType { get; set; }
@@ -290,9 +344,6 @@ public class AnalyticsController : ControllerBase
         public int? LastFollowUpId { get; set; }
     }
 
-    // NOTE the two different namespace casings below:
-    //   - TenantCustomer lives in  CRM.Domain.Entities  (capital D)
-    //   - ServiceRequest lives in  CRM.domain.Entities  (lowercase d)
     private static List<SegmentRow> SegmentCustomers(
         List<CRM.Domain.Entities.TenantCustomer> customers,
         List<CRM.domain.Entities.ServiceRequest> requests)

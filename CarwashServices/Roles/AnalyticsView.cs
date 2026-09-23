@@ -178,12 +178,12 @@ namespace CarwashServices.Roles
             for (int i = 0; i < _kpis.Length; i++) AddCell(kpiGrid, _kpis[i], i, i == _kpis.Length - 1);
 
             // Wire click targets now that all KPI cards exist.
-            _kpis[0].EnableCardClick("Manage Customers");
-            _kpis[1].EnableCardClick("Manage Customers");
-            _kpis[2].EnableCardClick("Follow-Ups / Reminders");
-            _kpis[3].EnableCardClick("View Reports");
-            _kpis[4].EnableCardClick("Manage Service Requests");
-            _kpis[5].EnableCardClick("View Reports");
+            _kpis[0].EnableCardClick(() => MainShell?.NavigateToCustomers("All"));
+            _kpis[1].EnableCardClick(() => MainShell?.NavigateToCustomers("Returning"));
+            _kpis[2].EnableCardClick(() => MainShell?.NavigateToFollowUps("Expired"));
+            _kpis[3].EnableCardClick(() => MainShell?.NavigateToModule("View Reports"));
+            _kpis[4].EnableCardClick(() => MainShell?.NavigateToServiceRequests("Completed"));
+            _kpis[5].EnableCardClick(() => MainShell?.NavigateToModule("View Reports"));
 
             _page.Controls.Add(kpiGrid, 0, 1);
 
@@ -197,7 +197,7 @@ namespace CarwashServices.Roles
             };
             _retentionChart = new AreaLineChart { Dock = DockStyle.Fill, LineColor = Ui.Accent };
             _retentionCard.Controls.Add(_retentionChart);
-            _retentionCard.EnableCardClick("View Reports");
+            _retentionCard.EnableCardClick(() => MainShell?.NavigateToModule("View Reports"));
             AddCell(row1, _retentionCard, 0, false);
 
             _washCard = new ChartCard
@@ -214,7 +214,7 @@ namespace CarwashServices.Roles
                 EmptyMax = 4
             };
             _washCard.Controls.Add(_washChart);
-            _washCard.EnableCardClick("Manage Customers");
+            _washCard.EnableCardClick(() => MainShell?.NavigateToCustomers("All"));
             AddCell(row1, _washCard, 1, false);
 
             _recentCard = new ChartCard
@@ -224,7 +224,7 @@ namespace CarwashServices.Roles
             };
             _activity = new ActivityList { Dock = DockStyle.Fill };
             _recentCard.Controls.Add(_activity);
-            _recentCard.EnableCardClick("Manage Service Requests");
+            _recentCard.EnableCardClick(() => MainShell?.NavigateToServiceRequests("All"));
             AddCell(row1, _recentCard, 2, true);
             _page.Controls.Add(row1, 0, 2);
 
@@ -254,7 +254,25 @@ namespace CarwashServices.Roles
             statusBody.Controls.Add(_donut, 0, 0);
             statusBody.Controls.Add(_legend, 1, 0);
             _statusCard.Controls.Add(statusBody);
-            _statusCard.EnableCardClick("Follow-Ups / Reminders");
+            _statusCard.EnableCardClick(() => MainShell?.NavigateToCustomers("AtRisk"));
+
+            // Donut segment clicks route to the specific segment.
+            _donut.Cursor = Cursors.Hand;
+            _donut.SegmentClicked += (s, label) =>
+            {
+                switch (label)
+                {
+                    case "Active":
+                        MainShell?.NavigateToCustomers("Active");
+                        break;
+                    case "At Risk":
+                        MainShell?.NavigateToCustomers("AtRisk");
+                        break;
+                    case "Lost":
+                        MainShell?.NavigateToCustomers("Lost");
+                        break;
+                }
+            };
             AddCell(row2, _statusCard, 0, false);
 
             _revenueCard = new ChartCard
@@ -275,7 +293,7 @@ namespace CarwashServices.Roles
                 EmptyText = "No revenue recorded yet"
             };
             _revenueCard.Controls.Add(_revenueChart);
-            _revenueCard.EnableCardClick("View Reports");
+            _revenueCard.EnableCardClick(() => MainShell?.NavigateToModule("View Reports"));
             AddCell(row2, _revenueCard, 1, true);
             _page.Controls.Add(row2, 0, 3);
 
@@ -303,7 +321,7 @@ namespace CarwashServices.Roles
             rows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             for (int i = 0; i < 3; i++) rows.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33f));
 
-            _rowAtRisk = new ActionRow("Follow-Ups / Reminders")
+            _rowAtRisk = new ActionRow(() => MainShell?.NavigateToCustomers("AtRisk"))
             {
                 Tone = Ui.Yellow,
                 Icon = IconKind.Alert,
@@ -315,7 +333,7 @@ namespace CarwashServices.Roles
             _rowAtRisk.Ghost.Click += (s, e) => Navigate("Manage Customers");
             _rowAtRisk.Solid.Click += (s, e) => FollowUpSegment("AtRisk");
 
-            _rowLost = new ActionRow("Follow-Ups / Reminders")
+            _rowLost = new ActionRow(() => MainShell?.NavigateToCustomers("Lost"))
             {
                 Tone = Ui.Red,
                 Icon = IconKind.UserX,
@@ -328,7 +346,7 @@ namespace CarwashServices.Roles
             _rowLost.Ghost.Click += (s, e) => Navigate("Manage Customers");
             _rowLost.Solid.Click += (s, e) => FollowUpSegment("Lost");
 
-            _rowRetention = new ActionRow("View Reports")
+            _rowRetention = new ActionRow(() => MainShell?.NavigateToModule("View Reports"))
             {
                 Tone = Ui.Accent,
                 Icon = IconKind.TrendDown,
@@ -857,13 +875,13 @@ namespace CarwashServices.Roles
         }
 
         // -----------------------------------------------------------------
-        //  RoundedCard — clickable via EnableCardClick(moduleKey).
-        //  The module key is a private field so the WinForms designer never
+        //  RoundedCard — clickable via EnableCardClick(Action).
+        //  The delegate is a private field so the WinForms designer never
         //  tries to serialise it.
         // -----------------------------------------------------------------
         private class RoundedCard : Panel
         {
-            private string _clickModule;
+            private Action _clickAction;
             private bool _hover;
             private bool _down;
 
@@ -876,10 +894,10 @@ namespace CarwashServices.Roles
 
             protected int S(double px) { return Ui.S(this, px); }
 
-            public void EnableCardClick(string moduleKey)
+            public void EnableCardClick(Action action)
             {
-                if (string.IsNullOrEmpty(moduleKey)) return;
-                _clickModule = moduleKey;
+                if (action == null) return;
+                _clickAction = action;
 
                 Cursor = Cursors.Hand;
                 Click += RaiseCardClick;
@@ -896,16 +914,12 @@ namespace CarwashServices.Roles
                     BindClickRecursive(inner);
             }
 
-            private void RaiseCardClick(object sender, EventArgs e)
-            {
-                if (string.IsNullOrEmpty(_clickModule)) return;
-                (FindForm() as MainForm)?.NavigateToModule(_clickModule);
-            }
+            private void RaiseCardClick(object sender, EventArgs e) => _clickAction?.Invoke();
 
             protected override void OnMouseEnter(EventArgs e)
             {
                 base.OnMouseEnter(e);
-                if (string.IsNullOrEmpty(_clickModule)) return;
+                if (_clickAction == null) return;
                 _hover = true;
                 Invalidate();
             }
@@ -913,7 +927,7 @@ namespace CarwashServices.Roles
             protected override void OnMouseLeave(EventArgs e)
             {
                 base.OnMouseLeave(e);
-                if (string.IsNullOrEmpty(_clickModule)) return;
+                if (_clickAction == null) return;
                 _hover = false;
                 _down = false;
                 Invalidate();
@@ -922,7 +936,7 @@ namespace CarwashServices.Roles
             protected override void OnMouseDown(MouseEventArgs e)
             {
                 base.OnMouseDown(e);
-                if (string.IsNullOrEmpty(_clickModule)) return;
+                if (_clickAction == null) return;
                 _down = true;
                 Invalidate();
             }
@@ -930,7 +944,7 @@ namespace CarwashServices.Roles
             protected override void OnMouseUp(MouseEventArgs e)
             {
                 base.OnMouseUp(e);
-                if (string.IsNullOrEmpty(_clickModule)) return;
+                if (_clickAction == null) return;
                 _down = false;
                 Invalidate();
             }
@@ -953,7 +967,7 @@ namespace CarwashServices.Roles
 
                 using (var path = Ui.Round(rect, radius))
                 {
-                    Color fill = !string.IsNullOrEmpty(_clickModule) && _hover
+                    Color fill = _clickAction != null && _hover
                         ? (_down ? Color.FromArgb(0xE9, 0xEE, 0xF6) : Color.FromArgb(0xF6, 0xF9, 0xFE))
                         : Color.White;
 
@@ -1379,6 +1393,8 @@ namespace CarwashServices.Roles
             public List<(string Label, double Value, Color Color)> Segments = new List<(string Label, double Value, Color Color)>();
             public string CenterTop = "0", CenterBottom = "Total";
 
+            public event EventHandler<string> SegmentClicked;
+
             public RingChart() { SetStyle(ControlStyles.Selectable, false); }
 
             protected override void OnPaint(PaintEventArgs e)
@@ -1419,6 +1435,48 @@ namespace CarwashServices.Roles
                 var cy = rect.Y + size / 2f;
                 Ui.Text(g, CenterTop, Ui.FTitle, Ui.Navy, new Rectangle((int)rect.X, (int)cy - S(26), size, S(34)), Ui.CenterF);
                 Ui.Text(g, CenterBottom, Ui.FSub, Ui.Muted, new Rectangle((int)rect.X, (int)cy + S(8), size, S(18)), Ui.CenterF);
+            }
+
+            protected override void OnMouseClick(MouseEventArgs e)
+            {
+                base.OnMouseClick(e);
+
+                if (Segments.Count == 0) return;
+
+                int size = Math.Min(Width, Height) - S(8);
+                if (size < 40) return;
+
+                var rect = new RectangleF((Width - size) / 2f, (Height - size) / 2f, size, size);
+                var center = new PointF(rect.X + rect.Width / 2f, rect.Y + rect.Height / 2f);
+
+                double dx = e.X - center.X;
+                double dy = e.Y - center.Y;
+                double dist = Math.Sqrt(dx * dx + dy * dy);
+
+                float thick = size * 0.17f;
+                double outerR = size / 2f;
+                double innerR = outerR - thick;
+
+                if (dist < innerR || dist > outerR) return;
+
+                double angle = Math.Atan2(dy, dx) * 180.0 / Math.PI;
+                angle += 90;
+                if (angle < 0) angle += 360;
+
+                double total = Segments.Sum(s => s.Value);
+                if (total <= 0) return;
+
+                double accum = 0;
+                foreach (var seg in Segments)
+                {
+                    double sweep = seg.Value / total * 360.0;
+                    if (angle >= accum && angle < accum + sweep)
+                    {
+                        SegmentClicked?.Invoke(this, seg.Label);
+                        return;
+                    }
+                    accum += sweep;
+                }
             }
         }
 
@@ -1524,18 +1582,18 @@ namespace CarwashServices.Roles
             public bool ShowTopBorder;
             public readonly RoundedButton Ghost, Solid;
 
-            private readonly string _clickModule;
+            private readonly Action _clickAction;
 
-            public ActionRow(string clickModule = null)
+            public ActionRow(Action onClick = null)
             {
-                _clickModule = clickModule;
+                _clickAction = onClick;
 
                 Ghost = new RoundedButton();
                 Solid = new RoundedButton { Solid = true };
                 Controls.Add(Ghost);
                 Controls.Add(Solid);
 
-                if (!string.IsNullOrEmpty(_clickModule))
+                if (_clickAction != null)
                 {
                     Cursor = Cursors.Hand;
                     Click += RaiseRowClick;
@@ -1544,8 +1602,7 @@ namespace CarwashServices.Roles
 
             private void RaiseRowClick(object sender, EventArgs e)
             {
-                if (string.IsNullOrEmpty(_clickModule)) return;
-                (FindForm() as MainForm)?.NavigateToModule(_clickModule);
+                _clickAction?.Invoke();
             }
 
             protected override void OnLayout(LayoutEventArgs e)

@@ -11,6 +11,7 @@ using System.Windows.Forms;
 using CarwashServices.Auth;
 using CarwashServices.Dialogs;
 using CarwashServices.Dtos;
+using CarwashServices.Shell;
 
 namespace CarwashServices.Roles
 {
@@ -32,7 +33,6 @@ namespace CarwashServices.Roles
         private static readonly Font StatusFont = new Font("Segoe UI Semibold", 9.5f);
         private static readonly Font ButtonFont = new Font("Segoe UI Semibold", 8.5f);
 
-        // ---- Actions column geometry ----
         private const int ActionsColW = 280;
         private const int ActionBtnW = 78;
         private const int ActionBtnH = 30;
@@ -40,6 +40,8 @@ namespace CarwashServices.Roles
         private const int ArchiveBtnW = 92;
 
         // ---- Layout ----
+        private const int MarginX = 30;
+        private const int TopMargin = 20;
         private const int RowHeight = 56;
         private const int PagerH = 48;
         private const int PageBottom = 24;
@@ -61,6 +63,7 @@ namespace CarwashServices.Roles
 
         private int _page = 1;
         private int _pageSize = 8;
+        private bool _relayouting;
 
         private Panel _root = null!;
         private Panel _contentPanel = null!;
@@ -96,19 +99,19 @@ namespace CarwashServices.Roles
 
             InitializeUI();
 
+            // FIX: turn on double-buffering for every child control.
+            Sidebar.EnableDoubleBuffering(this);
+
             Load += async (s, e) => await LoadServicesAsync();
         }
 
-        // ================================================================
-        //  UI
-        // ================================================================
         private void InitializeUI()
         {
             _root = new Panel
             {
                 Dock = DockStyle.Fill,
                 BackColor = PageBg,
-                Padding = new Padding(30, 20, 30, 20)
+                Padding = new Padding(MarginX, TopMargin, MarginX, TopMargin)
             };
             Controls.Add(_root);
 
@@ -368,8 +371,6 @@ namespace CarwashServices.Roles
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal
             };
 
-            // Column layout: two fill columns absorb the leftover width so the
-            // grid always fills the host. No spacer needed, no scrollbar.
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "ServiceId",
@@ -450,33 +451,9 @@ namespace CarwashServices.Roles
             };
             _contentPanel.Controls.Add(_pager);
 
-            void Relayout()
-            {
-                var w = _contentPanel.ClientSize.Width;
-                var h = _contentPanel.ClientSize.Height;
-
-                _addBtn.Location = new Point(w - _addBtn.Width, 30);
-
-                _tabBar.Width = w;
-                _chipBar.Width = w;
-                _filterCard.Width = w;
-
-                _refreshBtn.Location = new Point(w - 16 - _refreshBtn.Width, 28);
-                _searchBtn.Location = new Point(_refreshBtn.Left - 10 - _searchBtn.Width, 28);
-                _searchWrap.Width = Math.Max(120, _searchBtn.Left - 12 - _searchWrap.Left);
-
-                // Pager at the bottom, grid host occupies everything between
-                // GridTop and the pager.
-                _pager.SetBounds(0, h - PageBottom - PagerH, w, PagerH);
-                _gridHost.SetBounds(0, GridTop, w,
-                    Math.Max(0, (h - PageBottom - PagerH) - GridTop));
-
-                RecomputePageSize();
-                RenderCurrentPage();
-                RenderPager(CurrentTotalPages());
-            }
-            _contentPanel.Resize += (s, e) => Relayout();
-            Relayout();
+            // FIX: swap ClientSizeChanged for Resize.
+            _contentPanel.Resize += (s, e) => RelayoutUI();
+            RelayoutUI();
 
             StyleTabs();
         }
@@ -560,8 +537,67 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  DATA
+        //  LAYOUT
         // ================================================================
+        private void RelayoutUI()
+        {
+            if (_contentPanel == null || _relayouting) return;
+            _relayouting = true;
+            try
+            {
+                int prevW = -1;
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    int before = _contentPanel.ClientSize.Width;
+                    if (before == prevW) break;
+                    prevW = before;
+                    ApplyLayout();
+                }
+            }
+            finally
+            {
+                _relayouting = false;
+            }
+        }
+
+        private void ApplyLayout()
+        {
+            int fullW = _contentPanel.ClientSize.Width;
+            int h = _contentPanel.ClientSize.Height;
+            if (fullW < 300) return;
+
+            _contentPanel.SuspendLayout();
+            try
+            {
+                int w = fullW;
+
+                _addBtn.Location = new Point(w - _addBtn.Width, 30);
+
+                _tabBar.Width = w;
+                _chipBar.Width = w;
+                _filterCard.Width = w;
+
+                _refreshBtn.Location = new Point(w - 16 - _refreshBtn.Width, 28);
+                _searchBtn.Location = new Point(_refreshBtn.Left - 10 - _searchBtn.Width, 28);
+                _searchWrap.Width = Math.Max(120, _searchBtn.Left - 12 - _searchWrap.Left);
+
+                _pager.SetBounds(0, h - PageBottom - PagerH, w, PagerH);
+                _gridHost.SetBounds(0, GridTop, w,
+                    Math.Max(0, (h - PageBottom - PagerH) - GridTop));
+
+                RecomputePageSize();
+                RenderCurrentPage();
+                RenderPager(CurrentTotalPages());
+            }
+            finally
+            {
+                _contentPanel.ResumeLayout(false);
+                _contentPanel.PerformLayout();
+            }
+        }
+
+        // ================================================================
+        //  DATA        // ================================================================
         private async Task LoadServicesAsync()
         {
             try

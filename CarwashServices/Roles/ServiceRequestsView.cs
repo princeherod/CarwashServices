@@ -11,6 +11,7 @@ using System.Windows.Forms;
 using CarwashServices.Auth;
 using CarwashServices.Dialogs;
 using CarwashServices.Dtos;
+using CarwashServices.Shell;
 
 namespace CarwashServices.Roles
 {
@@ -43,12 +44,16 @@ namespace CarwashServices.Roles
 
         private static readonly bool TintBehindText = false;
 
+        // ---- Layout ----
         private const int PadX = 40;
         private const int TabTop = 114;
         private const int TabH = 44;
-        private const int FilterTop = 178;
+        private const int ChipTop = 166;
+        private const int ChipH = 40;
+        private const int ChipGap = 8;
+        private const int DrillDownChipH = 36;
+        private const int FilterTop = 214;
         private const int FilterH = 76;
-        private const int GridTop = FilterTop + FilterH + 12;
         private const int PagerH = 48;
         private const int PageBottom = 24;
 
@@ -84,7 +89,15 @@ namespace CarwashServices.Roles
 
         private int _page = 1;
         private int _pageSize = 8;
+        private bool _relayouting;
 
+        // ---- Drill-down ----
+        private Panel _drillDownChipBar = null!;
+        private Panel _drillDownChip = null!;
+        private Label _drillDownChipLabel = null!;
+        private string _drillDownFilter = "";   // "" means no drill-down active
+
+        // ---- UI ----
         private Panel _contentPanel = null!;
         private Panel _gridHost = null!;
         private DataGridView _grid = null!;
@@ -95,6 +108,8 @@ namespace CarwashServices.Roles
         private Label _tabActive = null!;
         private Label _tabArchived = null!;
         private Panel _tabUnderline = null!;
+        private Panel _tabBar = null!;
+        private Panel _filterCard = null!;
 
         private string CurrentUserName =>
             string.IsNullOrWhiteSpace(SessionUser.FullName) ? "Admin" : SessionUser.FullName;
@@ -110,6 +125,8 @@ namespace CarwashServices.Roles
 
             InitializeUI();
 
+            Sidebar.EnableDoubleBuffering(this);
+
             Load += async (s, e) =>
             {
                 await LoadLookupsAsync();
@@ -117,6 +134,9 @@ namespace CarwashServices.Roles
             };
         }
 
+        // ================================================================
+        //  UI
+        // ================================================================
         private void InitializeUI()
         {
             _contentPanel = new Panel { Dock = DockStyle.Fill, BackColor = PageBg };
@@ -166,27 +186,28 @@ namespace CarwashServices.Roles
             _newRequestBtn.Click += (s, e) => OpenNewRequestDialog();
             _contentPanel.Controls.Add(_newRequestBtn);
 
-            var tabBar = new Panel
+            // ---- Tab strip ----
+            _tabBar = new Panel
             {
                 Location = new Point(PadX, TabTop),
                 Height = TabH,
                 BackColor = Color.White,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            tabBar.Paint += (s, e) =>
+            _tabBar.Paint += (s, e) =>
             {
                 using var pen = new Pen(CardBorder);
-                e.Graphics.DrawLine(pen, 0, tabBar.Height - 1, tabBar.Width, tabBar.Height - 1);
+                e.Graphics.DrawLine(pen, 0, _tabBar.Height - 1, _tabBar.Width, _tabBar.Height - 1);
             };
-            _contentPanel.Controls.Add(tabBar);
+            _contentPanel.Controls.Add(_tabBar);
 
             const int TabWidth = 170;
             const int TabGap = 40;
 
             _tabActive = MakeTab("Active Requests", 0, TabWidth);
             _tabArchived = MakeTab("Archived Requests", TabWidth + TabGap, TabWidth);
-            tabBar.Controls.Add(_tabActive);
-            tabBar.Controls.Add(_tabArchived);
+            _tabBar.Controls.Add(_tabActive);
+            _tabBar.Controls.Add(_tabArchived);
 
             _tabUnderline = new Panel
             {
@@ -195,7 +216,7 @@ namespace CarwashServices.Roles
                 BackColor = Blue,
                 Location = new Point(_tabActive.Left, TabH - 2)
             };
-            tabBar.Controls.Add(_tabUnderline);
+            _tabBar.Controls.Add(_tabUnderline);
 
             _tabActive.Click += async (s, e) =>
             {
@@ -212,30 +233,90 @@ namespace CarwashServices.Roles
                 await LoadRequestsAsync();
             };
 
+            // ---- Status chips ----
             _chipBar = new Panel
             {
-                Location = new Point(PadX, FilterTop - 56),
-                Height = 40,
+                Location = new Point(PadX, ChipTop),
+                Height = ChipH,
                 BackColor = PageBg,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _contentPanel.Controls.Add(_chipBar);
             BuildChips();
 
-            var filterCard = new Panel
+            // ---- Drill-down chip (visible only when a filter is active) ----
+            _drillDownChipBar = new Panel
+            {
+                Location = new Point(PadX, ChipTop + ChipH + ChipGap),
+                Height = DrillDownChipH,
+                BackColor = PageBg,
+                Visible = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _contentPanel.Controls.Add(_drillDownChipBar);
+
+            _drillDownChip = new Panel
+            {
+                Location = new Point(0, 0),
+                Size = new Size(240, 32),
+                BackColor = BlueSoft,
+                Cursor = Cursors.Hand
+            };
+            _drillDownChip.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using var path = RoundedRect(
+                    new Rectangle(0, 0, _drillDownChip.Width - 1, _drillDownChip.Height - 1), 16);
+                using var fill = new SolidBrush(_drillDownChip.BackColor);
+                e.Graphics.FillPath(fill, path);
+            };
+            _drillDownChip.Click += (s, e) => ClearDrillDown();
+
+            _drillDownChipLabel = new Label
+            {
+                Text = "",
+                ForeColor = Blue,
+                BackColor = Color.Transparent,
+                Font = new Font("Segoe UI Semibold", 9f),
+                AutoSize = false,
+                Location = new Point(14, 0),
+                Size = new Size(190, 32),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            _drillDownChip.Controls.Add(_drillDownChipLabel);
+
+            var clearLbl = new Label
+            {
+                Text = "×",
+                ForeColor = Blue,
+                BackColor = Color.Transparent,
+                Font = new Font("Segoe UI Semibold", 12f),
+                AutoSize = false,
+                Location = new Point(210, 0),
+                Size = new Size(24, 32),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Cursor = Cursors.Hand
+            };
+            clearLbl.Click += (s, e) => ClearDrillDown();
+            _drillDownChip.Controls.Add(clearLbl);
+
+            _drillDownChipBar.Controls.Add(_drillDownChip);
+
+            // ---- Filter card ----
+            _filterCard = new Panel
             {
                 BackColor = Color.White,
                 Location = new Point(PadX, FilterTop),
                 Height = FilterH
             };
-            filterCard.Paint += (s, e) =>
+            _filterCard.Paint += (s, e) =>
             {
                 using var pen = new Pen(CardBorder);
-                e.Graphics.DrawRectangle(pen, 0, 0, filterCard.Width - 1, filterCard.Height - 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, _filterCard.Width - 1, _filterCard.Height - 1);
             };
-            _contentPanel.Controls.Add(filterCard);
+            _contentPanel.Controls.Add(_filterCard);
 
-            filterCard.Controls.Add(new Label
+            _filterCard.Controls.Add(new Label
             {
                 Text = "Search",
                 ForeColor = Muted,
@@ -285,7 +366,7 @@ namespace CarwashServices.Roles
                     ApplyFilter(resetPage: true);
                 }
             };
-            filterCard.Controls.Add(searchWrap);
+            _filterCard.Controls.Add(searchWrap);
 
             var searchBtn = new Button
             {
@@ -300,7 +381,7 @@ namespace CarwashServices.Roles
             };
             searchBtn.FlatAppearance.BorderSize = 0;
             searchBtn.Click += (s, e) => ApplyFilter(resetPage: true);
-            filterCard.Controls.Add(searchBtn);
+            _filterCard.Controls.Add(searchBtn);
 
             var refreshBtn = new Button
             {
@@ -318,12 +399,13 @@ namespace CarwashServices.Roles
                 await LoadLookupsAsync();
                 await LoadRequestsAsync();
             };
-            filterCard.Controls.Add(refreshBtn);
+            _filterCard.Controls.Add(refreshBtn);
 
+            // ---- Grid host ----
             _gridHost = new Panel
             {
                 BackColor = Color.White,
-                Location = new Point(PadX, GridTop),
+                Location = new Point(PadX, FilterTop + FilterH + 12),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
             _contentPanel.Controls.Add(_gridHost);
@@ -371,14 +453,7 @@ namespace CarwashServices.Roles
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal
             };
 
-            // Column sizing: fixed columns keep their widths so timestamps and
-            // names never ellipsise; two Fill columns absorb the remaining space.
-            _grid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "RequestId",
-                HeaderText = "ID",
-                Width = 70
-            });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "RequestId", HeaderText = "ID", Width = 70 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Customer",
@@ -393,34 +468,12 @@ namespace CarwashServices.Roles
                 HeaderText = "SERVICE",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 180,
-                FillWeight = 100
+                FillWeight = 90
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "Scheduled",
-                HeaderText = "SCHEDULED",
-                Width = 170,
-                MinimumWidth = 170
-            });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "Staff",
-                HeaderText = "STAFF",
-                Width = 150,
-                MinimumWidth = 150
-            });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "Priority",
-                HeaderText = "PRIORITY",
-                Width = 100
-            });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "Status",
-                HeaderText = "STATUS",
-                Width = 120
-            });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Scheduled", HeaderText = "SCHEDULED", Width = 170, MinimumWidth = 170 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Staff", HeaderText = "STAFF", Width = 150, MinimumWidth = 150 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Priority", HeaderText = "PRIORITY", Width = 100 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "STATUS", Width = 120 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Actions",
@@ -441,10 +494,10 @@ namespace CarwashServices.Roles
             _grid.CellMouseClick += Grid_CellMouseClick;
             _gridHost.Controls.Add(_grid);
 
+            // ---- Pager ----
             _pager = new Panel
             {
                 BackColor = Color.White,
-                Location = new Point(PadX, 0),
                 Height = PagerH,
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -455,31 +508,8 @@ namespace CarwashServices.Roles
             };
             _contentPanel.Controls.Add(_pager);
 
-            void Relayout()
-            {
-                var w = _contentPanel.ClientSize.Width;
-                var h = _contentPanel.ClientSize.Height;
-                int contentW = Math.Max(0, w - 2 * PadX);
-
-                _newRequestBtn.Location = new Point(w - _newRequestBtn.Width - PadX, 30);
-                tabBar.Width = contentW;
-                _chipBar.Width = contentW;
-
-                filterCard.Width = contentW;
-                refreshBtn.Location = new Point(contentW - 16 - refreshBtn.Width, 28);
-                searchBtn.Location = new Point(refreshBtn.Left - 10 - searchBtn.Width, 28);
-                searchWrap.Width = Math.Max(120, searchBtn.Left - 12 - searchWrap.Left);
-
-                _pager.SetBounds(PadX, h - PageBottom - PagerH, contentW, PagerH);
-                _gridHost.SetBounds(PadX, GridTop, contentW,
-                    Math.Max(0, (h - PageBottom - PagerH) - GridTop));
-
-                RecomputePageSize();
-                RenderCurrentPage();
-                RenderPager(CurrentTotalPages());
-            }
-            _contentPanel.Resize += (s, e) => Relayout();
-            Relayout();
+            _contentPanel.Resize += (s, e) => RelayoutUI();
+            RelayoutUI();
 
             StyleTabs();
         }
@@ -523,9 +553,18 @@ namespace CarwashServices.Roles
             b.FlatAppearance.MouseDownBackColor = Color.FromArgb(0xE9, 0xEE, 0xF6);
         }
 
+        // ================================================================
+        //  STATUS CHIPS
+        // ================================================================
         private void BuildChips()
         {
+            if (_chipBar == null) return;
+
             _chipBar.Controls.Clear();
+
+            if (string.IsNullOrWhiteSpace(_activeStatus))
+                _activeStatus = "All";
+
             var statuses = new[] { "All", "Pending", "Assigned", "InProgress", "Completed", "Cancelled" };
             int x = 0;
 
@@ -542,6 +581,7 @@ namespace CarwashServices.Roles
                     TabStop = false,
                     UseVisualStyleBackColor = false
                 };
+
                 bool active = st == _activeStatus;
                 chip.BackColor = active ? Navy : Color.White;
                 chip.ForeColor = active ? Color.White : Navy;
@@ -551,15 +591,153 @@ namespace CarwashServices.Roles
                 var captured = st;
                 chip.Click += (s, e) =>
                 {
+                    // A manual chip click clears any active drill-down.
                     _activeStatus = captured;
+                    _drillDownFilter = "";
+                    if (_drillDownChipBar != null) _drillDownChipBar.Visible = false;
+
                     BuildChips();
+                    RelayoutUI();
                     ApplyFilter(resetPage: true);
                 };
+
                 _chipBar.Controls.Add(chip);
                 x += 130;
             }
         }
 
+        // ================================================================
+        //  DRILL-DOWN
+        // ================================================================
+        public void ApplyDrillDown(string status)
+        {
+            _drillDownFilter = string.IsNullOrWhiteSpace(status) || status == "All"
+                ? ""
+                : status;
+
+            if (!string.IsNullOrEmpty(_drillDownFilter))
+            {
+                _activeStatus = _drillDownFilter;
+                if (_drillDownChipLabel != null)
+                    _drillDownChipLabel.Text = $"Status: {_drillDownFilter}";
+                if (_drillDownChipBar != null)
+                    _drillDownChipBar.Visible = _tab == ListTab.Active;
+            }
+            else
+            {
+                _activeStatus = "All";
+                if (_drillDownChipLabel != null) _drillDownChipLabel.Text = "";
+                if (_drillDownChipBar != null) _drillDownChipBar.Visible = false;
+            }
+
+            _page = 1;
+            BuildChips();
+            RelayoutUI();
+            ApplyFilter(resetPage: true);
+        }
+
+        public void ClearDrillDown()
+        {
+            ApplyDrillDown("All");
+        }
+
+        // ================================================================
+        //  LAYOUT
+        // ================================================================
+        private void RelayoutUI()
+        {
+            if (_contentPanel == null || _relayouting) return;
+            _relayouting = true;
+            try
+            {
+                int prevW = -1;
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    int before = _contentPanel.ClientSize.Width;
+                    if (before == prevW) break;
+                    prevW = before;
+                    ApplyLayout();
+                }
+            }
+            finally
+            {
+                _relayouting = false;
+            }
+        }
+
+        private void ApplyLayout()
+        {
+            int fullW = _contentPanel.ClientSize.Width;
+            int h = _contentPanel.ClientSize.Height;
+            if (fullW < 300) return;
+
+            int contentW = Math.Max(0, fullW - 2 * PadX);
+            int w = fullW;
+
+            _contentPanel.SuspendLayout();
+            try
+            {
+                // New Request button
+                _newRequestBtn.Location = new Point(w - _newRequestBtn.Width - PadX, 30);
+
+                // Tab strip
+                _tabBar.SetBounds(PadX, TabTop, contentW, TabH);
+
+                // Status chips
+                _chipBar.SetBounds(PadX, ChipTop, contentW, ChipH);
+
+                // Drill-down chip row — only occupies space when it's visible.
+                bool showDrill = _drillDownChipBar != null && _drillDownChipBar.Visible;
+                int drillAreaH = showDrill ? DrillDownChipH + ChipGap : 0;
+
+                if (_drillDownChipBar != null)
+                {
+                    _drillDownChipBar.SetBounds(PadX, ChipTop + ChipH + ChipGap,
+                        contentW, DrillDownChipH);
+                    _drillDownChipBar.Visible = showDrill;
+                }
+
+                // Filter card shifts down when the drill-down chip is visible.
+                int filterY = FilterTop + drillAreaH;
+                _filterCard.SetBounds(PadX, filterY, contentW, FilterH);
+
+                var refreshBtn = _filterCard.Controls.OfType<Button>()
+                    .FirstOrDefault(b => b.Text == "Refresh");
+                var searchBtn = _filterCard.Controls.OfType<Button>()
+                    .FirstOrDefault(b => b.Text == "Search");
+                var searchWrap = _filterCard.Controls.OfType<Panel>()
+                    .FirstOrDefault(p => p.Controls.OfType<TextBox>().Any());
+
+                if (refreshBtn != null)
+                    refreshBtn.Location = new Point(contentW - 16 - refreshBtn.Width, 28);
+
+                if (searchBtn != null && refreshBtn != null)
+                    searchBtn.Location = new Point(refreshBtn.Left - 10 - searchBtn.Width, 28);
+
+                if (searchWrap != null && searchBtn != null)
+                    searchWrap.Width = Math.Max(120, searchBtn.Left - 12 - searchWrap.Left);
+
+                // Grid host shifts down by the same amount.
+                int gridTop = filterY + FilterH + 12;
+
+                _pager.SetBounds(PadX, h - PageBottom - PagerH, contentW, PagerH);
+                _gridHost.SetBounds(PadX, gridTop, contentW,
+                    Math.Max(0, (h - PageBottom - PagerH) - gridTop));
+            }
+            finally
+            {
+                _contentPanel.ResumeLayout(false);
+                _contentPanel.PerformLayout();
+            }
+
+            RecomputePageSize();
+            RenderCurrentPage();
+            RenderPager(CurrentTotalPages());
+        }
+
+        // ================================================================
+        //  DATA
+        // ================================================================
         private async Task LoadLookupsAsync()
         {
             try
@@ -614,6 +792,7 @@ namespace CarwashServices.Roles
 
                 _all = await _http.GetFromJsonAsync<List<ServiceRequestDto>>(url) ?? new();
 
+                BuildChips();
                 ApplyFilter(resetPage: true);
             }
             catch (Exception ex)
@@ -629,6 +808,9 @@ namespace CarwashServices.Roles
             }
         }
 
+        // ================================================================
+        //  FILTER + PAGINATION
+        // ================================================================
         private void ApplyFilter(bool resetPage)
         {
             if (InvokeRequired)
@@ -639,11 +821,17 @@ namespace CarwashServices.Roles
 
             var search = _searchBox.Text?.Trim().ToLower() ?? "";
 
+            // Determine the effective status filter — drill-down takes priority.
+            var effectiveStatus = !string.IsNullOrWhiteSpace(_drillDownFilter)
+                ? _drillDownFilter
+                : _activeStatus;
+
             _filtered = _all.Where(r =>
             {
                 if (_tab == ListTab.Active &&
-                    _activeStatus != "All" &&
-                    !string.Equals(r.Status, _activeStatus, StringComparison.OrdinalIgnoreCase))
+                    !string.IsNullOrWhiteSpace(effectiveStatus) &&
+                    effectiveStatus != "All" &&
+                    !string.Equals(r.Status, effectiveStatus, StringComparison.OrdinalIgnoreCase))
                     return false;
 
                 if (string.IsNullOrEmpty(search)) return true;
@@ -664,6 +852,7 @@ namespace CarwashServices.Roles
 
             int totalPages = CurrentTotalPages();
             if (_page > totalPages) _page = totalPages;
+            if (_page < 1) _page = 1;
 
             RenderCurrentPage();
             RenderPager(totalPages);
@@ -776,7 +965,9 @@ namespace CarwashServices.Roles
                 items.Add(("›", _page + 1, false, _page < totalPages));
 
                 const int bw = 36, bh = 34, gap = 6;
-                int x = _pager.Width - 16 - (items.Count * bw + (items.Count - 1) * gap);
+                int pagerW = _pager.ClientSize.Width;
+                int totalButtonsW = items.Count * bw + (items.Count - 1) * gap;
+                int x = Math.Max(16, pagerW - 16 - totalButtonsW);
 
                 foreach (var it in items)
                 {
@@ -787,7 +978,7 @@ namespace CarwashServices.Roles
                     {
                         _page = target;
                         RenderCurrentPage();
-                        RenderPager(totalPages);
+                        RenderPager(CurrentTotalPages());
                     };
                     _pager.Controls.Add(b);
                     x += bw + gap;
@@ -816,6 +1007,9 @@ namespace CarwashServices.Roles
             return b;
         }
 
+        // ================================================================
+        //  CELL PAINTING
+        // ================================================================
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
@@ -1017,6 +1211,9 @@ namespace CarwashServices.Roles
             _ => (NeutralSoft, Muted)
         };
 
+        // ================================================================
+        //  HOVER + CLICK
+        // ================================================================
         private void Grid_CellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0 ||
@@ -1097,6 +1294,9 @@ namespace CarwashServices.Roles
             }
         }
 
+        // ================================================================
+        //  ACTIONS
+        // ================================================================
         private async void OpenNewRequestDialog()
         {
             using var dlg = new ServiceRequestEditDialog(null, _customerLookup, _serviceLookup);

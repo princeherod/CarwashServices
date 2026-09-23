@@ -65,6 +65,12 @@ namespace CarwashServices.Roles
         private Label _tableHeaderLbl;
         private Label _emptyLbl;
 
+        // ---- Drill-down filter state ----
+        private string _activeGridFilter = "";          // "" = no filter
+        private Panel _filterChipBar;
+        private Panel _filterChip;
+        private Label _filterChipLabel;
+
         // ---- Sub-view hosting ----
         private Panel _extraHost;
         private UserControl _currentExtra;
@@ -296,10 +302,10 @@ namespace CarwashServices.Roles
         {
             _kpiRow = Section(new Panel { BackColor = PageBg }, KpiRowHeight);
 
-            _kpiTxn = AddKpiCard("Total Transactions", out _kpiTxnSub, "Manage Service Requests");
-            _kpiRev = AddKpiCard("Total Revenue", out _kpiRevSub, "View Reports");
-            _kpiTicket = AddKpiCard("Avg. Ticket Size", out _kpiTicketSub, "View Reports");
-            _kpiPending = AddKpiCard("Pending / Cancelled", out _kpiPendingSub, "Manage Service Requests");
+            _kpiTxn = AddKpiCard("Total Transactions", out _kpiTxnSub, "");
+            _kpiRev = AddKpiCard("Total Revenue", out _kpiRevSub, "Paid");
+            _kpiTicket = AddKpiCard("Avg. Ticket Size", out _kpiTicketSub, "Completed");
+            _kpiPending = AddKpiCard("Pending / Cancelled", out _kpiPendingSub, "NotCompleted");
 
             _kpiRow.Resize += (s, e) =>
             {
@@ -311,7 +317,7 @@ namespace CarwashServices.Roles
             };
         }
 
-        private Label AddKpiCard(string title, out Label subtitle, string clickModule)
+        private Label AddKpiCard(string title, out Label subtitle, string filterKey)
         {
             var card = new CardPanel();
             _kpiRow.Controls.Add(card);
@@ -346,10 +352,10 @@ namespace CarwashServices.Roles
             };
             card.Controls.Add(subtitle);
 
-            if (!string.IsNullOrEmpty(clickModule))
+            if (!string.IsNullOrEmpty(filterKey))
             {
-                string captured = clickModule;
-                BindClick(card, () => Navigate(captured));
+                string captured = filterKey;
+                BindClick(card, () => ApplyGridFilter(captured));
             }
 
             return val;
@@ -413,6 +419,63 @@ namespace CarwashServices.Roles
                 UseMnemonic = false
             };
             _tableCard.Controls.Add(_tableHeaderLbl);
+
+            // ---- Drill-down filter chip (hidden until a filter is set) ----
+            _filterChipBar = new Panel
+            {
+                Location = new Point(20, 40),
+                Height = 34,
+                BackColor = Color.White,
+                Visible = false
+            };
+            _tableCard.Controls.Add(_filterChipBar);
+
+            _filterChip = new Panel
+            {
+                Location = new Point(0, 0),
+                Size = new Size(260, 30),
+                BackColor = Color.FromArgb(0xE3, 0xF1, 0xFD),
+                Cursor = Cursors.Hand
+            };
+            _filterChip.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using var path = RoundedRect(
+                    new Rectangle(0, 0, _filterChip.Width - 1, _filterChip.Height - 1), 15);
+                using var fill = new SolidBrush(_filterChip.BackColor);
+                e.Graphics.FillPath(fill, path);
+            };
+            _filterChip.Click += (s, e) => ClearGridFilter();
+
+            _filterChipLabel = new Label
+            {
+                Text = "",
+                ForeColor = Blue,
+                BackColor = Color.Transparent,
+                Font = new Font("Segoe UI Semibold", 9f),
+                AutoSize = false,
+                Location = new Point(14, 0),
+                Size = new Size(210, 30),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            _filterChip.Controls.Add(_filterChipLabel);
+
+            var clearLbl = new Label
+            {
+                Text = "×",
+                ForeColor = Blue,
+                BackColor = Color.Transparent,
+                Font = new Font("Segoe UI Semibold", 12f),
+                AutoSize = false,
+                Location = new Point(230, 0),
+                Size = new Size(24, 30),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Cursor = Cursors.Hand
+            };
+            clearLbl.Click += (s, e) => ClearGridFilter();
+            _filterChip.Controls.Add(clearLbl);
+
+            _filterChipBar.Controls.Add(_filterChip);
 
             _grid = new DataGridView
             {
@@ -502,7 +565,6 @@ namespace CarwashServices.Roles
             };
 
             _tableCard.Controls.Add(_grid);
-            Inset(_tableCard, _grid, 20, 44, 20, 20);
 
             _emptyLbl = new Label
             {
@@ -515,11 +577,31 @@ namespace CarwashServices.Roles
             };
             _tableCard.Controls.Add(_emptyLbl);
             _emptyLbl.BringToFront();
-            _tableCard.Resize += (s, e) => CenterEmptyLabel();
+
+            LayoutTableCard();
+            _tableCard.Resize += (s, e) => LayoutTableCard();
+        }
+
+        private void LayoutTableCard()
+        {
+            if (_tableCard == null || _grid == null) return;
+
+            int top = _filterChipBar != null && _filterChipBar.Visible ? 80 : 44;
+            _grid.SetBounds(20, top,
+                Math.Max(0, _tableCard.ClientSize.Width - 40),
+                Math.Max(0, _tableCard.ClientSize.Height - top - 20));
+
+            if (_emptyLbl != null)
+            {
+                _emptyLbl.Location = new Point(
+                    Math.Max(0, (_tableCard.Width - _emptyLbl.Width) / 2),
+                    Math.Max(top + 40, (_tableCard.Height - _emptyLbl.Height) / 2 + 20));
+            }
         }
 
         private void CenterEmptyLabel()
         {
+            if (_emptyLbl == null || _tableCard == null) return;
             _emptyLbl.Location = new Point(
                 Math.Max(0, (_tableCard.Width - _emptyLbl.Width) / 2),
                 Math.Max(90, (_tableCard.Height - _emptyLbl.Height) / 2 + 20));
@@ -728,6 +810,111 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
+        //  GRID FILTER (DRILL-DOWN)
+        // ================================================================
+        private void ApplyGridFilter(string filterKey)
+        {
+            if (_filterChipBar == null) return;
+
+            // Clicking the same KPI twice clears the filter.
+            if (_activeGridFilter == filterKey)
+            {
+                ClearGridFilter();
+                return;
+            }
+
+            _activeGridFilter = filterKey ?? "";
+
+            bool hasFilter = !string.IsNullOrEmpty(_activeGridFilter);
+            _filterChipBar.Visible = hasFilter;
+
+            if (hasFilter)
+                _filterChipLabel.Text = "Filtered by: " + DisplayFilterName(_activeGridFilter);
+
+            LayoutTableCard();
+            RebindGridRows();
+            _filterChipBar.Invalidate(true);
+        }
+
+        private void ClearGridFilter()
+        {
+            _activeGridFilter = "";
+            if (_filterChipBar != null) _filterChipBar.Visible = false;
+            LayoutTableCard();
+            RebindGridRows();
+        }
+
+        private static string DisplayFilterName(string key) => key switch
+        {
+            "Paid" => "Paid",
+            "Completed" => "Completed",
+            "NotCompleted" => "Pending / Cancelled",
+            _ => key
+        };
+
+        private IEnumerable<ReportTxnDto> FilteredTransactions()
+        {
+            IEnumerable<ReportTxnDto> rows = _data?.Transactions ?? new List<ReportTxnDto>();
+
+            switch (_activeGridFilter)
+            {
+                case "Paid":
+                    rows = rows.Where(t => t.Payment == "Paid");
+                    break;
+                case "Completed":
+                    rows = rows.Where(t => t.Status == "Completed");
+                    break;
+                case "NotCompleted":
+                    rows = rows.Where(t => t.Status == "Pending"
+                                        || t.Status == "Cancelled"
+                                        || t.Status == "InProgress");
+                    break;
+                case "":
+                default:
+                    break;
+            }
+
+            return rows;
+        }
+
+        private void RebindGridRows()
+        {
+            if (_grid == null || _data == null) return;
+
+            var list = FilteredTransactions().ToList();
+
+            _grid.SuspendLayout();
+            _grid.Rows.Clear();
+            foreach (var t in list)
+            {
+                _grid.Rows.Add(
+                    t.Txn, t.Date, t.Customer, t.Vehicle, t.Service,
+                    t.Amount, t.Payment, t.Status);
+            }
+            _grid.ClearSelection();
+            _grid.ResumeLayout();
+
+            if (_emptyLbl != null) _emptyLbl.Visible = list.Count == 0;
+
+            if (_tableCard != null)
+            {
+                int topPad = _filterChipBar != null && _filterChipBar.Visible ? 80 : 44;
+                _tableCard.Height = Math.Clamp(topPad + 40 + list.Count * 44 + 24, 260, 640);
+            }
+
+            LayoutTableCard();
+
+            if (_tableHeaderLbl != null)
+            {
+                string filterTag = string.IsNullOrEmpty(_activeGridFilter)
+                    ? ""
+                    : " · Filtered: " + DisplayFilterName(_activeGridFilter);
+                _tableHeaderLbl.Text =
+                    $"Service & Revenue Report · {_lastSubtitle}{filterTag} · {list.Count:N0} rows";
+            }
+        }
+
+        // ================================================================
         //  DATA LOAD (revenue only)
         // ================================================================
         private async Task LoadAsync()
@@ -828,22 +1015,6 @@ namespace CarwashServices.Roles
             _lineChart.Points = months.Select(m => (m.Label, m.Value)).ToList();
             _barChart.Bars = _data.ByService.Select(s => (s.Label, s.Value)).ToList();
 
-            _grid.SuspendLayout();
-            _grid.Rows.Clear();
-            foreach (var t in _data.Transactions)
-            {
-                _grid.Rows.Add(
-                    t.Txn, t.Date, t.Customer, t.Vehicle, t.Service,
-                    t.Amount, t.Payment, t.Status);
-            }
-            _grid.ClearSelection();
-            _grid.ResumeLayout();
-
-            int rows = _grid.Rows.Count;
-            _emptyLbl.Visible = rows == 0;
-            _tableCard.Height = Math.Clamp(44 + 40 + rows * 44 + 24, 260, 640);
-            CenterEmptyLabel();
-
             var rangeLabel = _dateRangeCombo.SelectedItem?.ToString() ?? "This Year";
             var filters = new List<string>();
             if (_serviceCombo.SelectedIndex > 0) filters.Add(_serviceCombo.SelectedItem?.ToString() ?? "");
@@ -851,7 +1022,9 @@ namespace CarwashServices.Roles
             var filterText = filters.Count > 0 ? " · " + string.Join(", ", filters) : "";
 
             _lastSubtitle = $"{rangeLabel}{filterText} · Generated at {_data.GeneratedAt}";
-            _tableHeaderLbl.Text = $"Service & Revenue Report · {_lastSubtitle} · {rows:N0} rows";
+
+            // Preserve the current drill-down filter across a reload.
+            RebindGridRows();
         }
 
         // ================================================================
@@ -927,13 +1100,13 @@ namespace CarwashServices.Roles
         };
 
         // ================================================================
-        //  EXPORT
+        //  EXPORT (respects the active filter)
         // ================================================================
         private bool HasRows
         {
             get
             {
-                if (_currentReportType == RevenueReport) return _data.Transactions.Any();
+                if (_currentReportType == RevenueReport) return FilteredTransactions().Any();
                 if (_currentExtra is IExportableReport er) return er.HasData;
                 return false;
             }
@@ -963,7 +1136,7 @@ namespace CarwashServices.Roles
                 {
                     var inv = CultureInfo.InvariantCulture;
                     sb.AppendLine("Txn #,Date,Customer,Vehicle,Service,Amount,Payment,Status");
-                    foreach (var t in _data.Transactions)
+                    foreach (var t in FilteredTransactions())
                     {
                         sb.AppendLine(
                             $"{Csv(t.Txn)},{Csv(t.Date)},{Csv(t.Customer)},{Csv(t.Vehicle)}," +
@@ -1053,12 +1226,27 @@ namespace CarwashServices.Roles
 
         private PrintDocument BuildPrintDocument()
         {
-            var rows = _data.Transactions.ToList();
+            // Print only the filtered rows, snapshot at the moment Export is invoked.
+            var rows = FilteredTransactions().ToList();
             string[] heads = { "Txn #", "Date", "Customer", "Vehicle", "Service", "Amount", "Payment", "Status" };
             float[] weights = { 0.9f, 1.1f, 2.0f, 1.0f, 2.2f, 1.1f, 1.0f, 1.0f };
             const int amountCol = 5;
             const float rowH = 22f;
             int next = 0, page = 0;
+
+            // Filtered totals, so the header reflects what's being printed.
+            decimal filteredRevenue = rows.Where(t => t.Status == "Completed").Sum(t => t.Amount);
+            int filteredCompleted = rows.Count(t => t.Status == "Completed");
+            int filteredPending = rows.Count(t => t.Status == "Pending"
+                                              || t.Status == "Cancelled"
+                                              || t.Status == "InProgress");
+            decimal filteredAvg = filteredCompleted > 0
+                ? filteredRevenue / filteredCompleted
+                : 0m;
+
+            string filterSuffix = string.IsNullOrEmpty(_activeGridFilter)
+                ? ""
+                : " · Filtered: " + DisplayFilterName(_activeGridFilter);
 
             var doc = new PrintDocument { DocumentName = "Service & Revenue Report" };
             doc.DefaultPageSettings.Landscape = true;
@@ -1094,12 +1282,12 @@ namespace CarwashServices.Roles
 
                 if (page == 1)
                 {
-                    g.DrawString(_lastSubtitle, subFont, gray, area.Left, y);
+                    g.DrawString(_lastSubtitle + filterSuffix, subFont, gray, area.Left, y);
                     y += subFont.GetHeight(g) + 6;
 
                     var summary =
-                        $"Transactions: {_data.TotalTransactions:N0}     Revenue: ₱{_data.TotalRevenue:N0}     " +
-                        $"Avg. ticket: ₱{_data.AvgTicket:N0}     Pending / cancelled: {_data.PendingOrCancelled:N0}";
+                        $"Transactions: {rows.Count:N0}     Revenue: ₱{filteredRevenue:N0}     " +
+                        $"Avg. ticket: ₱{filteredAvg:N0}     Pending / cancelled: {filteredPending:N0}";
                     g.DrawString(summary, headFont, ink, area.Left, y);
                     y += headFont.GetHeight(g) + 14;
                 }
@@ -1146,6 +1334,21 @@ namespace CarwashServices.Roles
             };
 
             return doc;
+        }
+
+        // ================================================================
+        //  Rounded-rect helper (chip drawing)
+        // ================================================================
+        private static GraphicsPath RoundedRect(Rectangle r, int radius)
+        {
+            int d = radius * 2;
+            var p = new GraphicsPath();
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
         }
     }
 
