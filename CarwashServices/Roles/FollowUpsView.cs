@@ -8,6 +8,7 @@ using System.Net.Http.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
+using CarwashServices.Auth;
 using CarwashServices.Dialogs;
 using CarwashServices.Dtos;
 
@@ -27,8 +28,8 @@ namespace CarwashServices.Roles
         private string _search = "";
         private string _statusFilter = "All statuses";
 
-        private int? _editingRowId = null;
-        private int _editingRowIndex = -1;
+        private enum ListTab { Active, Archived }
+        private ListTab _tab = ListTab.Active;
 
         private Panel _contentPanel;
         private Panel _statsBar;
@@ -43,6 +44,11 @@ namespace CarwashServices.Roles
         private TextBox _searchBox;
         private ComboBox _statusFilterCombo;
 
+        private Label _tabActive;
+        private Label _tabArchived;
+        private Panel _tabUnderline;
+        private Panel _tabBar;
+
         private Label _breadcrumb;
         private Label _sectionLbl;
         private Label _logTitleLbl;
@@ -55,7 +61,6 @@ namespace CarwashServices.Roles
 
         private const int MarginX = 40;
         private const int TopMargin = 20;
-        private const int ActionsColWidth = 190;
 
         private static readonly Color Navy = Color.FromArgb(0x0A, 0x16, 0x33);
         private static readonly Color Muted = Color.FromArgb(0x6B, 0x7A, 0x9A);
@@ -63,6 +68,11 @@ namespace CarwashServices.Roles
         private static readonly Color CardBorder = Color.FromArgb(0xE1, 0xE7, 0xF0);
         private static readonly Color HeaderBg = Color.FromArgb(0xF8, 0xFA, 0xFD);
         private static readonly Color ButtonBorder = Color.FromArgb(0xC9, 0xD3, 0xE3);
+        private static readonly Color Green = Color.FromArgb(0x1E, 0x7A, 0x34);
+        private static readonly Color GreenSoft = Color.FromArgb(0xE4, 0xF5, 0xE8);
+        private static readonly Color Red = Color.FromArgb(0xC6, 0x28, 0x28);
+        private static readonly Color RedSoft = Color.FromArgb(0xFD, 0xE7, 0xE6);
+        private static readonly Color Amber = Color.FromArgb(0xC8, 0x6D, 0x00);
 
         private static readonly Color GreenDot = Color.FromArgb(0x2E, 0xA0, 0x43);
         private static readonly Color YellowDot = Color.FromArgb(0xF5, 0xB0, 0x2E);
@@ -73,22 +83,60 @@ namespace CarwashServices.Roles
         private static readonly Font FontNormal = new Font("Segoe UI", 9.5f);
         private static readonly Font FontSub = new Font("Segoe UI", 8.5f);
         private static readonly Font FontPill = new Font("Segoe UI Semibold", 8.5f);
-        private static readonly Font FontAction = new Font("Segoe UI Semibold", 9f);
+        private static readonly Font FontAction = new Font("Segoe UI Semibold", 8.5f);
         private static readonly Font FontStatTitle = new Font("Segoe UI", 10f);
         private static readonly Font FontStatValue = new Font("Segoe UI Semibold", 24f);
 
-        // Status is drawn as coloured words only (no pill / circle).
-        // Set to true if you also want a light, square highlight behind the words.
         private static readonly bool TintBehindText = false;
 
-        private static readonly string[] StatusOptions =
-        {
-            "Scheduled", "Due today", "Sent", "Redeemed", "Expired"
-        };
+        // ============================================================
+        //  Main grid column weights
+        // ============================================================
+        private const int MinCustomer = 180;
+        private const int MinScheduled = 120;
+        private const int MinDiscount = 130;
+        private const int MinSendVia = 80;
+        private const int MinStatus = 110;
+        private const int MinActions = 130;
+        private const int MinArchived = 130;
 
-        // Terminal statuses — no more edits allowed once a follow-up reaches one of these
-        private static bool IsTerminalStatus(string status) =>
-            status == "Redeemed" || status == "Expired";
+        private const float WCustomer = 24f;
+        private const float WScheduled = 16f;
+        private const float WDiscount = 18f;
+        private const float WSendVia = 9f;
+        private const float WStatus = 11f;
+        private const float WActions = 22f;
+
+        // ============================================================
+        //  Log grid column weights
+        // ============================================================
+        private const int LogMinNum = 60;
+        private const int LogMinCustomer = 160;
+        private const int LogMinType = 140;
+        private const int LogMinMethod = 130;
+        private const int LogMinScheduled = 110;
+        private const int LogMinStatus = 110;
+        private const int LogMinNotes = 180;
+
+        private const float LogWNum = 6f;
+        private const float LogWCustomer = 18f;
+        private const float LogWType = 16f;
+        private const float LogWMethod = 14f;
+        private const float LogWScheduled = 12f;
+        private const float LogWStatus = 12f;
+        private const float LogWNotes = 22f;
+
+        // Actions cell button geometry
+        private const int EditBtnW = 72;
+        private const int ArcBtnW = 78;
+        private const int ResBtnW = 82;
+        private const int ActionBtnH = 28;
+        private const int ActionBtnGap = 6;
+
+        private int _hoverAction = -1;   // (row << 2) | buttonIndex
+
+        private string CurrentUserName =>
+            string.IsNullOrWhiteSpace(SessionUser.FullName) ? "Admin" : SessionUser.FullName;
 
         public FollowUpsView()
         {
@@ -156,10 +204,11 @@ namespace CarwashServices.Roles
                     SelectionForeColor = Muted,
                     Font = new Font("Segoe UI Semibold", 9f),
                     Alignment = DataGridViewContentAlignment.MiddleLeft,
-                    Padding = new Padding(16, 0, 0, 0)
+                    Padding = new Padding(16, 0, 0, 0),
+                    WrapMode = DataGridViewTriState.False
                 },
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
-                ColumnHeadersHeight = 44,
+                ColumnHeadersHeight = 46,
                 ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
                 DefaultCellStyle = new DataGridViewCellStyle
                 {
@@ -169,7 +218,8 @@ namespace CarwashServices.Roles
                     SelectionBackColor = Color.FromArgb(0xEA, 0xF2, 0xFD),
                     SelectionForeColor = Navy,
                     Alignment = DataGridViewContentAlignment.MiddleLeft,
-                    Padding = new Padding(16, 0, 8, 0)
+                    Padding = new Padding(16, 0, 8, 0),
+                    WrapMode = DataGridViewTriState.False
                 },
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
@@ -178,7 +228,8 @@ namespace CarwashServices.Roles
                 AllowUserToResizeRows = false,
                 RowHeadersVisible = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
-                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                ScrollBars = ScrollBars.Vertical
             };
             g.RowTemplate.Height = rowHeight;
             return g;
@@ -247,6 +298,51 @@ namespace CarwashServices.Roles
             _addBtn.Click += (s, e) => OpenAddDialog();
             _header.Controls.Add(_addBtn);
 
+            // ---- Tab strip ----
+            _tabBar = new Panel
+            {
+                Height = 44,
+                BackColor = Color.White
+            };
+            _tabBar.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder);
+                e.Graphics.DrawLine(pen, 0, _tabBar.Height - 1, _tabBar.Width, _tabBar.Height - 1);
+            };
+            _contentPanel.Controls.Add(_tabBar);
+
+            const int TabWidth = 180;
+            const int TabGap = 40;
+
+            _tabActive = MakeTab("Active Follow-Ups", 0, TabWidth);
+            _tabArchived = MakeTab("Archived", TabWidth + TabGap, TabWidth);
+            _tabBar.Controls.Add(_tabActive);
+            _tabBar.Controls.Add(_tabArchived);
+
+            _tabUnderline = new Panel
+            {
+                Height = 2,
+                Width = TabWidth,
+                BackColor = Navy,
+                Location = new Point(_tabActive.Left, 42)
+            };
+            _tabBar.Controls.Add(_tabUnderline);
+
+            _tabActive.Click += async (s, e) =>
+            {
+                if (_tab == ListTab.Active) return;
+                _tab = ListTab.Active;
+                StyleTabs();
+                await LoadAsync();
+            };
+            _tabArchived.Click += async (s, e) =>
+            {
+                if (_tab == ListTab.Archived) return;
+                _tab = ListTab.Archived;
+                StyleTabs();
+                await LoadAsync();
+            };
+
             _statsBar = new Panel
             {
                 Height = 100,
@@ -310,49 +406,13 @@ namespace CarwashServices.Roles
             _contentPanel.Controls.Add(_gridCard);
 
             _grid = CreateGrid(62);
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "FollowUpId", Visible = false });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Customer", HeaderText = "Customer", Width = 230 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Scheduled", HeaderText = "Scheduled", Width = 130 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "Reason",
-                HeaderText = "Reason",
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 110,
-                FillWeight = 100
-            });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "Discount",
-                HeaderText = "Discount offer",
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 110,
-                FillWeight = 100
-            });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "SendVia", HeaderText = "Send via", Width = 110 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", Width = 140 });
-            _grid.Columns.Add(new DataGridViewButtonColumn
-            {
-                Name = "Actions",
-                HeaderText = "",
-                UseColumnTextForButtonValue = false,
-                FlatStyle = FlatStyle.Flat,
-                Width = ActionsColWidth,
-                DefaultCellStyle = new DataGridViewCellStyle
-                {
-                    BackColor = Color.White,
-                    ForeColor = Navy,
-                    SelectionBackColor = Color.FromArgb(0xEA, 0xF2, 0xFD),
-                    SelectionForeColor = Navy,
-                    Alignment = DataGridViewContentAlignment.MiddleCenter,
-                    Padding = new Padding(12, 15, ActionsColWidth - 12 - 80, 15)
-                }
-            });
+            BuildGridColumns();
 
-            _grid.CellContentClick += Grid_CellContentClick;
             _grid.CellPainting += Grid_CellPainting;
-            _grid.SizeChanged += (s, e) => RepositionEditOverlays();
-            _grid.Scroll += (s, e) => RepositionEditOverlays();
+            _grid.CellMouseMove += Grid_CellMouseMove;
+            _grid.CellMouseClick += Grid_CellMouseClick;
+            _grid.CellMouseLeave += (s, e) => SetHover(-1);
+            _grid.MouseLeave += (s, e) => SetHover(-1);
             _gridCard.Controls.Add(_grid);
 
             _pagerBar = new Panel
@@ -405,27 +465,63 @@ namespace CarwashServices.Roles
             _contentPanel.Controls.Add(_logCard);
 
             _logGrid = CreateGrid(54);
-            _logGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Num", HeaderText = "#", Width = 70 });
-            _logGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Customer", HeaderText = "Customer", Width = 190 });
-            _logGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Type", HeaderText = "Type", Width = 180 });
+            _logGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Num",
+                HeaderText = "#",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = LogMinNum,
+                FillWeight = LogWNum
+            });
+            _logGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Customer",
+                HeaderText = "Customer",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = LogMinCustomer,
+                FillWeight = LogWCustomer
+            });
+            _logGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Type",
+                HeaderText = "Type",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = LogMinType,
+                FillWeight = LogWType
+            });
             _logGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Method",
                 HeaderText = "Contact Method",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 110,
-                FillWeight = 100
+                MinimumWidth = LogMinMethod,
+                FillWeight = LogWMethod
             });
-            _logGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Scheduled", HeaderText = "Scheduled", Width = 130 });
-            _logGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", Width = 140 });
+            _logGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Scheduled",
+                HeaderText = "Scheduled",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = LogMinScheduled,
+                FillWeight = LogWScheduled
+            });
+            _logGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Status",
+                HeaderText = "Status",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = LogMinStatus,
+                FillWeight = LogWStatus
+            });
             _logGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Notes",
                 HeaderText = "Notes",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 140,
-                FillWeight = 120
+                MinimumWidth = LogMinNotes,
+                FillWeight = LogWNotes
             });
+
             _logGrid.CellPainting += LogGrid_CellPainting;
             _logCard.Controls.Add(_logGrid);
 
@@ -438,6 +534,126 @@ namespace CarwashServices.Roles
                 await LoadAsync();
                 BeginInvoke(new Action(RelayoutUI));
             };
+        }
+
+        // ================================================================
+        //  GRID COLUMNS — depend on the active tab
+        // ================================================================
+        private void BuildGridColumns()
+        {
+            _grid.Columns.Clear();
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "FollowUpId",
+                Visible = false
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Customer",
+                HeaderText = "Customer",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = MinCustomer,
+                FillWeight = WCustomer
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Scheduled",
+                HeaderText = "Scheduled / Send On",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = MinScheduled,
+                FillWeight = WScheduled
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Discount",
+                HeaderText = "Discount offer",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = MinDiscount,
+                FillWeight = WDiscount
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "SendVia",
+                HeaderText = "Send via",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = MinSendVia,
+                FillWeight = WSendVia
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Status",
+                HeaderText = "Status",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = MinStatus,
+                FillWeight = WStatus
+            });
+
+            if (_tab == ListTab.Archived)
+            {
+                _grid.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    Name = "ArchivedInfo",
+                    HeaderText = "Archived",
+                    AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                    MinimumWidth = MinArchived,
+                    FillWeight = 14f
+                });
+            }
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Actions",
+                HeaderText = "Actions",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = MinActions,
+                FillWeight = WActions,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.White,
+                    ForeColor = Navy,
+                    SelectionBackColor = Color.FromArgb(0xEA, 0xF2, 0xFD),
+                    SelectionForeColor = Navy,
+                    Alignment = DataGridViewContentAlignment.MiddleCenter,
+                    Padding = new Padding(0),
+                    WrapMode = DataGridViewTriState.False
+                }
+            });
+        }
+
+        private Label MakeTab(string text, int x, int width) => new Label
+        {
+            Text = text,
+            Font = new Font("Segoe UI Semibold", 10.5f),
+            ForeColor = Muted,
+            AutoSize = false,
+            Size = new Size(width, 42),
+            Location = new Point(x, 0),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand,
+            BackColor = Color.White
+        };
+
+        private void StyleTabs()
+        {
+            bool activeIsActive = _tab == ListTab.Active;
+
+            _tabActive.ForeColor = activeIsActive ? Navy : Muted;
+            _tabArchived.ForeColor = activeIsActive ? Muted : Navy;
+
+            if (_tabUnderline != null)
+            {
+                _tabUnderline.Left = activeIsActive ? _tabActive.Left : _tabArchived.Left;
+                _tabUnderline.Width = activeIsActive ? _tabActive.Width : _tabArchived.Width;
+            }
+
+            if (_addBtn != null) _addBtn.Visible = activeIsActive;
+            if (_statsBar != null) _statsBar.Visible = activeIsActive;
         }
 
         // ================================================================
@@ -478,6 +694,9 @@ namespace CarwashServices.Roles
             _header.SetBounds(L, y, w, 92);
             _addBtn.Location = new Point(w - _addBtn.Width, 14);
             y += 92 + 8;
+
+            _tabBar.SetBounds(L, y, w, 44);
+            y += 44 + 20;
 
             _statsBar.SetBounds(L, y, w, 100);
             if (_statsLayoutWidth != w) BuildStats();
@@ -646,8 +865,6 @@ namespace CarwashServices.Roles
             _ => (Color.FromArgb(0xEE, 0xF1, 0xF6), Muted)
         };
 
-        // Status: coloured words only. No pill, no circle.
-        // (Name kept as PaintStatusPill so the existing calls keep working.)
         private static void PaintStatusPill(DataGridViewCellPaintingEventArgs e)
         {
             e.Paint(e.CellBounds, BaseParts);
@@ -681,51 +898,86 @@ namespace CarwashServices.Roles
             e.Handled = true;
         }
 
-        private static void PaintActionButton(DataGridViewCellPaintingEventArgs e)
+        // ---- Actions cell painter ----
+        // Uses the cell's text value as a "|"-delimited spec:
+        //   Active tab  → "Edit|Archive"   or "Archive" for terminal rows
+        //   Archived tab → "Restore"
+        private void PaintActionsCell(DataGridViewCellPaintingEventArgs e)
         {
-            var text = Convert.ToString(e.Value) ?? "";
-
-            // No action for terminal rows (Redeemed / Expired): paint an empty cell ourselves
-            // so the default button-cell paint can't leave a dark box behind.
-            if (string.IsNullOrEmpty(text))
-            {
-                var back = (e.State & DataGridViewElementStates.Selected) != 0
-                    ? e.CellStyle.SelectionBackColor
-                    : e.CellStyle.BackColor;
-
-                using (var br = new SolidBrush(back))
-                    e.Graphics.FillRectangle(br, e.CellBounds);
-
-                using (var pen = new Pen(CardBorder))
-                    e.Graphics.DrawLine(pen,
-                        e.CellBounds.Left, e.CellBounds.Bottom - 1,
-                        e.CellBounds.Right, e.CellBounds.Bottom - 1);
-
-                e.Handled = true;
-                return;
-            }
-
             e.Paint(e.CellBounds, BaseParts);
 
-            bool primary = text == "Save";
+            var spec = Convert.ToString(e.Value) ?? "";
+            if (string.IsNullOrEmpty(spec)) { e.Handled = true; return; }
 
-            var rect = new Rectangle(e.CellBounds.X + 12, e.CellBounds.Y + 15, 80, e.CellBounds.Height - 30);
-            var pathRect = new Rectangle(rect.X, rect.Y, rect.Width - 1, rect.Height - 1);
+            var parts = spec.Split('|');
 
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = RoundedRect(pathRect, 8))
-            using (var fill = new SolidBrush(primary ? Navy : Color.White))
-            using (var pen = new Pen(primary ? Navy : ButtonBorder, 1))
+            int totalW = 0;
+            for (int i = 0; i < parts.Length; i++)
             {
-                e.Graphics.FillPath(fill, path);
-                e.Graphics.DrawPath(pen, path);
+                totalW += parts[i] switch
+                {
+                    "Edit" => EditBtnW,
+                    "Archive" => ArcBtnW,
+                    "Restore" => ResBtnW,
+                    _ => ArcBtnW
+                };
+                if (i > 0) totalW += ActionBtnGap;
             }
 
-            TextRenderer.DrawText(e.Graphics, text, FontAction, rect,
-                primary ? Color.White : Navy,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            int x0 = e.CellBounds.X + (e.CellBounds.Width - totalW) / 2;
+            int y0 = e.CellBounds.Y + (e.CellBounds.Height - ActionBtnH) / 2;
+
+            for (int i = 0; i < parts.Length; i++)
+            {
+                int w = parts[i] switch
+                {
+                    "Edit" => EditBtnW,
+                    "Archive" => ArcBtnW,
+                    "Restore" => ResBtnW,
+                    _ => ArcBtnW
+                };
+
+                var rect = new Rectangle(x0, y0, w, ActionBtnH);
+                bool hover = _hoverAction == (e.RowIndex << 2) + i;
+
+                switch (parts[i])
+                {
+                    case "Edit":
+                        PaintButton(e.Graphics, rect, "Edit", hover, Navy);
+                        break;
+                    case "Archive":
+                        PaintButton(e.Graphics, rect, "Archive", hover, Red);
+                        break;
+                    case "Restore":
+                        PaintButton(e.Graphics, rect, "Restore", hover, Green);
+                        break;
+                }
+
+                x0 += w + ActionBtnGap;
+            }
 
             e.Handled = true;
+        }
+
+        private static void PaintButton(Graphics g, Rectangle rect, string text,
+            bool hover, Color tone)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            Color fill = hover ? tone : Color.White;
+            Color fore = hover ? Color.White : tone;
+
+            using (var path = RoundedRect(rect, 6))
+            using (var fillBrush = new SolidBrush(fill))
+            using (var pen = new Pen(tone, 1))
+            {
+                g.FillPath(fillBrush, path);
+                g.DrawPath(pen, path);
+            }
+
+            TextRenderer.DrawText(g, text, FontAction, rect, fore,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
         }
 
         private void Grid_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
@@ -738,7 +990,9 @@ namespace CarwashServices.Roles
                 return;
             }
 
-            switch (_grid.Columns[e.ColumnIndex].Name)
+            var colName = _grid.Columns[e.ColumnIndex].Name;
+
+            switch (colName)
             {
                 case "Customer":
                     PaintTwoLine(e, FontStrong, Navy, FontSub, Muted);
@@ -753,12 +1007,15 @@ namespace CarwashServices.Roles
                     }
 
                 case "Status":
-                    if (e.RowIndex != _editingRowIndex)
-                        PaintStatusPill(e);
+                    PaintStatusPill(e);
+                    break;
+
+                case "ArchivedInfo":
+                    PaintTwoLine(e, FontNormal, Navy, FontSub, Muted);
                     break;
 
                 case "Actions":
-                    PaintActionButton(e);
+                    PaintActionsCell(e);
                     break;
             }
         }
@@ -775,6 +1032,118 @@ namespace CarwashServices.Roles
 
             if (_logGrid.Columns[e.ColumnIndex].Name == "Status")
                 PaintStatusPill(e);
+        }
+
+        // ================================================================
+        //  HOVER + CLICK for the Actions column
+        // ================================================================
+        private void Grid_CellMouseMove(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 ||
+                _grid.Columns[e.ColumnIndex].Name != "Actions")
+            {
+                SetHover(-1);
+                return;
+            }
+
+            SetHover(HitTestActions(e.RowIndex, e.Location));
+        }
+
+        private void Grid_CellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (_grid.Columns[e.ColumnIndex].Name != "Actions") return;
+
+            int hit = HitTestActions(e.RowIndex, e.Location);
+            if (hit < 0) return;
+
+            int buttonIndex = hit & 0b11;
+
+            var spec = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
+            if (string.IsNullOrEmpty(spec)) return;
+
+            var parts = spec.Split('|');
+            if (buttonIndex >= parts.Length) return;
+
+            string action = parts[buttonIndex];
+
+            var idText = _grid.Rows[e.RowIndex].Cells["FollowUpId"].Value?.ToString() ?? "";
+            if (!int.TryParse(idText, out var rowId)) return;
+
+            var dto = _all.FirstOrDefault(f => f.FollowUpId == rowId);
+            if (dto == null) return;
+
+            switch (action)
+            {
+                case "Edit": OpenEditDialog(dto); break;
+                case "Archive": ArchiveAsync(dto); break;
+                case "Restore": RestoreAsync(dto); break;
+            }
+        }
+
+        private int HitTestActions(int rowIndex, Point local)
+        {
+            var cellBounds = _grid.GetCellDisplayRectangle(
+                _grid.Columns["Actions"].Index, rowIndex, false);
+
+            var absolute = new Point(cellBounds.X + local.X, cellBounds.Y + local.Y);
+
+            var spec = _grid.Rows[rowIndex].Cells["Actions"].Value?.ToString() ?? "";
+            if (string.IsNullOrEmpty(spec)) return -1;
+
+            var parts = spec.Split('|');
+
+            int totalW = 0;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                totalW += parts[i] switch
+                {
+                    "Edit" => EditBtnW,
+                    "Archive" => ArcBtnW,
+                    "Restore" => ResBtnW,
+                    _ => ArcBtnW
+                };
+                if (i > 0) totalW += ActionBtnGap;
+            }
+
+            int x0 = cellBounds.X + (cellBounds.Width - totalW) / 2;
+            int y0 = cellBounds.Y + (cellBounds.Height - ActionBtnH) / 2;
+
+            for (int i = 0; i < parts.Length; i++)
+            {
+                int w = parts[i] switch
+                {
+                    "Edit" => EditBtnW,
+                    "Archive" => ArcBtnW,
+                    "Restore" => ResBtnW,
+                    _ => ArcBtnW
+                };
+
+                var rect = new Rectangle(x0, y0, w, ActionBtnH);
+                if (rect.Contains(absolute)) return (rowIndex << 2) + i;
+
+                x0 += w + ActionBtnGap;
+            }
+
+            return -1;
+        }
+
+        private void SetHover(int encoded)
+        {
+            if (encoded == _hoverAction) return;
+
+            int old = _hoverAction;
+            _hoverAction = encoded;
+
+            var col = _grid.Columns["Actions"];
+            if (col != null)
+            {
+                if (old >= 0) _grid.InvalidateCell(col.Index, old >> 2);
+                if (encoded >= 0) _grid.InvalidateCell(col.Index, encoded >> 2);
+            }
+
+            _grid.Cursor = encoded >= 0 ? Cursors.Hand : Cursors.Default;
         }
 
         // ================================================================
@@ -801,11 +1170,20 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
 
-                _all = await _http.GetFromJsonAsync<List<FollowUpDto>>("api/follow-ups") ?? new();
-                _stats = await _http.GetFromJsonAsync<FollowUpStatsDto>("api/follow-ups/stats")
-                            ?? new FollowUpStatsDto();
+                var url = _tab == ListTab.Active
+                    ? "api/follow-ups"
+                    : "api/follow-ups/archived";
 
-                BuildStats();
+                _all = await _http.GetFromJsonAsync<List<FollowUpDto>>(url) ?? new();
+
+                if (_tab == ListTab.Active)
+                {
+                    _stats = await _http.GetFromJsonAsync<FollowUpStatsDto>("api/follow-ups/stats")
+                                ?? new FollowUpStatsDto();
+                    BuildStats();
+                }
+
+                BuildGridColumns();
                 ApplyFilter();
                 BuildLog();
             }
@@ -835,8 +1213,6 @@ namespace CarwashServices.Roles
             if (_grid == null || _pagerBar == null || _showingLbl == null)
                 return;
 
-            RemoveEditOverlays();
-
             var list = _all.OrderByDescending(f => f.FollowUpId).ToList();
 
             if (!string.IsNullOrEmpty(_search))
@@ -846,8 +1222,8 @@ namespace CarwashServices.Roles
                     var cust = _custById.TryGetValue(f.CustomerId, out var c) ? c : null;
                     var name = cust?.CustomerName?.ToLower() ?? "";
                     return name.Contains(_search)
-                        || (f.Reason ?? "").ToLower().Contains(_search)
-                        || (f.DiscountOffer ?? "").ToLower().Contains(_search);
+                        || (f.DiscountOffer ?? "").ToLower().Contains(_search)
+                        || (f.Notes ?? "").ToLower().Contains(_search);
                 }).ToList();
             }
 
@@ -868,8 +1244,6 @@ namespace CarwashServices.Roles
 
             _grid.SuspendLayout();
             _grid.Rows.Clear();
-            _editingRowId = null;
-            _editingRowIndex = -1;
 
             foreach (var f in pageItems)
             {
@@ -886,7 +1260,8 @@ namespace CarwashServices.Roles
                 var isOverdue = f.ScheduledDate.Date < DateTime.Today
                                 && f.Status != "Sent"
                                 && f.Status != "Contacted"
-                                && f.Status != "Redeemed";
+                                && f.Status != "Redeemed"
+                                && f.Status != "Expired";
                 if (isOverdue) scheduled += "\noverdue";
 
                 var method = f.ContactMethod switch
@@ -895,221 +1270,121 @@ namespace CarwashServices.Roles
                     _ => f.ContactMethod
                 };
 
-                // Terminal rows: no Edit button, no Save button
-                bool isTerminal = IsTerminalStatus(f.Status);
+                if (_tab == ListTab.Active)
+                {
+                    bool isTerminal = f.Status == "Redeemed" || f.Status == "Expired";
+                    string actions = isTerminal ? "Archive" : "Edit|Archive";
 
-                _grid.Rows.Add(
-                    f.FollowUpId,
-                    custCell,
-                    scheduled,
-                    f.Reason ?? "",
-                    string.IsNullOrWhiteSpace(f.DiscountOffer) ? "—" : f.DiscountOffer,
-                    method,
-                    f.Status,
-                    isTerminal ? "" : "Edit");
+                    _grid.Rows.Add(
+                        f.FollowUpId,
+                        custCell,
+                        scheduled,
+                        string.IsNullOrWhiteSpace(f.DiscountOffer) ? "—" : f.DiscountOffer,
+                        method,
+                        f.Status,
+                        actions);
+                }
+                else
+                {
+                    var archivedCell = "";
+                    if (f.ArchivedAt.HasValue)
+                        archivedCell = f.ArchivedAt.Value.ToString("yyyy-MM-dd");
+                    if (!string.IsNullOrWhiteSpace(f.ArchivedBy))
+                        archivedCell += "\nby " + f.ArchivedBy;
+
+                    _grid.Rows.Add(
+                        f.FollowUpId,
+                        custCell,
+                        scheduled,
+                        string.IsNullOrWhiteSpace(f.DiscountOffer) ? "—" : f.DiscountOffer,
+                        method,
+                        f.Status,
+                        string.IsNullOrWhiteSpace(archivedCell) ? "—" : archivedCell,
+                        "Restore");
+                }
             }
 
             _grid.ResumeLayout();
+            _grid.PerformLayout();
 
             var from = total == 0 ? 0 : start + 1;
             var to = Math.Min(start + _pageSize, total);
-            _showingLbl.Text = $"Showing {from}–{to} of {total} customers";
+            _showingLbl.Text = _tab == ListTab.Active
+                ? $"Showing {from}–{to} of {total} follow-ups"
+                : $"Showing {from}–{to} of {total} archived follow-ups";
 
             RebuildPager(totalPages);
         }
 
         // ================================================================
-        //  EDIT MODE
+        //  ARCHIVE / RESTORE
         // ================================================================
-        private void Grid_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        private async void ArchiveAsync(FollowUpDto f)
         {
-            if (e.RowIndex < 0) return;
-
-            var col = _grid.Columns[e.ColumnIndex];
-            if (col.Name != "Actions") return;
-
-            var actionText = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
-            if (string.IsNullOrEmpty(actionText)) return;   // terminal rows have no button
-
-            var rowId = Convert.ToInt32(_grid.Rows[e.RowIndex].Cells["FollowUpId"].Value);
-
-            if (_editingRowId == rowId)
-            {
-                var btnText = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
-                if (btnText == "Save")
-                    _ = SaveEditAsync(e.RowIndex, rowId);
-            }
-            else
-            {
-                EnterEditMode(e.RowIndex, rowId);
-            }
-        }
-
-        private void EnterEditMode(int rowIndex, int rowId)
-        {
-            // Safety: never enter edit mode for a Redeemed / Expired row
-            var currentStatus = _grid.Rows[rowIndex].Cells["Status"].Value?.ToString() ?? "";
-            if (IsTerminalStatus(currentStatus))
-                return;
-
-            RemoveEditOverlays();
-
-            _editingRowId = rowId;
-            _editingRowIndex = rowIndex;
-
-            _grid.Rows[rowIndex].Cells["Actions"].Value = "Save";
-
-            var cell = _grid.Rows[rowIndex].Cells["Status"];
-
-            var combo = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 9.5f),
-                BackColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Name = "statusCombo"
-            };
-            combo.Items.AddRange(StatusOptions);
-            var current = cell.Value?.ToString() ?? "Sent";
-            if (!StatusOptions.Contains(current))
-                combo.Items.Add(current);
-            combo.SelectedItem = current;
-
-            var cancelBtn = new Button
-            {
-                Text = "Cancel",
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9f),
-                BackColor = Color.White,
-                ForeColor = Navy,
-                UseVisualStyleBackColor = false,
-                Size = new Size(76, 32),
-                Cursor = Cursors.Hand,
-                Name = "cancelBtn"
-            };
-            cancelBtn.FlatAppearance.BorderColor = ButtonBorder;
-            cancelBtn.FlatAppearance.MouseOverBackColor = PageBg;
-            cancelBtn.Click += (s, e) => ExitEditMode();
-
-            _grid.Controls.Add(combo);
-            _grid.Controls.Add(cancelBtn);
-            combo.BringToFront();
-            cancelBtn.BringToFront();
-
-            combo.SelectedIndexChanged += (s, e) =>
-            {
-                cell.Value = combo.SelectedItem?.ToString() ?? current;
-            };
-
-            RepositionEditOverlays();
-        }
-
-        private void RepositionEditOverlays()
-        {
-            if (_grid == null) return;
-            if (_editingRowIndex < 0 || _editingRowIndex >= _grid.RowCount) return;
-
-            var st = _grid.GetCellDisplayRectangle(_grid.Columns["Status"].Index, _editingRowIndex, false);
-            var ac = _grid.GetCellDisplayRectangle(_grid.Columns["Actions"].Index, _editingRowIndex, false);
-
-            foreach (Control c in _grid.Controls)
-            {
-                if (c is ComboBox cb && cb.Name == "statusCombo")
-                {
-                    cb.Visible = st.Width > 0;
-                    cb.Width = Math.Max(40, st.Width - 24);
-                    cb.Location = new Point(st.X + 12, st.Y + (st.Height - cb.Height) / 2);
-                }
-                else if (c is Button btn && btn.Name == "cancelBtn")
-                {
-                    btn.Visible = ac.Width > 0;
-                    btn.Location = new Point(ac.X + 100, ac.Y + 15);
-                }
-            }
-        }
-
-        private void RemoveEditOverlays()
-        {
-            if (_grid == null) return;
-
-            var toRemove = new List<Control>();
-            foreach (Control c in _grid.Controls)
-            {
-                if (c is ComboBox cb && cb.Name == "statusCombo")
-                    toRemove.Add(c);
-                else if (c is Button b && b.Name == "cancelBtn")
-                    toRemove.Add(c);
-            }
-            foreach (var c in toRemove)
-            {
-                _grid.Controls.Remove(c);
-                c.Dispose();
-            }
-        }
-
-        private void ExitEditMode()
-        {
-            RemoveEditOverlays();
-            _editingRowId = null;
-            _editingRowIndex = -1;
-            ApplyFilter();
-        }
-
-        private async Task SaveEditAsync(int rowIndex, int rowId)
-        {
-            var dto = _all.FirstOrDefault(f => f.FollowUpId == rowId);
-            if (dto == null) { ExitEditMode(); return; }
-
-            string newStatus = dto.Status;
-            foreach (Control c in _grid.Controls)
-            {
-                if (c is ComboBox cb && cb.Name == "statusCombo")
-                {
-                    newStatus = cb.SelectedItem?.ToString() ?? dto.Status;
-                    break;
-                }
-            }
-
-            var body = new
-            {
-                followUpId = dto.FollowUpId,
-                customerId = dto.CustomerId,
-                type = dto.Type,
-                contactMethod = dto.ContactMethod,
-                reason = dto.Reason,
-                discountOffer = dto.DiscountOffer,
-                notes = dto.Notes,
-                scheduledDate = dto.ScheduledDate,
-                validUntil = dto.ValidUntil,
-                status = newStatus
-            };
+            if (!ArchiveConfirmDialog.ConfirmArchive("follow-up")) return;
 
             try
             {
-                var resp = await _http.PutAsJsonAsync($"api/follow-ups/{rowId}", body);
+                Cursor = Cursors.WaitCursor;
+                var resp = await _http.PutAsJsonAsync(
+                    $"api/follow-ups/{f.FollowUpId}/archive",
+                    new { archivedBy = CurrentUserName });
 
-                if (resp.IsSuccessStatusCode)
+                if (!resp.IsSuccessStatusCode)
                 {
-                    RemoveEditOverlays();
-                    _editingRowId = null;
-                    _editingRowIndex = -1;
-
-                    await LoadLookupsAsync();
-                    await LoadAsync();
-                }
-                else
-                {
-                    var err = await resp.Content.ReadAsStringAsync();
-                    MessageBox.Show(
-                        $"Save failed.\n\n{resp.StatusCode}\n\n{err}",
+                    var body = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Archive failed: {resp.StatusCode}\n\n{body}",
                         "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
                 }
+
+                await LoadAsync();
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
-                    $"Save failed.\n\n{ex.Message}",
+                MessageBox.Show($"Archive failed.\n\n{ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally { Cursor = Cursors.Default; }
+        }
+
+        private async void RestoreAsync(FollowUpDto f)
+        {
+            if (!ArchiveConfirmDialog.ConfirmRestore("follow-up")) return;
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                var resp = await _http.PutAsync(
+                    $"api/follow-ups/{f.FollowUpId}/restore", null);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Restore failed: {resp.StatusCode}\n\n{body}",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                await LoadAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Restore failed.\n\n{ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally { Cursor = Cursors.Default; }
+        }
+
+        // ================================================================
+        //  EDIT
+        // ================================================================
+        private void OpenEditDialog(FollowUpDto dto)
+        {
+            using var dlg = new FollowUpEditDialog(_customers, dto);
+            if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+            {
+                _ = ReloadAllAsync();
             }
         }
 
@@ -1238,8 +1513,7 @@ namespace CarwashServices.Roles
             if (dlg.ShowDialog(this.FindForm()) == DialogResult.OK)
             {
                 _page = 1;
-                await LoadLookupsAsync();
-                await LoadAsync();
+                await ReloadAllAsync();
             }
         }
 
@@ -1259,8 +1533,7 @@ namespace CarwashServices.Roles
             if (dlg.ShowDialog(this.FindForm()) == DialogResult.OK)
             {
                 _page = 1;
-                await LoadLookupsAsync();
-                await LoadAsync();
+                await ReloadAllAsync();
             }
         }
 
