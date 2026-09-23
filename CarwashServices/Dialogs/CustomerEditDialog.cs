@@ -13,7 +13,7 @@ namespace CarwashServices.Dialogs
     public class CustomerEditDialog : Form
     {
         // -----------------------------------------------------------------
-        //  Palette + layout constants
+        //  Palette + layout
         // -----------------------------------------------------------------
         private static readonly Color Navy = Color.FromArgb(0x0A, 0x14, 0x28);
         private static readonly Color NavyHover = Color.FromArgb(0x16, 0x28, 0x4A);
@@ -22,16 +22,17 @@ namespace CarwashServices.Dialogs
         private static readonly Color Line = Color.FromArgb(0xE5, 0xE8, 0xEE);
         private static readonly Color Accent = Color.FromArgb(0x1E, 0x88, 0xE5);
         private static readonly Color Danger = Color.FromArgb(0xC6, 0x28, 0x28);
+        private static readonly Color FieldErrorBg = Color.FromArgb(0xFF, 0xF5, 0xF5);
 
         private const int PadX = 30;
         private const int ContentW = 760;
         private const int Gap = 16;
-        private const int W2 = (ContentW - Gap) / 2;       // 372
-        private const int X2b = PadX + W2 + Gap;           // 418
-        private const int W3 = (ContentW - 2 * Gap) / 3;   // 242
-        private const int X3b = PadX + W3 + Gap;           // 288
-        private const int X3c = PadX + 2 * (W3 + Gap);     // 546
-        private const int W3c = PadX + ContentW - X3c;     // 244
+        private const int W2 = (ContentW - Gap) / 2;
+        private const int X2b = PadX + W2 + Gap;
+        private const int W3 = (ContentW - 2 * Gap) / 3;
+        private const int X3b = PadX + W3 + Gap;
+        private const int X3c = PadX + 2 * (W3 + Gap);
+        private const int W3c = PadX + ContentW - X3c;
 
         // -----------------------------------------------------------------
         //  State
@@ -65,15 +66,25 @@ namespace CarwashServices.Dialogs
         private Label _errorLbl = null!;
         private Button _deleteBtn = null!;
 
+        // Error provider — shows a red icon + tooltip next to invalid fields.
+        private readonly ErrorProvider _errors = new ErrorProvider();
+
         private readonly HttpClient _http = new HttpClient
         {
             BaseAddress = new Uri("http://localhost:5180/"),
             Timeout = TimeSpan.FromSeconds(10)
         };
 
-        private static readonly Regex PhoneRegex = new Regex(@"^[0-9+\-\s()]{7,20}$", RegexOptions.Compiled);
-        private static readonly Regex EmailRegex = new Regex(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
-        private static readonly Regex PlateRegex = new Regex(@"^[A-Za-z0-9\- ]{2,15}$", RegexOptions.Compiled);
+        private static readonly Regex NameRegex =
+            new(@"^[\p{L}][\p{L}\s\.\-']{1,49}$", RegexOptions.Compiled);
+        private static readonly Regex PhoneRegex =
+            new(@"^[0-9+\-\s()]{7,20}$", RegexOptions.Compiled);
+        private static readonly Regex EmailRegex =
+            new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
+        private static readonly Regex PlateRegex =
+            new(@"^[A-Za-z0-9\- ]{2,15}$", RegexOptions.Compiled);
+        private static readonly Regex ModelRegex =
+            new(@"^[A-Za-z0-9\s\.\-'/]{1,50}$", RegexOptions.Compiled);
 
         public CustomerEditDialog(int? customerId)
         {
@@ -106,6 +117,10 @@ namespace CarwashServices.Dialogs
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
+
+            // ErrorProvider defaults
+            _errors.BlinkStyle = ErrorBlinkStyle.NeverBlink;
+            _errors.ContainerControl = this;
 
             // ---- Header ----
             var header = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = Color.White };
@@ -143,7 +158,6 @@ namespace CarwashServices.Dialogs
             };
             footer.Controls.Add(_errorLbl);
 
-            // Delete (edit mode only)
             _deleteBtn = new Button
             {
                 Text = "Delete Customer",
@@ -223,10 +237,10 @@ namespace CarwashServices.Dialogs
             _emailTxt = AddText(body, "Email *", X2b, y, W2, "e.g. juan@example.com");
             y += 78;
 
-            _streetTxt = AddText(body, "Street / Barangay", PadX, y, W2, "e.g. 12 Rizal St., Brgy. Poblacion");
+            _streetTxt = AddText(body, "Street / Barangay *", PadX, y, W2, "e.g. 12 Rizal St., Brgy. Poblacion");
             y += 60;
 
-            _cityTxt = AddText(body, "City / Municipality", PadX, y, W2, "e.g. Davao City");
+            _cityTxt = AddText(body, "City / Municipality *", PadX, y, W2, "e.g. Davao City");
             _provinceTxt = AddText(body, "Province", X2b, y, W2, "e.g. Davao del Sur");
             y += 74;
 
@@ -234,12 +248,10 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(SectionDivider("VEHICLE INFORMATION", y));
             y += 32;
 
-            // Row 1: Plate / Make / Model
             _plateTxt = AddText(body, "Plate number *", PadX, y, W3, "e.g. ABC 1234");
             AddHint(body, "Letters and numbers only.", PadX, y + 44);
 
-            _makeCombo = AddCombo(body, "Make (brand)", X3b, y, W3, BrandCatalog.Makes);
-            // Make's "Other" free-text field sits below the combo (only shown when "Other" is picked)
+            _makeCombo = AddCombo(body, "Make (brand) *", X3b, y, W3, BrandCatalog.Makes);
             _makeOtherTxt = new TextBox
             {
                 Location = new Point(X3b, y + 44),
@@ -250,22 +262,21 @@ namespace CarwashServices.Dialogs
                 PlaceholderText = "Type brand",
                 Visible = false
             };
-            _makeOtherTxt.TextChanged += (s, e) => ClearError();
+            _makeOtherTxt.TextChanged += (s, e) => ClearFieldError(_makeOtherTxt);
             body.Controls.Add(_makeOtherTxt);
             _makeCombo.SelectedIndexChanged += (s, e) =>
             {
                 _makeOtherTxt.Visible = (string?)_makeCombo.SelectedItem == "Other";
+                ClearFieldError(_makeCombo);
             };
 
-            _modelTxt = AddText(body, "Model", X3c, y, W3c, "e.g. Fortuner");
+            _modelTxt = AddText(body, "Model *", X3c, y, W3c, "e.g. Fortuner");
             y += 78;
 
-            // Row 2: Year / Body / Color
-            _yearCombo = AddCombo(body, "Year model", PadX, y, W3, BuildYearItems());
-            _bodyCombo = AddCombo(body, "Body type", X3b, y, W3, BrandCatalog.BodyTypes);
+            _yearCombo = AddCombo(body, "Year model *", PadX, y, W3, BuildYearItems());
+            _bodyCombo = AddCombo(body, "Body type *", X3b, y, W3, BrandCatalog.BodyTypes);
 
-            _colorCombo = AddCombo(body, "Color", X3c, y, W3c, BrandCatalog.Colors);
-            // Color's "Other" free-text field sits next to the combo (only shown when "Other" is picked)
+            _colorCombo = AddCombo(body, "Color *", X3c, y, W3c, BrandCatalog.Colors);
             _colorOtherTxt = new TextBox
             {
                 Location = new Point(X3c + 130, y + 44),
@@ -276,11 +287,12 @@ namespace CarwashServices.Dialogs
                 PlaceholderText = "Type color",
                 Visible = false
             };
-            _colorOtherTxt.TextChanged += (s, e) => ClearError();
+            _colorOtherTxt.TextChanged += (s, e) => ClearFieldError(_colorOtherTxt);
             body.Controls.Add(_colorOtherTxt);
             _colorCombo.SelectedIndexChanged += (s, e) =>
             {
                 _colorOtherTxt.Visible = (string?)_colorCombo.SelectedItem == "Other";
+                ClearFieldError(_colorCombo);
             };
             y += 78;
 
@@ -290,7 +302,6 @@ namespace CarwashServices.Dialogs
 
             _sourceCombo = AddCombo(body, "Source", PadX, y, W2, BrandCatalog.Sources);
 
-            // Status row (edit mode only)
             _statusRow = new Panel { Location = new Point(X2b, y), Size = new Size(W2, 60), BackColor = Color.White };
             _statusRow.Controls.Add(new Label
             {
@@ -312,7 +323,7 @@ namespace CarwashServices.Dialogs
             _statusCombo.SelectedIndex = 0;
             _statusRow.Controls.Add(_statusCombo);
             body.Controls.Add(_statusRow);
-            _statusRow.Visible = _isEdit;   // NOT shown when creating a new customer
+            _statusRow.Visible = _isEdit;
 
             y += 78;
 
@@ -356,7 +367,7 @@ namespace CarwashServices.Dialogs
                 BackColor = Color.White,
                 PlaceholderText = placeholder
             };
-            tb.TextChanged += (s, e) => ClearError();
+            tb.TextChanged += (s, e) => ClearFieldError(tb);
             parent.Controls.Add(tb);
             return tb;
         }
@@ -374,6 +385,7 @@ namespace CarwashServices.Dialogs
             };
             cb.Items.AddRange(items);
             cb.SelectedIndex = 0;
+            cb.SelectedIndexChanged += (s, e) => ClearFieldError(cb);
             parent.Controls.Add(cb);
             return cb;
         }
@@ -421,9 +433,40 @@ namespace CarwashServices.Dialogs
             return p;
         }
 
+        // =================================================================
+        //  Field error helpers
+        // =================================================================
         private void ClearError()
         {
             if (_errorLbl != null) _errorLbl.Text = "";
+        }
+
+        private void ClearFieldError(Control c)
+        {
+            if (c is TextBox tb)
+            {
+                tb.BackColor = Color.White;
+                _errors.SetError(tb, "");
+            }
+            else if (c is ComboBox cb)
+            {
+                cb.BackColor = Color.White;
+                _errors.SetError(cb, "");
+            }
+        }
+
+        private void MarkFieldError(Control c, string message)
+        {
+            if (c is TextBox tb)
+            {
+                tb.BackColor = FieldErrorBg;
+                _errors.SetError(tb, message);
+            }
+            else if (c is ComboBox cb)
+            {
+                cb.BackColor = FieldErrorBg;
+                _errors.SetError(cb, message);
+            }
         }
 
         // =================================================================
@@ -443,7 +486,6 @@ namespace CarwashServices.Dialogs
                 _loaded = c;
                 _titleLbl.Text = TitleText(c.CustomerCode);
 
-                // Split "Juan Dela Cruz" into first name + last name at the first space
                 var full = c.CustomerName ?? "";
                 int firstSpace = full.IndexOf(' ');
                 if (firstSpace > 0)
@@ -460,7 +502,6 @@ namespace CarwashServices.Dialogs
                 _phoneTxt.Text = c.ContactNumber ?? "";
                 _emailTxt.Text = c.EmailAddress ?? "";
 
-                // Address: we saved it as a single string — split on the first two commas if possible
                 var addr = c.Address ?? "";
                 var parts = addr.Split(',');
                 if (parts.Length >= 3)
@@ -481,7 +522,6 @@ namespace CarwashServices.Dialogs
 
                 _plateTxt.Text = c.PlateNumber ?? "";
 
-                // Make: if the saved value is in our list, select it; otherwise "Other" + free text
                 if (!string.IsNullOrWhiteSpace(c.VehicleMake) &&
                     Array.IndexOf(BrandCatalog.Makes, c.VehicleMake) >= 0)
                 {
@@ -534,64 +574,150 @@ namespace CarwashServices.Dialogs
         }
 
         // =================================================================
-        //  VALIDATION
+        //  VALIDATION — collects every error, returns false if any failed
         // =================================================================
-        private bool ValidateForm(out string errorMessage)
+        private bool ValidateForm()
         {
-            errorMessage = "";
+            // Clear all previous errors.
+            ClearAllErrors();
 
-            if (string.IsNullOrWhiteSpace(_firstNameTxt.Text))
-            { errorMessage = "First name is required."; _firstNameTxt.Focus(); return false; }
-            if (_firstNameTxt.Text.Trim().Length < 2)
-            { errorMessage = "First name must be at least 2 characters."; _firstNameTxt.Focus(); return false; }
+            // ---- First name ----
+            var first = _firstNameTxt.Text.Trim();
+            if (first.Length == 0)
+                MarkFieldError(_firstNameTxt, "First name is required.");
+            else if (first.Length < 2)
+                MarkFieldError(_firstNameTxt, "Must be at least 2 characters.");
+            else if (first.Length > 50)
+                MarkFieldError(_firstNameTxt, "Must be 50 characters or fewer.");
+            else if (!NameRegex.IsMatch(first))
+                MarkFieldError(_firstNameTxt, "Letters, spaces, hyphens, apostrophes, periods only.");
 
-            if (string.IsNullOrWhiteSpace(_lastNameTxt.Text))
-            { errorMessage = "Last name is required."; _lastNameTxt.Focus(); return false; }
-            if (_lastNameTxt.Text.Trim().Length < 2)
-            { errorMessage = "Last name must be at least 2 characters."; _lastNameTxt.Focus(); return false; }
+            // ---- Last name ----
+            var last = _lastNameTxt.Text.Trim();
+            if (last.Length == 0)
+                MarkFieldError(_lastNameTxt, "Last name is required.");
+            else if (last.Length < 2)
+                MarkFieldError(_lastNameTxt, "Must be at least 2 characters.");
+            else if (last.Length > 50)
+                MarkFieldError(_lastNameTxt, "Must be 50 characters or fewer.");
+            else if (!NameRegex.IsMatch(last))
+                MarkFieldError(_lastNameTxt, "Letters, spaces, hyphens, apostrophes, periods only.");
 
-            if (string.IsNullOrWhiteSpace(_phoneTxt.Text))
-            { errorMessage = "Mobile number is required."; _phoneTxt.Focus(); return false; }
-            if (!PhoneRegex.IsMatch(_phoneTxt.Text.Trim()))
+            // ---- Mobile ----
+            var phone = _phoneTxt.Text.Trim();
+            if (phone.Length == 0)
+                MarkFieldError(_phoneTxt, "Mobile number is required.");
+            else if (!PhoneRegex.IsMatch(phone))
+                MarkFieldError(_phoneTxt, "7–20 chars; digits, spaces, +, -, ( ) only.");
+
+            // ---- Email ----
+            var email = _emailTxt.Text.Trim();
+            if (email.Length == 0)
+                MarkFieldError(_emailTxt, "Email is required.");
+            else if (email.Length > 200)
+                MarkFieldError(_emailTxt, "Must be 200 characters or fewer.");
+            else if (!EmailRegex.IsMatch(email))
+                MarkFieldError(_emailTxt, "Not a valid email format. Example: name@example.com");
+
+            // ---- Street ----
+            var street = _streetTxt.Text.Trim();
+            if (street.Length == 0)
+                MarkFieldError(_streetTxt, "Street / Barangay is required.");
+            else if (street.Length < 3)
+                MarkFieldError(_streetTxt, "Must be at least 3 characters.");
+            else if (street.Length > 200)
+                MarkFieldError(_streetTxt, "Must be 200 characters or fewer.");
+
+            // ---- City ----
+            var city = _cityTxt.Text.Trim();
+            if (city.Length == 0)
+                MarkFieldError(_cityTxt, "City / Municipality is required.");
+            else if (city.Length < 2)
+                MarkFieldError(_cityTxt, "Must be at least 2 characters.");
+
+            // ---- Plate ----
+            var plate = _plateTxt.Text.Trim();
+            if (plate.Length == 0)
+                MarkFieldError(_plateTxt, "Plate number is required.");
+            else if (!PlateRegex.IsMatch(plate))
+                MarkFieldError(_plateTxt, "2–15 chars; letters, numbers, spaces, hyphens only.");
+
+            // ---- Make ----
+            var makeChoice = (string?)_makeCombo.SelectedItem ?? "";
+            if (string.IsNullOrEmpty(makeChoice))
+                MarkFieldError(_makeCombo, "Please select a vehicle make.");
+            else if (makeChoice == "Other" && string.IsNullOrWhiteSpace(_makeOtherTxt.Text))
+                MarkFieldError(_makeOtherTxt, "Please type the vehicle make.");
+
+            // ---- Model ----
+            var model = _modelTxt.Text.Trim();
+            if (model.Length == 0)
+                MarkFieldError(_modelTxt, "Vehicle model is required.");
+            else if (!ModelRegex.IsMatch(model))
+                MarkFieldError(_modelTxt, "Letters, numbers, spaces, and . - ' / only.");
+
+            // ---- Year ----
+            var yearText = (string?)_yearCombo.SelectedItem ?? "";
+            if (string.IsNullOrWhiteSpace(yearText))
             {
-                errorMessage = "Mobile number must be 7–20 digits. Only numbers, spaces, +, -, and ( ) are allowed.";
-                _phoneTxt.Focus();
-                return false;
+                MarkFieldError(_yearCombo, "Please select the vehicle year model.");
+            }
+            else if (!int.TryParse(yearText, out var year) || year < 1970 || year > DateTime.Today.Year)
+            {
+                MarkFieldError(_yearCombo, $"Year must be between 1970 and {DateTime.Today.Year}.");
             }
 
-            if (string.IsNullOrWhiteSpace(_emailTxt.Text))
-            { errorMessage = "Email is required."; _emailTxt.Focus(); return false; }
-            if (!EmailRegex.IsMatch(_emailTxt.Text.Trim()))
-            { errorMessage = "Email isn't in a valid format. Example: name@example.com"; _emailTxt.Focus(); return false; }
+            // ---- Body type ----
+            var body = (string?)_bodyCombo.SelectedItem ?? "";
+            if (string.IsNullOrEmpty(body))
+                MarkFieldError(_bodyCombo, "Please select a vehicle body type.");
 
-            if (string.IsNullOrWhiteSpace(_plateTxt.Text))
-            { errorMessage = "Plate number is required."; _plateTxt.Focus(); return false; }
-            if (!PlateRegex.IsMatch(_plateTxt.Text.Trim()))
-            {
-                errorMessage = "Plate number must be 2–15 characters (letters, numbers, spaces, hyphens only).";
-                _plateTxt.Focus();
-                return false;
-            }
+            // ---- Color ----
+            var colorChoice = (string?)_colorCombo.SelectedItem ?? "";
+            if (string.IsNullOrEmpty(colorChoice))
+                MarkFieldError(_colorCombo, "Please select a vehicle color.");
+            else if (colorChoice == "Other" && string.IsNullOrWhiteSpace(_colorOtherTxt.Text))
+                MarkFieldError(_colorOtherTxt, "Please type the colour.");
 
-            // If the user picked "Other" for make, force them to type a value
-            if ((string?)_makeCombo.SelectedItem == "Other" &&
-                string.IsNullOrWhiteSpace(_makeOtherTxt.Text))
-            {
-                errorMessage = "Please type the vehicle make you selected as 'Other'.";
-                _makeOtherTxt.Focus();
-                return false;
-            }
+            // If any ErrorProvider.SetError marked something, validation failed.
+            bool ok = !HasAnyError();
+            return ok;
+        }
 
-            // If the user picked "Other" for colour, force them to type a value
-            if ((string?)_colorCombo.SelectedItem == "Other" &&
-                string.IsNullOrWhiteSpace(_colorOtherTxt.Text))
-            {
-                errorMessage = "Please type the colour you selected as 'Other'.";
-                _colorOtherTxt.Focus();
-                return false;
-            }
+        private bool HasAnyError()
+        {
+            return !string.IsNullOrEmpty(_errors.GetError(_firstNameTxt))
+                || !string.IsNullOrEmpty(_errors.GetError(_lastNameTxt))
+                || !string.IsNullOrEmpty(_errors.GetError(_phoneTxt))
+                || !string.IsNullOrEmpty(_errors.GetError(_emailTxt))
+                || !string.IsNullOrEmpty(_errors.GetError(_streetTxt))
+                || !string.IsNullOrEmpty(_errors.GetError(_cityTxt))
+                || !string.IsNullOrEmpty(_errors.GetError(_plateTxt))
+                || !string.IsNullOrEmpty(_errors.GetError(_makeCombo))
+                || !string.IsNullOrEmpty(_errors.GetError(_makeOtherTxt))
+                || !string.IsNullOrEmpty(_errors.GetError(_modelTxt))
+                || !string.IsNullOrEmpty(_errors.GetError(_yearCombo))
+                || !string.IsNullOrEmpty(_errors.GetError(_bodyCombo))
+                || !string.IsNullOrEmpty(_errors.GetError(_colorCombo))
+                || !string.IsNullOrEmpty(_errors.GetError(_colorOtherTxt));
+        }
 
-            return true;
+        private void ClearAllErrors()
+        {
+            ClearFieldError(_firstNameTxt);
+            ClearFieldError(_lastNameTxt);
+            ClearFieldError(_phoneTxt);
+            ClearFieldError(_emailTxt);
+            ClearFieldError(_streetTxt);
+            ClearFieldError(_cityTxt);
+            ClearFieldError(_plateTxt);
+            ClearFieldError(_makeCombo);
+            ClearFieldError(_makeOtherTxt);
+            ClearFieldError(_modelTxt);
+            ClearFieldError(_yearCombo);
+            ClearFieldError(_bodyCombo);
+            ClearFieldError(_colorCombo);
+            ClearFieldError(_colorOtherTxt);
         }
 
         // =================================================================
@@ -651,11 +777,27 @@ namespace CarwashServices.Dialogs
         // =================================================================
         private async Task SaveAsync()
         {
-            if (!ValidateForm(out string error))
+            if (!ValidateForm())
             {
-                _errorLbl.Text = error;
+                _errorLbl.Text = "Please correct the highlighted fields.";
+
+                // Focus the first invalid control so the user lands on it.
+                foreach (Control c in new Control[]
+                {
+                    _firstNameTxt, _lastNameTxt, _phoneTxt, _emailTxt,
+                    _streetTxt, _cityTxt, _plateTxt, _makeCombo, _makeOtherTxt,
+                    _modelTxt, _yearCombo, _bodyCombo, _colorCombo, _colorOtherTxt
+                })
+                {
+                    if (!string.IsNullOrEmpty(_errors.GetError(c)))
+                    {
+                        c.Focus();
+                        break;
+                    }
+                }
                 return;
             }
+
             ClearError();
 
             if (!ConfirmSave()) return;
@@ -677,7 +819,6 @@ namespace CarwashServices.Dialogs
                 contactNumber = _phoneTxt.Text.Trim(),
                 emailAddress = _emailTxt.Text.Trim(),
                 address = ResolveAddress(),
-                // On create, force Active. Status is only editable on edit.
                 isActive = _isEdit
                     ? _statusCombo.SelectedItem?.ToString() != "Inactive"
                     : true,

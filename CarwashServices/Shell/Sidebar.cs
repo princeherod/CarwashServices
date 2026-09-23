@@ -12,13 +12,19 @@ namespace CarwashServices.Shell
     {
         public event EventHandler<string>? ModuleSelected;
 
+        /// <summary>
+        /// Raised when the user clicks Sign Out. MainForm listens for this and
+        /// closes itself so the outer loop in Program.Main can re-show the
+        /// login screen without restarting the process.
+        /// </summary>
+        public event EventHandler? SignOutRequested;
+
         private string _activeModule = "";
 
         public string ActiveModuleKey => _activeModule;
 
-        // Kept so we can just toggle colours on click instead of rebuilding the whole sidebar.
-        private readonly Dictionary<string, Button> _moduleButtons = new();
-        private readonly Dictionary<string, Panel> _moduleAccents = new();
+        // Kept so we can toggle highlights on click without rebuilding the whole sidebar.
+        private readonly Dictionary<string, SidebarButton> _moduleButtons = new();
 
         // ---- Palette ----
         private static readonly Color NavyBg = Color.FromArgb(0x0A, 0x14, 0x28);
@@ -41,7 +47,6 @@ namespace CarwashServices.Shell
                      ControlStyles.UserPaint, true);
 
             _moduleButtons.Clear();
-            _moduleAccents.Clear();
             Build();
         }
 
@@ -52,25 +57,17 @@ namespace CarwashServices.Shell
         {
             if (_activeModule == moduleKey) return;
 
-            // Dim the previously active item
             if (!string.IsNullOrEmpty(_activeModule) &&
                 _moduleButtons.TryGetValue(_activeModule, out var oldBtn))
             {
-                oldBtn.BackColor = NavyBg;
-                oldBtn.FlatAppearance.MouseOverBackColor = NavyHover;
-                if (_moduleAccents.TryGetValue(_activeModule, out var oldAccent))
-                    oldAccent.Visible = false;
+                oldBtn.SetActive(false);
             }
 
             _activeModule = moduleKey;
 
-            // Highlight the newly active item
             if (_moduleButtons.TryGetValue(moduleKey, out var newBtn))
             {
-                newBtn.BackColor = NavyActive;
-                newBtn.FlatAppearance.MouseOverBackColor = NavyActive;
-                if (_moduleAccents.TryGetValue(moduleKey, out var newAccent))
-                    newAccent.Visible = true;
+                newBtn.SetActive(true);
             }
         }
 
@@ -290,17 +287,22 @@ namespace CarwashServices.Shell
             card.BringToFront();
         }
 
+        // ================================================================
+        //  SIGN OUT — raises the event so MainForm can close itself
+        // ================================================================
         private void SignOut()
         {
-            SessionUser.Clear();
-            var main = FindForm();
-            main?.Hide();
+            var confirm = MessageBox.Show(
+                "Sign out of AquaShine CRM?",
+                "Sign Out",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
 
-            using var login = new LoginForm();
-            if (login.ShowDialog() == DialogResult.OK)
-                Application.Restart();
-            else
-                main?.Close();
+            if (confirm != DialogResult.Yes) return;
+
+            SessionUser.Clear();
+            SignOutRequested?.Invoke(this, EventArgs.Empty);
         }
 
         private static string Initials(string name)
@@ -345,143 +347,34 @@ namespace CarwashServices.Shell
         }
 
         // ================================================================
-        // MENU ITEM — always creates the accent bar, just toggles visibility
+        // MENU ITEM — a single double-buffered control paints its own
+        // background, accent bar, icon, and label. No child controls, no
+        // transparent-panel flicker.
         // ================================================================
         private int AddItem(string label, string iconKey, int y, string? key = null)
         {
-            bool isActive = key != null && key == _activeModule;
-
-            var btn = new Button
+            var btn = new SidebarButton(iconKey, label)
             {
-                Text = "        " + label,
-                TextAlign = ContentAlignment.MiddleLeft,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9.5f),
-                ForeColor = TextMain,
-                BackColor = isActive ? NavyActive : NavyBg,
                 Width = 240,
                 Height = 42,
                 Left = 20,
                 Top = y,
                 Cursor = Cursors.Hand,
-                Padding = new Padding(20, 0, 0, 0)
+                Tag = key
             };
 
-            btn.FlatAppearance.BorderSize = 0;
-            btn.FlatAppearance.MouseOverBackColor = isActive ? NavyActive : NavyHover;
-
-            // Accent bar — always created, just hidden when inactive
-            var accent = new Panel
-            {
-                Location = new Point(0, 0),
-                Size = new Size(4, 42),
-                BackColor = AccentBlue,
-                Visible = isActive
-            };
-            btn.Controls.Add(accent);
-
-            var icon = new Panel
-            {
-                Location = new Point(20, 11),
-                Size = new Size(20, 20),
-                BackColor = Color.Transparent
-            };
-            icon.Paint += (s, e) => DrawIcon(e.Graphics, iconKey, isActive ? AccentBlue : TextDim);
-            btn.Controls.Add(icon);
+            if (key != null && key == _activeModule)
+                btn.SetActive(true);
 
             if (key != null)
             {
                 var capturedKey = key;
                 btn.Click += (s, e) => ModuleSelected?.Invoke(this, capturedKey);
                 _moduleButtons[capturedKey] = btn;
-                _moduleAccents[capturedKey] = accent;
             }
 
             Controls.Add(btn);
             return y + 46;
-        }
-
-        // ================================================================
-        // ICON DRAWING
-        // ================================================================
-        private static void DrawIcon(Graphics g, string key, Color color)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using var pen = new Pen(color, 1.6f);
-            pen.StartCap = LineCap.Round;
-            pen.EndCap = LineCap.Round;
-            pen.LineJoin = LineJoin.Round;
-            using var brush = new SolidBrush(color);
-
-            switch (key)
-            {
-                case "dashboard":
-                    g.DrawRectangle(pen, 2, 2, 7, 7);
-                    g.DrawRectangle(pen, 11, 2, 7, 7);
-                    g.DrawRectangle(pen, 2, 11, 7, 7);
-                    g.DrawRectangle(pen, 11, 11, 7, 7);
-                    break;
-                case "analytics":
-                    g.DrawLine(pen, 2, 18, 2, 3);
-                    g.DrawLine(pen, 2, 18, 18, 18);
-                    g.FillRectangle(brush, 5, 11, 3, 7);
-                    g.FillRectangle(brush, 10, 7, 3, 11);
-                    g.FillRectangle(brush, 15, 4, 3, 14);
-                    break;
-                case "reports":
-                    g.DrawRectangle(pen, 3, 2, 14, 17);
-                    g.DrawLine(pen, 6, 7, 14, 7);
-                    g.DrawLine(pen, 6, 11, 14, 11);
-                    g.DrawLine(pen, 6, 15, 12, 15);
-                    break;
-                case "users":
-                    g.DrawEllipse(pen, 2, 3, 6, 6);
-                    g.DrawArc(pen, 0, 9, 10, 10, 180, 180);
-                    g.DrawEllipse(pen, 13, 9, 5, 5);
-                    g.DrawLine(pen, 15, 14, 15, 19);
-                    g.DrawLine(pen, 15, 17, 18, 17);
-                    break;
-                case "customers":
-                    g.DrawEllipse(pen, 3, 2, 5, 5);
-                    g.DrawArc(pen, 1, 8, 9, 9, 180, 180);
-                    g.DrawEllipse(pen, 12, 3, 5, 5);
-                    g.DrawArc(pen, 10, 9, 9, 9, 180, 180);
-                    break;
-                case "services":
-                    g.DrawArc(pen, 1, 1, 10, 10, 30, 300);
-                    g.DrawLine(pen, 9, 9, 17, 17);
-                    g.DrawEllipse(pen, 15, 15, 4, 4);
-                    break;
-                case "requests":
-                    g.DrawRectangle(pen, 1, 8, 11, 8);
-                    g.DrawLine(pen, 12, 10, 18, 10);
-                    g.DrawLine(pen, 18, 10, 18, 16);
-                    g.DrawEllipse(pen, 3, 14, 4, 4);
-                    g.DrawEllipse(pen, 13, 14, 4, 4);
-                    break;
-                case "reminders":
-                    g.DrawArc(pen, 4, 3, 12, 12, 180, 180);
-                    g.DrawLine(pen, 4, 11, 4, 15);
-                    g.DrawLine(pen, 16, 11, 16, 15);
-                    g.DrawLine(pen, 3, 15, 17, 15);
-                    g.DrawEllipse(pen, 8, 16, 4, 3);
-                    break;
-                case "admin":
-                    PointF[] shield =
-                    {
-                        new PointF(10, 2),
-                        new PointF(17, 5),
-                        new PointF(17, 11),
-                        new PointF(10, 18),
-                        new PointF(3, 11),
-                        new PointF(3, 5)
-                    };
-                    g.DrawPolygon(pen, shield);
-                    break;
-                default:
-                    g.DrawEllipse(pen, 4, 4, 12, 12);
-                    break;
-            }
         }
 
         private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
@@ -494,6 +387,184 @@ namespace CarwashServices.Shell
             path.AddArc(bounds.X, bounds.Y + bounds.Height - d, d, d, 90, 90);
             path.CloseFigure();
             return path;
+        }
+
+        // ================================================================
+        //  SidebarButton — double-buffered, owns its own icon + accent bar
+        // ================================================================
+        private sealed class SidebarButton : Button
+        {
+            private static readonly Color BgNormal = Color.FromArgb(0x0A, 0x14, 0x28);
+            private static readonly Color BgActive = Color.FromArgb(0x14, 0x2A, 0x52);
+            private static readonly Color BgHover = Color.FromArgb(0x12, 0x22, 0x40);
+            private static readonly Color Accent = Color.FromArgb(0x42, 0xA5, 0xF5);
+            private static readonly Color IconIdle = Color.FromArgb(0x9A, 0xA8, 0xC0);
+            private static readonly Color TextMain = Color.White;
+
+            private readonly string _iconKey;
+            private readonly string _label;
+            private bool _active;
+            private bool _hover;
+
+            public SidebarButton(string iconKey, string label)
+            {
+                _iconKey = iconKey ?? "dashboard";
+                _label = label ?? "";
+
+                SetStyle(
+                    ControlStyles.UserPaint |
+                    ControlStyles.AllPaintingInWmPaint |
+                    ControlStyles.OptimizedDoubleBuffer |
+                    ControlStyles.ResizeRedraw, true);
+
+                FlatStyle = FlatStyle.Flat;
+                FlatAppearance.BorderSize = 0;
+                BackColor = BgNormal;
+                ForeColor = TextMain;
+                Font = new Font("Segoe UI", 9.5f);
+                Text = "";  // painted manually
+            }
+
+            public void SetActive(bool active)
+            {
+                if (_active == active) return;
+                _active = active;
+                Invalidate();
+            }
+
+            protected override void OnMouseEnter(EventArgs e)
+            {
+                base.OnMouseEnter(e);
+                _hover = true;
+                Invalidate();
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                base.OnMouseLeave(e);
+                _hover = false;
+                Invalidate();
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                // Background
+                Color bg = _active ? BgActive : (_hover ? BgHover : BgNormal);
+                using (var b = new SolidBrush(bg))
+                    g.FillRectangle(b, ClientRectangle);
+
+                // Accent bar (left edge) when active
+                if (_active)
+                {
+                    using var accent = new SolidBrush(Accent);
+                    g.FillRectangle(accent, 0, 0, 4, Height);
+                }
+
+                // Icon
+                Color iconColor = _active ? Accent : IconIdle;
+                var iconRect = new RectangleF(20, (Height - 20) / 2f, 20, 20);
+                DrawIcon(g, _iconKey, iconRect, iconColor);
+
+                // Label
+                var textRect = new Rectangle(52, 0, Width - 56, Height);
+                TextRenderer.DrawText(
+                    g, _label, Font, textRect, TextMain,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis |
+                    TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            }
+
+            private static void DrawIcon(Graphics g, string key, RectangleF bounds, Color color)
+            {
+                var state = g.Save();
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                g.TranslateTransform(bounds.X, bounds.Y);
+                g.ScaleTransform(bounds.Width / 20f, bounds.Height / 20f);
+
+                using var pen = new Pen(color, 1.6f)
+                {
+                    StartCap = LineCap.Round,
+                    EndCap = LineCap.Round,
+                    LineJoin = LineJoin.Round
+                };
+                using var brush = new SolidBrush(color);
+
+                switch (key)
+                {
+                    case "dashboard":
+                        g.DrawRectangle(pen, 2, 2, 7, 7);
+                        g.DrawRectangle(pen, 11, 2, 7, 7);
+                        g.DrawRectangle(pen, 2, 11, 7, 7);
+                        g.DrawRectangle(pen, 11, 11, 7, 7);
+                        break;
+                    case "analytics":
+                        g.DrawLine(pen, 2, 18, 2, 3);
+                        g.DrawLine(pen, 2, 18, 18, 18);
+                        g.FillRectangle(brush, 5, 11, 3, 7);
+                        g.FillRectangle(brush, 10, 7, 3, 11);
+                        g.FillRectangle(brush, 15, 4, 3, 14);
+                        break;
+                    case "reports":
+                        g.DrawRectangle(pen, 3, 2, 14, 17);
+                        g.DrawLine(pen, 6, 7, 14, 7);
+                        g.DrawLine(pen, 6, 11, 14, 11);
+                        g.DrawLine(pen, 6, 15, 12, 15);
+                        break;
+                    case "users":
+                        g.DrawEllipse(pen, 2, 3, 6, 6);
+                        g.DrawArc(pen, 0, 9, 10, 10, 180, 180);
+                        g.DrawEllipse(pen, 13, 9, 5, 5);
+                        g.DrawLine(pen, 15, 14, 15, 19);
+                        g.DrawLine(pen, 15, 17, 18, 17);
+                        break;
+                    case "customers":
+                        g.DrawEllipse(pen, 3, 2, 5, 5);
+                        g.DrawArc(pen, 1, 8, 9, 9, 180, 180);
+                        g.DrawEllipse(pen, 12, 3, 5, 5);
+                        g.DrawArc(pen, 10, 9, 9, 9, 180, 180);
+                        break;
+                    case "services":
+                        g.DrawArc(pen, 1, 1, 10, 10, 30, 300);
+                        g.DrawLine(pen, 9, 9, 17, 17);
+                        g.DrawEllipse(pen, 15, 15, 4, 4);
+                        break;
+                    case "requests":
+                        g.DrawRectangle(pen, 1, 8, 11, 8);
+                        g.DrawLine(pen, 12, 10, 18, 10);
+                        g.DrawLine(pen, 18, 10, 18, 16);
+                        g.DrawEllipse(pen, 3, 14, 4, 4);
+                        g.DrawEllipse(pen, 13, 14, 4, 4);
+                        break;
+                    case "reminders":
+                        g.DrawArc(pen, 4, 3, 12, 12, 180, 180);
+                        g.DrawLine(pen, 4, 11, 4, 15);
+                        g.DrawLine(pen, 16, 11, 16, 15);
+                        g.DrawLine(pen, 3, 15, 17, 15);
+                        g.DrawEllipse(pen, 8, 16, 4, 3);
+                        break;
+                    case "admin":
+                        PointF[] shield =
+                        {
+                            new PointF(10, 2),
+                            new PointF(17, 5),
+                            new PointF(17, 11),
+                            new PointF(10, 18),
+                            new PointF(3, 11),
+                            new PointF(3, 5)
+                        };
+                        g.DrawPolygon(pen, shield);
+                        break;
+                    default:
+                        g.DrawEllipse(pen, 4, 4, 12, 12);
+                        break;
+                }
+
+                g.Restore(state);
+            }
         }
     }
 }

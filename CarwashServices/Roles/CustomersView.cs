@@ -133,7 +133,7 @@ namespace CarwashServices.Roles
                 Text = "Customers · vehicles · interactions",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
-                Location = new Point(0, 76),          // nudged down so it no longer touches the title
+                Location = new Point(0, 76),
                 AutoSize = true
             });
 
@@ -348,7 +348,6 @@ namespace CarwashServices.Roles
                 (c.CustomerCode?.ToLower().Contains(search) ?? false)
             ).ToList();
 
-            // Rows that fit in the visible area (set _pageSize = 6 here for a fixed size)
             _pageSize = Math.Max(1, (st.ListPanel.ClientSize.Height + RowGap) / (RowHeight + RowGap));
 
             int totalPages = Math.Max(1, (int)Math.Ceiling(filtered.Count / (double)_pageSize));
@@ -521,7 +520,6 @@ namespace CarwashServices.Roles
             };
             row.Controls.Add(metaLbl);
 
-            // Status — plain colored text (no pill / background)
             var statusLbl = new Label
             {
                 Text = c.IsActive ? "Active" : "Inactive",
@@ -592,7 +590,7 @@ namespace CarwashServices.Roles
                 BackColor = Color.White,
                 ForeColor = Navy,
                 Size = new Size(140, 40),
-                Location = new Point(600, 0),           // fallback — Resize will move it
+                Location = new Point(600, 0),
                 Cursor = Cursors.Hand,
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
@@ -609,7 +607,6 @@ namespace CarwashServices.Roles
             };
             _detailScreen.Controls.Add(editBtn);
 
-            // ---- outline style so the buttons don't render grey ----
             StyleOutlineButton(backBtn);
             StyleOutlineButton(editBtn);
 
@@ -669,7 +666,6 @@ namespace CarwashServices.Roles
             };
             header.Controls.Add(subLbl);
 
-            // Status — plain colored text (no pill / background)
             var pill = new Label
             {
                 Text = customer.IsActive ? "Active" : "Inactive",
@@ -753,7 +749,6 @@ namespace CarwashServices.Roles
             _detailScreen.Resize += (s, e) => LayoutDetail();
             LayoutDetail();
 
-            // ---- Tab switch handlers ----
             void SelectProfile()
             {
                 tabProfile.ForeColor = Navy;
@@ -975,7 +970,7 @@ namespace CarwashServices.Roles
                 int y = 0;
                 foreach (var it in items.OrderByDescending(x => x.CreatedAt))
                 {
-                    var row = BuildInteractionRow(it);
+                    var row = BuildInteractionRow(it, LoadAsync);
                     row.Location = new Point(0, y);
                     row.Width = listPanel.ClientSize.Width - 4;
                     row.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -1016,10 +1011,11 @@ namespace CarwashServices.Roles
             return host;
         }
 
-        // ---- One interaction card ----
-        private Panel BuildInteractionRow(CustomerInteractionDto it)
+        // ---- One interaction card (with optional inline Edit button) ----
+        private Panel BuildInteractionRow(CustomerInteractionDto it, Func<Task> reload)
         {
             bool isComplaint = string.Equals(it.Kind, "Complaint", StringComparison.OrdinalIgnoreCase);
+            bool resolved = string.Equals(it.Status, "Resolved", StringComparison.OrdinalIgnoreCase);
             Color barColor = isComplaint ? Red : Green;
             Color kindBg = isComplaint ? RedSoft : GreenSoft;
             Color kindFg = isComplaint ? Red : Green;
@@ -1059,7 +1055,7 @@ namespace CarwashServices.Roles
             };
             row.Controls.Add(sev);
 
-            bool resolved = string.Equals(it.Status, "Resolved", StringComparison.OrdinalIgnoreCase);
+            // ---- Status pill ----
             var statusPill = new Label
             {
                 Text = it.Status ?? "Open",
@@ -1074,15 +1070,45 @@ namespace CarwashServices.Roles
             row.Controls.Add(statusPill);
             row.Resize += (s, e) => statusPill.Location = new Point(row.Width - 100, 12);
 
+            // ---- Inline Edit button (only when the record is still Open) ----
+            if (!resolved)
+            {
+                var editBtn = new Button
+                {
+                    Text = "Edit",
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font("Segoe UI Semibold", 9f),
+                    ForeColor = Navy,
+                    BackColor = Color.White,
+                    Size = new Size(80, 30),
+                    Cursor = Cursors.Hand,
+                    Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                    Location = new Point(row.Width - 100, 46)
+                };
+                editBtn.FlatAppearance.BorderColor = CardBorder;
+                editBtn.Click += async (s, e) =>
+                {
+                    using var dlg = new InteractionEditDialog(it.CustomerId, it.Kind, it.InteractionId);
+                    if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+                        await reload();
+                };
+                row.Controls.Add(editBtn);
+                row.Resize += (s, e) => editBtn.Location = new Point(row.Width - 100, 46);
+            }
+
             var title = new Label
             {
                 Text = it.Title ?? "",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 11f),
                 Location = new Point(20, 44),
-                AutoSize = true
+                AutoSize = false,
+                AutoEllipsis = true,
+                Size = new Size(row.Width - 130, 20),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             row.Controls.Add(title);
+            row.Resize += (s, e) => title.Width = Math.Max(80, row.Width - 130);
 
             var details = new Label
             {
@@ -1090,9 +1116,13 @@ namespace CarwashServices.Roles
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9.5f),
                 Location = new Point(20, 68),
-                AutoSize = true
+                AutoSize = false,
+                AutoEllipsis = true,
+                Size = new Size(row.Width - 40, 20),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             row.Controls.Add(details);
+            row.Resize += (s, e) => details.Width = Math.Max(80, row.Width - 40);
 
             var date = new Label
             {

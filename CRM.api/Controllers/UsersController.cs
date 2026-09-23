@@ -50,10 +50,7 @@ public class UsersController : ControllerBase
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.UserId == id);
 
-        if (row is null)
-            return NotFound(new { message = $"User {id} not found." });
-
-        if (!AllowedRoleIds.Contains(row.RoleId))
+        if (row is null || !AllowedRoleIds.Contains(row.RoleId))
             return NotFound(new { message = $"User {id} not found." });
 
         return Ok(new
@@ -86,6 +83,8 @@ public class UsersController : ControllerBase
             return BadRequest(new { message = "Email is required." });
         if (!AllowedRoleIds.Contains(req.RoleId))
             return BadRequest(new { message = "Role must be Manager or Service Staff." });
+        if (string.IsNullOrWhiteSpace(req.Password))
+            return BadRequest(new { message = "Password is required." });
 
         var email = req.Email.Trim().ToLowerInvariant();
 
@@ -93,22 +92,28 @@ public class UsersController : ControllerBase
         if (exists)
             return Conflict(new { message = $"A user with email '{req.Email}' already exists." });
 
-        // Demo hashing — replace with a real hash later.
-        var passwordHash = string.IsNullOrWhiteSpace(req.Password) ? "" : req.Password;
-
         var user = new User
         {
             FullName = req.FullName.Trim(),
             Email = req.Email.Trim(),
             RoleId = req.RoleId,
             Status = string.IsNullOrWhiteSpace(req.Status) ? "Active" : req.Status,
-            PasswordHash = passwordHash,
-            IdentityUserId = "",      // linked later if you add ASP.NET Identity
+            PasswordHash = req.Password ?? string.Empty,   // never null in the DB
+            IdentityUserId = string.Empty,                 // never null in the DB
             CreatedAt = DateTime.UtcNow
         };
 
         _db.Users.Add(user);
-        await _db.SaveChangesAsync();
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+        {
+            var inner = ex.InnerException?.Message ?? ex.Message;
+            return StatusCode(500, new { message = "Create failed.", detail = inner });
+        }
 
         return CreatedAtAction(nameof(GetById), new { id = user.UserId }, new
         {
@@ -127,7 +132,7 @@ public class UsersController : ControllerBase
         public string Email { get; set; } = "";
         public int RoleId { get; set; }
         public string Status { get; set; } = "Active";
-        public string? Password { get; set; }     // optional — blank = keep existing
+        public string? Password { get; set; }   // blank = keep existing
     }
 
     // PUT: api/users/5
@@ -135,10 +140,7 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> Update(int id, [FromBody] UserUpdateRequest req)
     {
         var existing = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id);
-        if (existing is null)
-            return NotFound(new { message = $"User {id} not found." });
-
-        if (!AllowedRoleIds.Contains(existing.RoleId))
+        if (existing is null || !AllowedRoleIds.Contains(existing.RoleId))
             return NotFound(new { message = $"User {id} not found." });
 
         if (string.IsNullOrWhiteSpace(req.FullName))
@@ -158,10 +160,27 @@ public class UsersController : ControllerBase
         existing.RoleId = req.RoleId;
         existing.Status = string.IsNullOrWhiteSpace(req.Status) ? "Active" : req.Status;
 
-        if (!string.IsNullOrWhiteSpace(req.Password))
-            existing.PasswordHash = req.Password;   // replace with hashing later
+        // Only replace the password if the caller actually sent a non-empty one.
+        if (!string.IsNullOrEmpty(req.Password))
+            existing.PasswordHash = req.Password;
 
-        await _db.SaveChangesAsync();
+        // ---- Defensive: the entity declares these as non-nullable strings,
+        // but the DB rows may have drifted to NULL. Coerce before saving so
+        // the UPDATE never fails on a NOT NULL constraint.
+        existing.PasswordHash ??= string.Empty;
+        existing.IdentityUserId ??= string.Empty;
+        if (existing.CreatedAt == default)
+            existing.CreatedAt = DateTime.UtcNow;
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+        {
+            var inner = ex.InnerException?.Message ?? ex.Message;
+            return StatusCode(500, new { message = "Save failed.", detail = inner });
+        }
 
         return Ok(new
         {
@@ -179,14 +198,20 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> Delete(int id)
     {
         var row = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id);
-        if (row is null)
-            return NotFound(new { message = $"User {id} not found." });
-
-        if (!AllowedRoleIds.Contains(row.RoleId))
+        if (row is null || !AllowedRoleIds.Contains(row.RoleId))
             return NotFound(new { message = $"User {id} not found." });
 
         _db.Users.Remove(row);
-        await _db.SaveChangesAsync();
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+        {
+            var inner = ex.InnerException?.Message ?? ex.Message;
+            return StatusCode(500, new { message = "Delete failed.", detail = inner });
+        }
 
         return NoContent();
     }

@@ -18,6 +18,7 @@ using System.Windows.Forms;
 using CarwashServices.Controls.Charts;
 using CarwashServices.Controls.Reports;
 using CarwashServices.Dtos;
+using CarwashServices.Shell;
 
 namespace CarwashServices.Roles
 {
@@ -132,6 +133,28 @@ namespace CarwashServices.Roles
                 _currentExtra?.Dispose();
             }
             base.Dispose(disposing);
+        }
+
+        // ================================================================
+        //  NAVIGATION
+        // ================================================================
+        private void Navigate(string moduleKey)
+        {
+            (FindForm() as MainForm)?.NavigateToModule(moduleKey);
+        }
+
+        /// <summary>
+        /// Recursively attaches a click handler so the entire surface is clickable.
+        /// </summary>
+        private static void BindClick(Control root, Action onClick)
+        {
+            if (root == null || onClick == null) return;
+
+            root.Cursor = Cursors.Hand;
+            root.Click += (s, e) => onClick();
+
+            foreach (Control child in root.Controls)
+                BindClick(child, onClick);
         }
 
         // ================================================================
@@ -273,10 +296,10 @@ namespace CarwashServices.Roles
         {
             _kpiRow = Section(new Panel { BackColor = PageBg }, KpiRowHeight);
 
-            _kpiTxn = AddKpiCard("Total Transactions", out _kpiTxnSub);
-            _kpiRev = AddKpiCard("Total Revenue", out _kpiRevSub);
-            _kpiTicket = AddKpiCard("Avg. Ticket Size", out _kpiTicketSub);
-            _kpiPending = AddKpiCard("Pending / Cancelled", out _kpiPendingSub);
+            _kpiTxn = AddKpiCard("Total Transactions", out _kpiTxnSub, "Manage Service Requests");
+            _kpiRev = AddKpiCard("Total Revenue", out _kpiRevSub, "View Reports");
+            _kpiTicket = AddKpiCard("Avg. Ticket Size", out _kpiTicketSub, "View Reports");
+            _kpiPending = AddKpiCard("Pending / Cancelled", out _kpiPendingSub, "Manage Service Requests");
 
             _kpiRow.Resize += (s, e) =>
             {
@@ -288,7 +311,7 @@ namespace CarwashServices.Roles
             };
         }
 
-        private Label AddKpiCard(string title, out Label subtitle)
+        private Label AddKpiCard(string title, out Label subtitle, string clickModule)
         {
             var card = new CardPanel();
             _kpiRow.Controls.Add(card);
@@ -323,6 +346,12 @@ namespace CarwashServices.Roles
             };
             card.Controls.Add(subtitle);
 
+            if (!string.IsNullOrEmpty(clickModule))
+            {
+                string captured = clickModule;
+                BindClick(card, () => Navigate(captured));
+            }
+
             return val;
         }
 
@@ -334,8 +363,8 @@ namespace CarwashServices.Roles
             _lineChart = new ReportLineChart { BackColor = Color.White, LineColor = Blue };
             _barChart = new ReportBarChart { BackColor = Color.White, BarColor = Color.FromArgb(0x22, 0xA0, 0x66) };
 
-            var lineCard = MakeChartCard("Revenue by Month", _lineChart);
-            var barCard = MakeChartCard("Revenue by Service", _barChart);
+            var lineCard = MakeChartCard("Revenue by Month", _lineChart, "View Reports");
+            var barCard = MakeChartCard("Revenue by Service", _barChart, "Manage Services");
 
             _chartsRow.Resize += (s, e) =>
             {
@@ -345,7 +374,7 @@ namespace CarwashServices.Roles
             };
         }
 
-        private CardPanel MakeChartCard(string title, Control chart)
+        private CardPanel MakeChartCard(string title, Control chart, string clickModule)
         {
             var card = new CardPanel();
             _chartsRow.Controls.Add(card);
@@ -359,6 +388,13 @@ namespace CarwashServices.Roles
             });
             card.Controls.Add(chart);
             Inset(card, chart, 20, 50, 20, 16);
+
+            if (!string.IsNullOrEmpty(clickModule))
+            {
+                string captured = clickModule;
+                BindClick(card, () => Navigate(captured));
+            }
+
             return card;
         }
 
@@ -457,6 +493,14 @@ namespace CarwashServices.Roles
 
             _grid.CellPainting += Grid_CellPainting;
             _grid.SortCompare += Grid_SortCompare;
+
+            // Clicking a transaction row jumps to Service Requests.
+            _grid.CellMouseClick += (s, e) =>
+            {
+                if (e.RowIndex < 0) return;
+                Navigate("Manage Service Requests");
+            };
+
             _tableCard.Controls.Add(_grid);
             Inset(_tableCard, _grid, 20, 44, 20, 20);
 
@@ -498,10 +542,6 @@ namespace CarwashServices.Roles
         {
             if (_extraHost == null || !_extraHost.Visible) return;
             int w = Math.Max(760, _flow.ClientSize.Width - _flow.Padding.Horizontal);
-            // REMOVED the 600px floor — that was forcing the host taller than the
-            // visible flow area, which pushed the sub-view's KPI row up under its
-            // own header. The sub-views have their own AutoScroll, so let the host
-            // take whatever space is actually available.
             int h = Math.Max(200, _flow.ClientSize.Height - _flow.Padding.Vertical - 40);
             if (_extraHost.Width != w) _extraHost.Width = w;
             if (_extraHost.Height != h) _extraHost.Height = h;
@@ -525,7 +565,6 @@ namespace CarwashServices.Roles
                 _revenueWidgets.Add(_tableCard);
             }
 
-            // Dispose previous sub-view
             if (_currentExtra != null)
             {
                 _extraHost.Controls.Remove(_currentExtra);
@@ -735,9 +774,7 @@ namespace CarwashServices.Roles
 
                 BindData();
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
             catch (Exception ex)
             {
                 if (IsDisposed) return;

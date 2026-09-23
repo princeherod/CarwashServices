@@ -140,6 +140,20 @@ namespace CarwashServices.Shell
         {
             BuildUi();
             LoadRememberedEmail();
+
+            // ---- Anti-flicker: stay invisible until the first layout settles.
+            Opacity = 0;
+            Shown += (s, e) =>
+            {
+                PerformLayout();
+                Invalidate(true);
+                Update();
+                Opacity = 1;
+
+                // Focus the right field only once we're actually visible.
+                if (_email.Value.Length > 0) _password.FocusInput();
+                else _email.FocusInput();
+            };
         }
 
         private void BuildUi()
@@ -287,13 +301,6 @@ namespace CarwashServices.Shell
             BackColor = Color.White
         };
 
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-            if (_email.Value.Length > 0) _password.FocusInput();
-            else _email.FocusInput();
-        }
-
         private static string RememberFile =>
             Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -384,8 +391,12 @@ namespace CarwashServices.Shell
                     catch { }
 
                     SaveRememberedEmail();
+
+                    // Do NOT call Close(). Setting DialogResult makes
+                    // ShowDialog() return; the loop in Program.Main handles
+                    // disposal. Closing here would cause an extra repaint of
+                    // the parent form behind the login window.
                     DialogResult = DialogResult.OK;
-                    Close();
                     return;
                 }
 

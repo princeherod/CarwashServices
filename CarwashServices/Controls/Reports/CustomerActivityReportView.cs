@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using CarwashServices.Dtos;
+using CarwashServices.Shell;
 
 namespace CarwashServices.Controls.Reports
 {
@@ -53,20 +54,19 @@ namespace CarwashServices.Controls.Reports
         private readonly DataGridView _grid = new();
         private readonly Label _subtitle = new();
 
-        // ---- Layout rows ----
         private TableLayoutPanel _page;
-        private Panel _chartsRowPanel;    // row 2
-        private Panel _tableRowPanel;     // row 3
+        private TableLayoutPanel _chartsGrid;
+        private Card _tableCard;
+        private Panel _chartsRowPanel;
+        private Panel _tableRowPanel;
 
         public CustomerActivityReportView()
         {
             Dock = DockStyle.Fill;
             BackColor = PageBg;
             DoubleBuffered = true;
-
             AutoScroll = true;
             AutoScrollMinSize = new Size(900, 100 + 130 + 340 + 420);
-
             BuildUi();
         }
 
@@ -76,17 +76,13 @@ namespace CarwashServices.Controls.Reports
             _ = LoadAsync(_currentRange);
         }
 
-        // ---- View modes ----
-        // Row layout: 0=header (always)  1=KPI (always)  2=charts  3=table
         public void ShowChartOnly()
         {
             if (_page == null) return;
             _page.RowStyles[2] = new RowStyle(SizeType.Absolute, 340);
             _page.RowStyles[3] = new RowStyle(SizeType.Absolute, 0);
-
             if (_chartsRowPanel != null) _chartsRowPanel.Visible = true;
             if (_tableRowPanel != null) _tableRowPanel.Visible = false;
-
             _page.PerformLayout();
         }
 
@@ -95,10 +91,8 @@ namespace CarwashServices.Controls.Reports
             if (_page == null) return;
             _page.RowStyles[2] = new RowStyle(SizeType.Absolute, 0);
             _page.RowStyles[3] = new RowStyle(SizeType.Percent, 100f);
-
             if (_chartsRowPanel != null) _chartsRowPanel.Visible = false;
             if (_tableRowPanel != null) _tableRowPanel.Visible = true;
-
             _page.PerformLayout();
         }
 
@@ -107,11 +101,23 @@ namespace CarwashServices.Controls.Reports
             if (_page == null) return;
             _page.RowStyles[2] = new RowStyle(SizeType.Absolute, 340);
             _page.RowStyles[3] = new RowStyle(SizeType.Percent, 100f);
-
             if (_chartsRowPanel != null) _chartsRowPanel.Visible = true;
             if (_tableRowPanel != null) _tableRowPanel.Visible = true;
-
             _page.PerformLayout();
+        }
+
+        private static void BindClick(Control root, Action onClick)
+        {
+            if (root == null || onClick == null) return;
+            root.Cursor = Cursors.Hand;
+            root.Click += (s, e) => onClick();
+            foreach (Control child in root.Controls)
+                BindClick(child, onClick);
+        }
+
+        private void Navigate(string moduleKey)
+        {
+            (FindForm() as MainForm)?.NavigateToModule(moduleKey);
         }
 
         private void BuildUi()
@@ -126,13 +132,12 @@ namespace CarwashServices.Controls.Reports
                 Padding = Padding.Empty
             };
             _page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));   // row 0: header
-            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));   // row 1: KPI
-            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 340));   // row 2: charts
-            _page.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // row 3: table
+            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
+            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));
+            _page.RowStyles.Add(new RowStyle(SizeType.Absolute, 340));
+            _page.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             Controls.Add(_page);
 
-            // ---- Row 0: header ----
             var header = ComplaintFeedbackReportView.MakePageHeader(
                 "Customer Activity Report",
                 "How often each customer visits and how much they spend.");
@@ -140,7 +145,6 @@ namespace CarwashServices.Controls.Reports
             header.Margin = Padding.Empty;
             _page.Controls.Add(header, 0, 0);
 
-            // ---- Row 1: KPI ----
             var kpiGrid = MakeGrid(25f, 25f, 25f, 25f);
             AddKpi(kpiGrid, 0, "Total Customers", "", _kTotal, _kTotalSub, Blue);
             AddKpi(kpiGrid, 1, "Active Customers", "Visited within 60 days", _kActive, _kActiveSub, Green);
@@ -148,17 +152,18 @@ namespace CarwashServices.Controls.Reports
             AddKpi(kpiGrid, 3, "Avg Services / Customer", "", _kAvg, _kAvgSub, Orange);
             _page.Controls.Add(MakeRowHost(kpiGrid), 0, 1);
 
-            // ---- Row 2: charts ----
-            var chartsGrid = MakeGrid(50f, 50f);
-            chartsGrid.Controls.Add(
-                MakeCard("Customers by Acquisition Source", _bySource, new Padding(0, 0, 8, 16)), 0, 0);
-            chartsGrid.Controls.Add(
-                MakeCard("Customers by Vehicle Type", _byVehicle, new Padding(8, 0, 0, 16)), 1, 0);
-            _chartsRowPanel = MakeRowHost(chartsGrid);
+            _chartsGrid = MakeGrid(50f, 50f);
+            var sourceCard = MakeCard("Customers by Acquisition Source", _bySource, new Padding(0, 0, 8, 16));
+            var vehicleCard = MakeCard("Customers by Vehicle Type", _byVehicle, new Padding(8, 0, 0, 16));
+            BindClick(sourceCard, () => Navigate("Manage Customers"));
+            BindClick(vehicleCard, () => Navigate("Manage Customers"));
+            _chartsGrid.Controls.Add(sourceCard, 0, 0);
+            _chartsGrid.Controls.Add(vehicleCard, 1, 0);
+            _chartsRowPanel = MakeRowHost(_chartsGrid);
             _page.Controls.Add(_chartsRowPanel, 0, 2);
 
-            // ---- Row 3: table ----
-            _tableRowPanel = MakeRowHost(MakeTableCard());
+            _tableCard = MakeTableCard();
+            _tableRowPanel = MakeRowHost(_tableCard);
             _page.Controls.Add(_tableRowPanel, 0, 3);
         }
 
@@ -182,7 +187,6 @@ namespace CarwashServices.Controls.Reports
                 Margin = margin,
                 Padding = new Padding(20, 14, 20, 20)
             };
-
             content.Dock = DockStyle.Fill;
             card.Controls.Add(content);
             card.Controls.Add(new Label
@@ -205,7 +209,6 @@ namespace CarwashServices.Controls.Reports
                 Margin = Padding.Empty,
                 Padding = new Padding(20, 12, 20, 20)
             };
-
             ConfigureGrid();
             _grid.Dock = DockStyle.Fill;
             card.Controls.Add(_grid);
@@ -218,7 +221,6 @@ namespace CarwashServices.Controls.Reports
             _subtitle.Font = new Font("Segoe UI", 9f);
             _subtitle.UseMnemonic = false;
             card.Controls.Add(_subtitle);
-
             return card;
         }
 
@@ -276,6 +278,13 @@ namespace CarwashServices.Controls.Reports
             AddCol("Status", "Status", 11);
 
             _grid.CellPainting += Grid_CellPainting;
+
+            // Click a customer row -> jump to their record.
+            _grid.CellMouseClick += (s, e) =>
+            {
+                if (e.RowIndex < 0) return;
+                Navigate("Manage Customers");
+            };
         }
 
         private void AddCol(string name, string header, float weight,
@@ -288,7 +297,6 @@ namespace CarwashServices.Controls.Reports
                 FillWeight = weight,
                 MinimumWidth = 80
             };
-
             var style = new DataGridViewCellStyle();
             if (bold) style.Font = new Font("Segoe UI Semibold", 9.5f);
             if (format != null) style.Format = format;
@@ -296,7 +304,6 @@ namespace CarwashServices.Controls.Reports
             {
                 style.Alignment = DataGridViewContentAlignment.MiddleRight;
                 style.Padding = new Padding(0, 0, 16, 0);
-
                 col.HeaderCell.Style = new DataGridViewCellStyle(_grid.ColumnHeadersDefaultCellStyle)
                 {
                     Alignment = DataGridViewContentAlignment.MiddleRight,
@@ -304,7 +311,6 @@ namespace CarwashServices.Controls.Reports
                 };
             }
             col.DefaultCellStyle = style;
-
             _grid.Columns.Add(col);
         }
 
@@ -332,7 +338,6 @@ namespace CarwashServices.Controls.Reports
             {
                 Margin = new Padding(col == 0 ? 0 : 8, 0, col == count - 1 ? 0 : 8, 16)
             };
-
             card.Controls.Add(new Panel { Dock = DockStyle.Left, Width = 4, BackColor = accent });
 
             card.Controls.Add(new Label
@@ -359,6 +364,7 @@ namespace CarwashServices.Controls.Reports
             subLbl.BackColor = Color.White;
             card.Controls.Add(subLbl);
 
+            BindClick(card, () => Navigate("Manage Customers"));
             grid.Controls.Add(card, col, 0);
         }
 
@@ -372,7 +378,6 @@ namespace CarwashServices.Controls.Reports
                 var data = await _http.GetFromJsonAsync<CustomerActivityReportDto>(
                     $"api/reports/customer-activity?companyId=1&range={Uri.EscapeDataString(r)}")
                     ?? new CustomerActivityReportDto();
-
                 _data = data;
 
                 _kTotal.Text = data.TotalCustomers.ToString();
@@ -413,15 +418,8 @@ namespace CarwashServices.Controls.Reports
                 foreach (var row in data.Rows)
                 {
                     var idx = _grid.Rows.Add(
-                        row.Customer,
-                        Or(row.Phone),
-                        Or(row.VehicleType),
-                        Or(row.Source),
-                        row.TotalVisits,
-                        Or(row.LastVisit),
-                        row.LifetimeValue,
-                        row.AvgSpend,
-                        row.Status);
+                        row.Customer, Or(row.Phone), Or(row.VehicleType), Or(row.Source),
+                        row.TotalVisits, Or(row.LastVisit), row.LifetimeValue, row.AvgSpend, row.Status);
 
                     foreach (DataGridViewCell cell in _grid.Rows[idx].Cells)
                     {
@@ -468,8 +466,7 @@ namespace CarwashServices.Controls.Reports
 
                 var textSize = TextRenderer.MeasureText(e.Graphics, text, PillFont);
                 int h = 24;
-                var pill = new Rectangle(
-                    e.CellBounds.X + 12,
+                var pill = new Rectangle(e.CellBounds.X + 12,
                     e.CellBounds.Y + (e.CellBounds.Height - h) / 2,
                     textSize.Width + 20, h);
 
@@ -483,7 +480,6 @@ namespace CarwashServices.Controls.Reports
                 TextRenderer.DrawText(e.Graphics, text, PillFont, pill, fg,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
-
             e.Handled = true;
         }
 
@@ -499,9 +495,6 @@ namespace CarwashServices.Controls.Reports
             return p;
         }
 
-        // ------------------------------------------------------------------
-        //  Export
-        // ------------------------------------------------------------------
         public bool HasData => _data.Rows.Count > 0;
 
         public string BuildCsv()
@@ -531,12 +524,10 @@ namespace CarwashServices.Controls.Reports
             var doc = new PrintDocument { DocumentName = "Customer Activity Report" };
             doc.DefaultPageSettings.Landscape = true;
             doc.DefaultPageSettings.Margins = new Margins(50, 50, 50, 50);
-
             const float rowH = 22f;
             string[] heads = { "Customer", "Phone", "Vehicle", "Source", "Visits", "Last Visit", "LTV", "Avg Spend", "Status" };
             float[] weights = { 1.6f, 1.3f, 1.0f, 1.0f, 0.8f, 1.0f, 1.1f, 1.0f, 0.9f };
             int next = 0, page = 0;
-
             doc.BeginPrint += (s, e) => { next = 0; page = 0; };
 
             doc.PrintPage += (s, e) =>
@@ -598,8 +589,7 @@ namespace CarwashServices.Controls.Reports
                     DrawCells(new[]
                     {
                         r.Customer ?? "", r.Phone ?? "", r.VehicleType ?? "", r.Source ?? "",
-                        r.TotalVisits.ToString(),
-                        r.LastVisit ?? "",
+                        r.TotalVisits.ToString(), r.LastVisit ?? "",
                         "₱" + r.LifetimeValue.ToString("N0"),
                         "₱" + r.AvgSpend.ToString("N0"),
                         r.Status ?? ""
@@ -615,7 +605,6 @@ namespace CarwashServices.Controls.Reports
 
                 e.HasMorePages = next < rows.Count;
             };
-
             return doc;
         }
 

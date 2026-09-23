@@ -4,6 +4,7 @@ using System.Windows.Forms;
 
 using CarwashServices.Auth;
 using CarwashServices.Roles;
+using CarwashServices.Roles.Admin;
 
 namespace CarwashServices.Shell
 {
@@ -14,7 +15,13 @@ namespace CarwashServices.Shell
         private Label _titleLabel;
         private Panel _contentPanel;
 
-        // FIX: composite the entire form's child tree on the GPU — kills most flicker.
+        /// <summary>
+        /// Set to true by the sidebar when the user clicks Sign Out, so the
+        /// outer loop in Program.Main can show the login screen again without
+        /// restarting the process.
+        /// </summary>
+        public bool SignOutRequested { get; private set; }
+
         protected override CreateParams CreateParams
         {
             get
@@ -34,11 +41,15 @@ namespace CarwashServices.Shell
             Font = new Font("Segoe UI", 9.5f);
             MinimumSize = new Size(1200, 700);
 
-            // FIX: disable auto-redraw while we build the shell
             SuspendLayout();
 
             _sidebar = new Sidebar();
             _sidebar.ModuleSelected += Sidebar_ModuleSelected;
+            _sidebar.SignOutRequested += (s, e) =>
+            {
+                SignOutRequested = true;
+                Close();
+            };
             Controls.Add(_sidebar);
 
             _headerPanel = new Panel
@@ -66,7 +77,6 @@ namespace CarwashServices.Shell
                 BackColor = Color.FromArgb(0xF0, 0xF4, 0xFA)
             };
 
-            // FIX: turn on double-buffering for the content panel so view swaps don't flicker
             typeof(Panel)
                 .GetProperty("DoubleBuffered",
                     System.Reflection.BindingFlags.Instance |
@@ -78,7 +88,6 @@ namespace CarwashServices.Shell
 
             ResumeLayout(true);
 
-            // Pick a sensible default module for the logged-in role.
             var modules = RoleRouter.ModulesFor(SessionUser.Role);
             if (modules.Length > 0)
                 NavigateTo(modules[0]);
@@ -110,7 +119,6 @@ namespace CarwashServices.Shell
 
         private void NavigateTo(string key)
         {
-            // FIX: freeze the panel layout while we swap views
             _contentPanel.SuspendLayout();
             try
             {
@@ -139,8 +147,9 @@ namespace CarwashServices.Shell
                         break;
 
                     case "Manage Users":
-                        ShowComingSoon(key);
-                        return;
+                        view = new UsersView();
+                        headerText = "MANAGE USERS";
+                        break;
 
                     case "Manage Customers":
                         view = new CustomersView();
@@ -161,10 +170,6 @@ namespace CarwashServices.Shell
                         view = new FollowUpsView();
                         headerText = "FOLLOW-UPS / REMINDERS";
                         break;
-
-                    case "Manage Admin Accounts":
-                        ShowComingSoon(key);
-                        return;
 
                     default:
                         ShowComingSoon(key);

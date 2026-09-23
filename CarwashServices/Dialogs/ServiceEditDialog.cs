@@ -1,9 +1,12 @@
 ﻿using System;
 using System.Drawing;
+using System.Globalization;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+
 using CarwashServices.Dtos;
 
 namespace CarwashServices.Dialogs
@@ -12,12 +15,15 @@ namespace CarwashServices.Dialogs
     {
         private int? _serviceId;
 
-        private TextBox _nameTxt;
-        private TextBox _descriptionTxt;
-        private TextBox _priceTxt;
-        private TextBox _durationTxt;
-        private ComboBox _categoryCombo;
-        private ComboBox _activeCombo;
+        private TextBox _nameTxt = null!;
+        private TextBox _descriptionTxt = null!;
+        private TextBox _priceTxt = null!;
+        private TextBox _durationTxt = null!;
+        private ComboBox _categoryCombo = null!;
+        private ComboBox _activeCombo = null!;
+        private Panel _activeRow = null!;
+
+        private readonly ErrorProvider _errors = new ErrorProvider();
 
         private HttpClient _http = new HttpClient { BaseAddress = new Uri("http://localhost:5180/") };
 
@@ -27,6 +33,16 @@ namespace CarwashServices.Dialogs
         private static readonly Color TextMuted = Color.FromArgb(107, 122, 154);
         private static readonly Color BorderSoft = Color.FromArgb(225, 231, 240);
         private static readonly Color AccentBlue = Color.FromArgb(30, 136, 229);
+        private static readonly Color FieldErrorBg = Color.FromArgb(0xFF, 0xF5, 0xF5);
+
+        // ---- Validation regexes ----
+        // Name must contain at least one letter, no digits-only strings.
+        private static readonly Regex NameRegex =
+            new(@"^(?=.*[\p{L}])[\p{L}\p{N}\s\.\,\-\'&/\(\)]{2,150}$", RegexOptions.Compiled);
+
+        // Category must contain at least one letter (no pure numbers).
+        private static readonly Regex CategoryRegex =
+            new(@"^(?=.*[\p{L}])[\p{L}\s\-&]{2,50}$", RegexOptions.Compiled);
 
         public ServiceEditDialog(int? serviceId)
         {
@@ -39,14 +55,19 @@ namespace CarwashServices.Dialogs
 
         private void InitializeForm()
         {
-            Text = _serviceId.HasValue ? $"Edit Service — #{_serviceId}" : "Add New Service";
-            Size = new Size(840, 720);
+            bool isEdit = _serviceId.HasValue;
+
+            Text = isEdit ? $"Edit Service — #{_serviceId}" : "Add New Service";
+            Size = new Size(840, isEdit ? 720 : 640);
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9.5f);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
+
+            _errors.BlinkStyle = ErrorBlinkStyle.NeverBlink;
+            _errors.ContainerControl = this;
 
             // ---- Header ----
             var header = new Panel
@@ -59,7 +80,7 @@ namespace CarwashServices.Dialogs
 
             var headerTitle = new Label
             {
-                Text = _serviceId.HasValue ? $"Edit Service — #{_serviceId}" : "Add New Service",
+                Text = isEdit ? $"Edit Service — #{_serviceId}" : "Add New Service",
                 ForeColor = TextDark,
                 Font = new Font("Segoe UI Semibold", 13f),
                 Location = new Point(30, 24),
@@ -103,6 +124,7 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(MakeLabel("SERVICE_NAME *", 30, y));
             _nameTxt = MakeTextBox(30, y + 22, 745);
             _nameTxt.PlaceholderText = "e.g. Basic Wash";
+            _nameTxt.TextChanged += (s, e) => ClearFieldError(_nameTxt);
             body.Controls.Add(_nameTxt);
             y += 75;
 
@@ -119,6 +141,7 @@ namespace CarwashServices.Dialogs
                 BackColor = Color.White,
                 PlaceholderText = "Describe what this service includes..."
             };
+            _descriptionTxt.TextChanged += (s, e) => ClearFieldError(_descriptionTxt);
             body.Controls.Add(_descriptionTxt);
             y += 125;
 
@@ -126,16 +149,18 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(MakeLabel("PRICE (DECIMAL) *", 30, y));
             _priceTxt = MakeTextBox(30, y + 22, 360);
             _priceTxt.PlaceholderText = "500.00";
+            _priceTxt.TextChanged += (s, e) => ClearFieldError(_priceTxt);
             body.Controls.Add(_priceTxt);
 
             body.Controls.Add(MakeLabel("DURATION_MINUTES (INT) *", 415, y));
             _durationTxt = MakeTextBox(415, y + 22, 360);
             _durationTxt.PlaceholderText = "30";
+            _durationTxt.TextChanged += (s, e) => ClearFieldError(_durationTxt);
             body.Controls.Add(_durationTxt);
             y += 75;
 
-            // CATEGORY + IS_ACTIVE
-            body.Controls.Add(MakeLabel("CATEGORY", 30, y));
+            // CATEGORY
+            body.Controls.Add(MakeLabel("CATEGORY *", 30, y));
             _categoryCombo = new ComboBox
             {
                 Location = new Point(30, y + 22),
@@ -148,12 +173,22 @@ namespace CarwashServices.Dialogs
             {
                 "", "Exterior", "Interior", "Full Service", "Specialty"
             });
+            _categoryCombo.SelectedIndex = 0;
+            _categoryCombo.SelectedIndexChanged += (s, e) => ClearFieldError(_categoryCombo);
             body.Controls.Add(_categoryCombo);
 
-            body.Controls.Add(MakeLabel("IS_ACTIVE", 415, y));
+            // IS_ACTIVE — only shown on edit. On create the value is forced to true.
+            _activeRow = new Panel
+            {
+                Location = new Point(415, y),
+                Size = new Size(360, 60),
+                BackColor = Color.White,
+                Visible = isEdit
+            };
+            _activeRow.Controls.Add(MakeLabel("IS_ACTIVE", 0, 0));
             _activeCombo = new ComboBox
             {
-                Location = new Point(415, y + 22),
+                Location = new Point(0, 22),
                 Width = 360,
                 Font = new Font("Segoe UI", 10f),
                 DropDownStyle = ComboBoxStyle.DropDownList,
@@ -161,7 +196,9 @@ namespace CarwashServices.Dialogs
             };
             _activeCombo.Items.AddRange(new object[] { "true", "false" });
             _activeCombo.SelectedIndex = 0;
-            body.Controls.Add(_activeCombo);
+            _activeRow.Controls.Add(_activeCombo);
+            body.Controls.Add(_activeRow);
+
             y += 85;
 
             // ---- Footer ----
@@ -190,7 +227,7 @@ namespace CarwashServices.Dialogs
 
             var saveBtn = new Button
             {
-                Text = _serviceId.HasValue ? "Save Changes" : "Add Service",
+                Text = isEdit ? "Save Changes" : "Add Service",
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI Semibold", 10f),
                 ForeColor = Color.White,
@@ -263,55 +300,219 @@ namespace CarwashServices.Dialogs
             return p;
         }
 
+        // =================================================================
+        //  Error helpers
+        // =================================================================
+        private void ClearFieldError(Control c)
+        {
+            if (c is TextBox tb)
+            {
+                tb.BackColor = Color.White;
+                _errors.SetError(tb, "");
+            }
+            else if (c is ComboBox cb)
+            {
+                cb.BackColor = Color.White;
+                _errors.SetError(cb, "");
+            }
+        }
+
+        private void MarkFieldError(Control c, string message)
+        {
+            if (c is TextBox tb)
+            {
+                tb.BackColor = FieldErrorBg;
+                _errors.SetError(tb, message);
+            }
+            else if (c is ComboBox cb)
+            {
+                cb.BackColor = FieldErrorBg;
+                _errors.SetError(cb, message);
+            }
+        }
+
+        // =================================================================
+        //  LOAD (edit mode)
+        // =================================================================
         private async Task LoadServiceAsync(int id)
         {
             try
             {
-                // ProductDto now lives in CarwashServices.Views (Dtos.cs)
                 var list = await _http.GetFromJsonAsync<System.Collections.Generic.List<ProductDto>>(
                     "api/tenant/1/products");
                 if (list == null) return;
                 var p = list.Find(x => x.ProductId == id);
                 if (p == null) return;
 
-                _nameTxt.Text = p.ProductName;
+                _nameTxt.Text = p.ProductName ?? "";
                 _descriptionTxt.Text = p.Description ?? "";
                 _priceTxt.Text = p.UnitPrice.ToString("0.##");
                 _durationTxt.Text = p.DurationMinutes.ToString();
-                _categoryCombo.SelectedItem = p.Category ?? "";
+
+                if (!string.IsNullOrWhiteSpace(p.Category) &&
+                    _categoryCombo.Items.Contains(p.Category))
+                {
+                    _categoryCombo.SelectedItem = p.Category;
+                }
+                else if (!string.IsNullOrWhiteSpace(p.Category))
+                {
+                    // Unknown category — keep the value visible.
+                    _categoryCombo.Items.Add(p.Category);
+                    _categoryCombo.SelectedItem = p.Category;
+                }
+
+                // Only meaningful on edit.
                 _activeCombo.SelectedItem = p.IsActive ? "true" : "false";
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to load service.\n\n{ex.Message}",
+                MessageBox.Show(
+                    $"Failed to load service.\n\n{ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
+        // =================================================================
+        //  VALIDATION
+        // =================================================================
+        private bool ValidateForm()
+        {
+            // Clear everything first.
+            ClearFieldError(_nameTxt);
+            ClearFieldError(_descriptionTxt);
+            ClearFieldError(_priceTxt);
+            ClearFieldError(_durationTxt);
+            ClearFieldError(_categoryCombo);
+            ClearFieldError(_activeCombo);
+
+            bool ok = true;
+
+            // ---- SERVICE_NAME ----
+            var name = _nameTxt.Text.Trim();
+            if (name.Length == 0)
+            {
+                MarkFieldError(_nameTxt, "Service name is required.");
+                ok = false;
+            }
+            else if (name.Length < 2)
+            {
+                MarkFieldError(_nameTxt, "Service name must be at least 2 characters.");
+                ok = false;
+            }
+            else if (name.Length > 150)
+            {
+                MarkFieldError(_nameTxt, "Service name must be 150 characters or fewer.");
+                ok = false;
+            }
+            else if (Regex.IsMatch(name, @"^\d+$"))
+            {
+                MarkFieldError(_nameTxt, "Service name can't be all numbers — include at least one letter.");
+                ok = false;
+            }
+            else if (!NameRegex.IsMatch(name))
+            {
+                MarkFieldError(_nameTxt, "Letters, numbers, spaces, and . , - ' & / ( ) only.");
+                ok = false;
+            }
+
+            // ---- DESCRIPTION (optional, but bounded) ----
+            var desc = _descriptionTxt.Text.Trim();
+            if (desc.Length > 1000)
+            {
+                MarkFieldError(_descriptionTxt, "Description must be 1000 characters or fewer.");
+                ok = false;
+            }
+
+            // ---- PRICE ----
+            var priceText = _priceTxt.Text.Trim();
+            if (priceText.Length == 0)
+            {
+                MarkFieldError(_priceTxt, "Price is required.");
+                ok = false;
+            }
+            else if (!decimal.TryParse(priceText, NumberStyles.Number,
+                                       CultureInfo.InvariantCulture, out var price))
+            {
+                MarkFieldError(_priceTxt, "Price must be a number like 500 or 499.99.");
+                ok = false;
+            }
+            else if (price <= 0)
+            {
+                MarkFieldError(_priceTxt, "Price must be greater than zero.");
+                ok = false;
+            }
+            else if (price > 1_000_000m)
+            {
+                MarkFieldError(_priceTxt, "Price must be 1,000,000 or less.");
+                ok = false;
+            }
+
+            // ---- DURATION ----
+            var durationText = _durationTxt.Text.Trim();
+            if (durationText.Length == 0)
+            {
+                MarkFieldError(_durationTxt, "Duration is required.");
+                ok = false;
+            }
+            else if (!int.TryParse(durationText, out var duration))
+            {
+                MarkFieldError(_durationTxt, "Duration must be a whole number (minutes).");
+                ok = false;
+            }
+            else if (duration <= 0)
+            {
+                MarkFieldError(_durationTxt, "Duration must be at least 1 minute.");
+                ok = false;
+            }
+            else if (duration > 1440)
+            {
+                MarkFieldError(_durationTxt, "Duration can't exceed 1440 minutes (24 hours).");
+                ok = false;
+            }
+
+            // ---- CATEGORY ----
+            var category = (string?)_categoryCombo.SelectedItem ?? "";
+            if (string.IsNullOrWhiteSpace(category))
+            {
+                MarkFieldError(_categoryCombo, "Please pick a category.");
+                ok = false;
+            }
+            else if (!CategoryRegex.IsMatch(category))
+            {
+                MarkFieldError(_categoryCombo, "Category must contain at least one letter.");
+                ok = false;
+            }
+
+            return ok;
+        }
+
+        // =================================================================
+        //  SAVE
+        // =================================================================
         private async Task SaveAsync()
         {
-            if (string.IsNullOrWhiteSpace(_nameTxt.Text) ||
-                string.IsNullOrWhiteSpace(_priceTxt.Text) ||
-                string.IsNullOrWhiteSpace(_durationTxt.Text))
+            if (!ValidateForm())
             {
-                MessageBox.Show("SERVICE_NAME, PRICE, and DURATION_MINUTES are required.",
-                    "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // Focus the first invalid control in field order.
+                foreach (var c in new Control[] { _nameTxt, _priceTxt, _durationTxt, _categoryCombo })
+                {
+                    if (!string.IsNullOrEmpty(_errors.GetError(c)))
+                    {
+                        c.Focus();
+                        break;
+                    }
+                }
                 return;
             }
 
-            if (!decimal.TryParse(_priceTxt.Text.Trim(), out var price))
-            {
-                MessageBox.Show("PRICE must be a valid number.",
-                    "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            var price = decimal.Parse(_priceTxt.Text.Trim(), NumberStyles.Number, CultureInfo.InvariantCulture);
+            var duration = int.Parse(_durationTxt.Text.Trim());
+            var category = (string?)_categoryCombo.SelectedItem ?? "";
 
-            if (!int.TryParse(_durationTxt.Text.Trim(), out var duration))
-            {
-                MessageBox.Show("DURATION_MINUTES must be a valid integer.",
-                    "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            // On create: always active. On edit: read the combo.
+            bool isActive = _serviceId.HasValue
+                ? (_activeCombo.SelectedItem?.ToString() == "true")
+                : true;
 
             var dto = new
             {
@@ -322,8 +523,8 @@ namespace CarwashServices.Dialogs
                 description = _descriptionTxt.Text.Trim(),
                 unitPrice = price,
                 durationMinutes = duration,
-                category = _categoryCombo.SelectedItem?.ToString() ?? "",
-                isActive = _activeCombo.SelectedItem?.ToString() == "true",
+                category = category,
+                isActive = isActive,
                 createdAt = DateTime.UtcNow
             };
 

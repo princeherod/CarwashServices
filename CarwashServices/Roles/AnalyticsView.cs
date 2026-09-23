@@ -16,7 +16,6 @@ using CarwashServices.Shell;
 
 namespace CarwashServices.Roles
 {
-   
     public class AnalyticsView : UserControl
     {
         private HttpClient _http;
@@ -76,6 +75,18 @@ namespace CarwashServices.Roles
         private int S(double px) { return Ui.S(this, px); }
 
         // ================================================================
+        //  NAVIGATION
+        // ================================================================
+        private MainForm MainShell => this.FindForm() as MainForm;
+
+        private void Navigate(string moduleKey)
+        {
+            var shell = MainShell;
+            if (shell == null) return;
+            shell.NavigateToModule(moduleKey);
+        }
+
+        // ================================================================
         //  BUILD UI (runs once)
         // ================================================================
         private void BuildUi()
@@ -116,27 +127,84 @@ namespace CarwashServices.Roles
             _header.RefreshButton.Click += async (s, e) => await ReloadAsync();
             _page.Controls.Add(_header, 0, 0);
 
+            // ---- KPI grid ----
             var kpiGrid = MakeGrid(16.66f, 16.66f, 16.66f, 16.66f, 16.66f, 16.7f);
+
             _kpis = new[]
             {
-                new KpiCard { Title = "Total Customers",        Icon = IconKind.Users,     IconBg = Color.FromArgb(0xE1, 0xEC, 0xFD), IconFg = Ui.Accent },
-                new KpiCard { Title = "Returning Customers",    Icon = IconKind.Repeat,    IconBg = Color.FromArgb(0xE1, 0xF7, 0xEC), IconFg = Ui.Green },
-                new KpiCard { Title = "Churn Rate",             Icon = IconKind.TrendDown, IconBg = Color.FromArgb(0xFD, 0xE4, 0xE4), IconFg = Ui.Red },
-                new KpiCard { Title = "Avg Spend per Customer", Icon = IconKind.Card,      IconBg = Color.FromArgb(0xEC, 0xE7, 0xFD), IconFg = Ui.Purple },
-                new KpiCard { Title = "Cars Washed This Month", Icon = IconKind.Car,       IconBg = Color.FromArgb(0xFD, 0xF2, 0xD9), IconFg = Color.FromArgb(0xD9, 0x8A, 0x06) },
-                new KpiCard { Title = "Revenue This Month",     Icon = IconKind.Coin,      IconBg = Color.FromArgb(0xDD, 0xF5, 0xF0), IconFg = Ui.Teal }
+                new KpiCard
+                {
+                    Title = "Total Customers",
+                    Icon = IconKind.Users,
+                    IconBg = Color.FromArgb(0xE1, 0xEC, 0xFD),
+                    IconFg = Ui.Accent
+                },
+                new KpiCard
+                {
+                    Title = "Returning Customers",
+                    Icon = IconKind.Repeat,
+                    IconBg = Color.FromArgb(0xE1, 0xF7, 0xEC),
+                    IconFg = Ui.Green
+                },
+                new KpiCard
+                {
+                    Title = "Churn Rate",
+                    Icon = IconKind.TrendDown,
+                    IconBg = Color.FromArgb(0xFD, 0xE4, 0xE4),
+                    IconFg = Ui.Red
+                },
+                new KpiCard
+                {
+                    Title = "Avg Spend per Customer",
+                    Icon = IconKind.Card,
+                    IconBg = Color.FromArgb(0xEC, 0xE7, 0xFD),
+                    IconFg = Ui.Purple
+                },
+                new KpiCard
+                {
+                    Title = "Cars Washed This Month",
+                    Icon = IconKind.Car,
+                    IconBg = Color.FromArgb(0xFD, 0xF2, 0xD9),
+                    IconFg = Color.FromArgb(0xD9, 0x8A, 0x06)
+                },
+                new KpiCard
+                {
+                    Title = "Revenue This Month",
+                    Icon = IconKind.Coin,
+                    IconBg = Color.FromArgb(0xDD, 0xF5, 0xF0),
+                    IconFg = Ui.Teal
+                }
             };
             for (int i = 0; i < _kpis.Length; i++) AddCell(kpiGrid, _kpis[i], i, i == _kpis.Length - 1);
+
+            // Wire click targets now that all KPI cards exist.
+            _kpis[0].EnableCardClick("Manage Customers");
+            _kpis[1].EnableCardClick("Manage Customers");
+            _kpis[2].EnableCardClick("Follow-Ups / Reminders");
+            _kpis[3].EnableCardClick("View Reports");
+            _kpis[4].EnableCardClick("Manage Service Requests");
+            _kpis[5].EnableCardClick("View Reports");
+
             _page.Controls.Add(kpiGrid, 0, 1);
 
+            // ---- Row 1: retention / wash / recent ----
             var row1 = MakeGrid(36f, 28f, 36f);
 
-            _retentionCard = new ChartCard { Title = "Customer Retention Rate", Subtitle = "Monthly retention — active visitors / total seen" };
+            _retentionCard = new ChartCard
+            {
+                Title = "Customer Retention Rate",
+                Subtitle = "Monthly retention — active visitors / total seen"
+            };
             _retentionChart = new AreaLineChart { Dock = DockStyle.Fill, LineColor = Ui.Accent };
             _retentionCard.Controls.Add(_retentionChart);
+            _retentionCard.EnableCardClick("View Reports");
             AddCell(row1, _retentionCard, 0, false);
 
-            _washCard = new ChartCard { Title = "Wash Frequency by Customer Segment", Subtitle = "Average washes per month by loyalty tier" };
+            _washCard = new ChartCard
+            {
+                Title = "Wash Frequency by Customer Segment",
+                Subtitle = "Average washes per month by loyalty tier"
+            };
             _washChart = new ColumnChart
             {
                 Dock = DockStyle.Fill,
@@ -146,14 +214,21 @@ namespace CarwashServices.Roles
                 EmptyMax = 4
             };
             _washCard.Controls.Add(_washChart);
+            _washCard.EnableCardClick("Manage Customers");
             AddCell(row1, _washCard, 1, false);
 
-            _recentCard = new ChartCard { Title = "Recent Activity", Subtitle = "Latest service requests" };
+            _recentCard = new ChartCard
+            {
+                Title = "Recent Activity",
+                Subtitle = "Latest service requests"
+            };
             _activity = new ActivityList { Dock = DockStyle.Fill };
             _recentCard.Controls.Add(_activity);
+            _recentCard.EnableCardClick("Manage Service Requests");
             AddCell(row1, _recentCard, 2, true);
             _page.Controls.Add(row1, 0, 2);
 
+            // ---- Row 2: status / revenue ----
             var row2 = MakeGrid(42f, 58f);
 
             _statusCard = new ChartCard
@@ -179,6 +254,7 @@ namespace CarwashServices.Roles
             statusBody.Controls.Add(_donut, 0, 0);
             statusBody.Controls.Add(_legend, 1, 0);
             _statusCard.Controls.Add(statusBody);
+            _statusCard.EnableCardClick("Follow-Ups / Reminders");
             AddCell(row2, _statusCard, 0, false);
 
             _revenueCard = new ChartCard
@@ -199,9 +275,11 @@ namespace CarwashServices.Roles
                 EmptyText = "No revenue recorded yet"
             };
             _revenueCard.Controls.Add(_revenueChart);
+            _revenueCard.EnableCardClick("View Reports");
             AddCell(row2, _revenueCard, 1, true);
             _page.Controls.Add(row2, 0, 3);
 
+            // ---- Actions card ----
             _actionsCard = new ChartCard
             {
                 Title = "Customer Retention Actions",
@@ -225,19 +303,39 @@ namespace CarwashServices.Roles
             rows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             for (int i = 0; i < 3; i++) rows.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33f));
 
-            _rowAtRisk = new ActionRow { Tone = Ui.Yellow, Icon = IconKind.Alert, Dock = DockStyle.Fill, Margin = Padding.Empty };
+            _rowAtRisk = new ActionRow("Follow-Ups / Reminders")
+            {
+                Tone = Ui.Yellow,
+                Icon = IconKind.Alert,
+                Dock = DockStyle.Fill,
+                Margin = Padding.Empty
+            };
             _rowAtRisk.Ghost.Text = "View Customers";
             _rowAtRisk.Solid.Text = "Follow Up";
-            _rowAtRisk.Ghost.Click += (s, e) => ShowSegmentDialog("At-Risk Customers", "AtRisk");
+            _rowAtRisk.Ghost.Click += (s, e) => Navigate("Manage Customers");
             _rowAtRisk.Solid.Click += (s, e) => FollowUpSegment("AtRisk");
 
-            _rowLost = new ActionRow { Tone = Ui.Red, Icon = IconKind.UserX, ShowTopBorder = true, Dock = DockStyle.Fill, Margin = Padding.Empty };
+            _rowLost = new ActionRow("Follow-Ups / Reminders")
+            {
+                Tone = Ui.Red,
+                Icon = IconKind.UserX,
+                ShowTopBorder = true,
+                Dock = DockStyle.Fill,
+                Margin = Padding.Empty
+            };
             _rowLost.Ghost.Text = "View Customers";
             _rowLost.Solid.Text = "Create Offer";
-            _rowLost.Ghost.Click += (s, e) => ShowSegmentDialog("Lost Customers", "Lost");
+            _rowLost.Ghost.Click += (s, e) => Navigate("Manage Customers");
             _rowLost.Solid.Click += (s, e) => FollowUpSegment("Lost");
 
-            _rowRetention = new ActionRow { Tone = Ui.Accent, Icon = IconKind.TrendDown, ShowTopBorder = true, Dock = DockStyle.Fill, Margin = Padding.Empty };
+            _rowRetention = new ActionRow("View Reports")
+            {
+                Tone = Ui.Accent,
+                Icon = IconKind.TrendDown,
+                ShowTopBorder = true,
+                Dock = DockStyle.Fill,
+                Margin = Padding.Empty
+            };
             _rowRetention.Ghost.Text = "View Analysis";
             _rowRetention.Solid.Text = "Take Action";
             _rowRetention.Ghost.Click += (s, e) => { _root.AutoScrollPosition = new Point(0, 0); };
@@ -480,30 +578,6 @@ namespace CarwashServices.Roles
         // ================================================================
         //  SEGMENT ACTIONS
         // ================================================================
-        private async void ShowSegmentDialog(string title, string segment)
-        {
-            try
-            {
-                Cursor = Cursors.WaitCursor;
-                var rows = await _http.GetFromJsonAsync<List<SegmentCustomerDto>>(
-                    $"api/analytics/segment-customers?companyId=1&segment={segment}")
-                    ?? new List<SegmentCustomerDto>();
-
-                Cursor = Cursors.Default;
-
-                using var dlg = new CustomerSegmentDialog(title, rows);
-                if (dlg.ShowDialog(this.FindForm()) == DialogResult.OK)
-                    JumpToFollowUp(dlg.SelectedCustomerIds);
-            }
-            catch (Exception ex)
-            {
-                Cursor = Cursors.Default;
-                MessageBox.Show(
-                    $"Failed to load segment customers.\n\n{ex.Message}",
-                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
         private async void FollowUpSegment(string segment)
         {
             try
@@ -515,7 +589,6 @@ namespace CarwashServices.Roles
 
                 Cursor = Cursors.Default;
 
-                // Only send customers who don't already have an open follow-up.
                 var eligible = rows.Where(r => !r.HasOpenFollowUp).ToList();
 
                 if (eligible.Count == 0)
@@ -783,8 +856,17 @@ namespace CarwashServices.Roles
             protected int S(double px) { return Ui.S(this, px); }
         }
 
+        // -----------------------------------------------------------------
+        //  RoundedCard — clickable via EnableCardClick(moduleKey).
+        //  The module key is a private field so the WinForms designer never
+        //  tries to serialise it.
+        // -----------------------------------------------------------------
         private class RoundedCard : Panel
         {
+            private string _clickModule;
+            private bool _hover;
+            private bool _down;
+
             public RoundedCard()
             {
                 SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
@@ -793,6 +875,65 @@ namespace CarwashServices.Roles
             }
 
             protected int S(double px) { return Ui.S(this, px); }
+
+            public void EnableCardClick(string moduleKey)
+            {
+                if (string.IsNullOrEmpty(moduleKey)) return;
+                _clickModule = moduleKey;
+
+                Cursor = Cursors.Hand;
+                Click += RaiseCardClick;
+
+                foreach (Control child in Controls)
+                    BindClickRecursive(child);
+            }
+
+            private void BindClickRecursive(Control c)
+            {
+                c.Cursor = Cursors.Hand;
+                c.Click += RaiseCardClick;
+                foreach (Control inner in c.Controls)
+                    BindClickRecursive(inner);
+            }
+
+            private void RaiseCardClick(object sender, EventArgs e)
+            {
+                if (string.IsNullOrEmpty(_clickModule)) return;
+                (FindForm() as MainForm)?.NavigateToModule(_clickModule);
+            }
+
+            protected override void OnMouseEnter(EventArgs e)
+            {
+                base.OnMouseEnter(e);
+                if (string.IsNullOrEmpty(_clickModule)) return;
+                _hover = true;
+                Invalidate();
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                base.OnMouseLeave(e);
+                if (string.IsNullOrEmpty(_clickModule)) return;
+                _hover = false;
+                _down = false;
+                Invalidate();
+            }
+
+            protected override void OnMouseDown(MouseEventArgs e)
+            {
+                base.OnMouseDown(e);
+                if (string.IsNullOrEmpty(_clickModule)) return;
+                _down = true;
+                Invalidate();
+            }
+
+            protected override void OnMouseUp(MouseEventArgs e)
+            {
+                base.OnMouseUp(e);
+                if (string.IsNullOrEmpty(_clickModule)) return;
+                _down = false;
+                Invalidate();
+            }
 
             protected override void OnPaintBackground(PaintEventArgs e)
             {
@@ -812,7 +953,11 @@ namespace CarwashServices.Roles
 
                 using (var path = Ui.Round(rect, radius))
                 {
-                    using (var b = new SolidBrush(Color.White)) g.FillPath(b, path);
+                    Color fill = !string.IsNullOrEmpty(_clickModule) && _hover
+                        ? (_down ? Color.FromArgb(0xE9, 0xEE, 0xF6) : Color.FromArgb(0xF6, 0xF9, 0xFE))
+                        : Color.White;
+
+                    using (var b = new SolidBrush(fill)) g.FillPath(b, path);
                     using (var pen = new Pen(Ui.CardBorder)) g.DrawPath(pen, path);
                 }
 
@@ -1379,12 +1524,28 @@ namespace CarwashServices.Roles
             public bool ShowTopBorder;
             public readonly RoundedButton Ghost, Solid;
 
-            public ActionRow()
+            private readonly string _clickModule;
+
+            public ActionRow(string clickModule = null)
             {
+                _clickModule = clickModule;
+
                 Ghost = new RoundedButton();
                 Solid = new RoundedButton { Solid = true };
                 Controls.Add(Ghost);
                 Controls.Add(Solid);
+
+                if (!string.IsNullOrEmpty(_clickModule))
+                {
+                    Cursor = Cursors.Hand;
+                    Click += RaiseRowClick;
+                }
+            }
+
+            private void RaiseRowClick(object sender, EventArgs e)
+            {
+                if (string.IsNullOrEmpty(_clickModule)) return;
+                (FindForm() as MainForm)?.NavigateToModule(_clickModule);
             }
 
             protected override void OnLayout(LayoutEventArgs e)

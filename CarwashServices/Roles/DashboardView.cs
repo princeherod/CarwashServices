@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using CarwashServices.Dtos;
+using CarwashServices.Shell;
 
 namespace CarwashServices.Roles
 {
@@ -38,13 +39,10 @@ namespace CarwashServices.Roles
         private static readonly Color Red = Color.FromArgb(0xC6, 0x28, 0x28);
         private static readonly Color RedSoft = Color.FromArgb(0xFD, 0xE7, 0xE6);
 
-        // ---- Fonts (created once; the old code created a new Font on every cell paint) ----
         private static readonly Font FontCustName = new Font("Segoe UI Semibold", 9.5f);
         private static readonly Font FontCustPlate = new Font("Segoe UI", 8.5f);
         private static readonly Font FontStatus = new Font("Segoe UI Semibold", 9.5f);
 
-        // Status is drawn as coloured words only (no pill / circle) — same as the Service Requests
-        // and Follow-Ups screens. Set to true if you also want a light, square highlight behind the words.
         private static readonly bool TintBehindText = false;
 
         // ---- Layout constants ----
@@ -52,9 +50,9 @@ namespace CarwashServices.Roles
         private const int TopMargin = 20;
         private const int SectionGap = 16;
         private const int KpiHeight = 120;
-        private const int MiddleRowHeight = 460;   // was 400: right-hand cards were too short for their lists
-        private const int BottomRowHeight = 320;   // was 300: fits header + 5 log rows exactly
-        private const int CardTitleStrip = 48;     // space reserved at the top of a card for its title
+        private const int MiddleRowHeight = 460;
+        private const int BottomRowHeight = 320;
+        private const int CardTitleStrip = 48;
         private const int CardPad = 16;
 
         private Panel _root = null!;
@@ -85,6 +83,30 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
+        //  NAVIGATION
+        // ================================================================
+        private void Navigate(string moduleKey)
+        {
+            (FindForm() as MainForm)?.NavigateToModule(moduleKey);
+        }
+
+        /// <summary>
+        /// Attaches a click handler to a control and every descendant, so the
+        /// whole surface is clickable. Prevents the designer complaining about
+        /// serialisable properties.
+        /// </summary>
+        private void BindClick(Control root, Action onClick)
+        {
+            if (root == null || onClick == null) return;
+
+            root.Cursor = Cursors.Hand;
+            root.Click += (s, e) => onClick();
+
+            foreach (Control child in root.Controls)
+                BindClick(child, onClick);
+        }
+
+        // ================================================================
         //  UI CONSTRUCTION
         // ================================================================
         private void InitializeUI()
@@ -102,10 +124,11 @@ namespace CarwashServices.Roles
             // -------- KPI row --------
             _kpiRow = new Panel { Height = KpiHeight, BackColor = Color.Transparent };
             _root.Controls.Add(_kpiRow);
-            _kpiCustomers = AddKpiCard(_kpiRow, "TOTAL CUSTOMERS", out _kpiCustomersSub);
-            _kpiToday = AddKpiCard(_kpiRow, "TODAY'S JOBS", out _kpiTodaySub);
-            _kpiInProgress = AddKpiCard(_kpiRow, "IN PROGRESS", out _kpiInProgressSub);
-            _kpiRevenue = AddKpiCard(_kpiRow, "REVENUE (THIS MONTH)", out _kpiRevenueSub);
+
+            _kpiCustomers = AddKpiCard(_kpiRow, "TOTAL CUSTOMERS", out _kpiCustomersSub, "Manage Customers");
+            _kpiToday = AddKpiCard(_kpiRow, "TODAY'S JOBS", out _kpiTodaySub, "Manage Service Requests");
+            _kpiInProgress = AddKpiCard(_kpiRow, "IN PROGRESS", out _kpiInProgressSub, "Manage Service Requests");
+            _kpiRevenue = AddKpiCard(_kpiRow, "REVENUE (THIS MONTH)", out _kpiRevenueSub, "View Reports");
 
             // -------- Middle row --------
             _middleRow = new Panel { BackColor = Color.Transparent };
@@ -114,31 +137,39 @@ namespace CarwashServices.Roles
             // LEFT: Recent Service Requests
             var recentCard = MakeCard(_middleRow, "Recent Service Requests");
             _recentGrid = MakeGrid();
-            _recentGrid.RowTemplate.Height = 56;   // two-line customer cell needs more than 44px
+            _recentGrid.RowTemplate.Height = 56;
             AddColumns(_recentGrid,
                 ("Id", "ID", 70),
                 ("Customer", "CUSTOMER", 200),
-                ("Service", "SERVICE", -1),                       // -1 = fill
-                ("Scheduled", "SCHEDULED", 120),                  // was SCHEDULED_DATE  (truncated)
-                ("Staff", "STAFF", 140),                          // was ASSIGNED_STAFF  (truncated)
+                ("Service", "SERVICE", -1),
+                ("Scheduled", "SCHEDULED", 120),
+                ("Staff", "STAFF", 140),
                 ("Status", "STATUS", 120));
             _recentGrid.CellPainting += RecentGrid_CellPainting;
+            _recentGrid.CellMouseClick += (s, e) =>
+            {
+                if (e.RowIndex < 0) return;
+                Navigate("Manage Service Requests");
+            };
             recentCard.Controls.Add(_recentGrid);
             Inset(recentCard, _recentGrid, CardPad, CardTitleStrip, CardPad, CardPad);
 
+            // The card title itself should be clickable too
+            BindClick(recentCard, () => Navigate("Manage Service Requests"));
+
             // RIGHT TOP: Follow-Up Queue
-            // NOTE: no Dock = Fill here. A docked control ignores SetBounds, so the list used to
-            // cover the whole card and sit underneath the title. Inset() positions it below the title.
             var followCard = MakeCard(_middleRow, "Follow-Up Queue");
             _followUpList = new Panel { BackColor = Color.White, AutoScroll = true };
             followCard.Controls.Add(_followUpList);
             Inset(followCard, _followUpList, CardPad, CardTitleStrip, CardPad, CardPad);
+            BindClick(followCard, () => Navigate("Follow-Ups / Reminders"));
 
             // RIGHT BOTTOM: Service Staff
             var staffCard = MakeCard(_middleRow, "Service Staff on Duty");
             _staffList = new Panel { BackColor = Color.White, AutoScroll = true };
             staffCard.Controls.Add(_staffList);
             Inset(staffCard, _staffList, CardPad, CardTitleStrip, CardPad, CardPad);
+            BindClick(staffCard, () => Navigate("Manage Users"));
 
             // -------- Bottom row: Status Logs --------
             _bottomRow = new Panel { BackColor = Color.Transparent };
@@ -154,8 +185,14 @@ namespace CarwashServices.Roles
                 ("UpdatedAt", "UPDATED_AT", 170),
                 ("Notes", "NOTES", -1));
             _logsGrid.CellPainting += LogsGrid_CellPainting;
+            _logsGrid.CellMouseClick += (s, e) =>
+            {
+                if (e.RowIndex < 0) return;
+                Navigate("Manage Service Requests");
+            };
             logsCard.Controls.Add(_logsGrid);
             Inset(logsCard, _logsGrid, CardPad, CardTitleStrip, CardPad, CardPad);
+            BindClick(logsCard, () => Navigate("Manage Service Requests"));
 
             _logsEmpty = new Label
             {
@@ -168,14 +205,13 @@ namespace CarwashServices.Roles
             };
             logsCard.Controls.Add(_logsEmpty);
 
-            // Store card references on the row panels so Relayout can find them
             _middleRow.Tag = new[] { recentCard, followCard, staffCard };
             _bottomRow.Tag = logsCard;
 
             Relayout();
         }
 
-        private Label AddKpiCard(Panel parent, string title, out Label subtitle)
+        private Label AddKpiCard(Panel parent, string title, out Label subtitle, string clickModule)
         {
             var card = new BorderPanel
             {
@@ -212,6 +248,13 @@ namespace CarwashServices.Roles
                 AutoSize = true
             };
             card.Controls.Add(subtitle);
+
+            // Make the whole KPI card clickable.
+            if (!string.IsNullOrEmpty(clickModule))
+            {
+                string captured = clickModule;
+                BindClick(card, () => Navigate(captured));
+            }
 
             return val;
         }
@@ -306,8 +349,6 @@ namespace CarwashServices.Roles
             }
         }
 
-        // Keeps `child` inset inside `parent` (l, t, r, b margins). Only works for controls
-        // that are NOT docked — a docked control ignores SetBounds.
         private static void Inset(Control parent, Control child, int l, int t, int r, int b)
         {
             void Apply() => child.SetBounds(l, t,
@@ -329,26 +370,23 @@ namespace CarwashServices.Roles
             int L = _root.Padding.Left;
             int y = _root.Padding.Top;
 
-            // KPI row
             _kpiRow.SetBounds(L, y, w, KpiHeight);
             LayoutKpis(w);
             y += KpiHeight + SectionGap;
 
-            // Middle row: 60% | 40%
             _middleRow.SetBounds(L, y, w, MiddleRowHeight);
             if (_middleRow.Tag is BorderPanel[] cards && cards.Length == 3)
             {
                 int leftW = (int)(w * 0.60);
                 int rightW = w - leftW - SectionGap;
-                cards[0].SetBounds(0, 0, leftW, MiddleRowHeight);                         // Recent
+                cards[0].SetBounds(0, 0, leftW, MiddleRowHeight);
                 int halfH = (MiddleRowHeight - SectionGap) / 2;
-                cards[1].SetBounds(leftW + SectionGap, 0, rightW, halfH);                  // Follow-Up
+                cards[1].SetBounds(leftW + SectionGap, 0, rightW, halfH);
                 cards[2].SetBounds(leftW + SectionGap, halfH + SectionGap, rightW,
-                                   MiddleRowHeight - halfH - SectionGap);                   // Staff
+                                   MiddleRowHeight - halfH - SectionGap);
             }
             y += MiddleRowHeight + SectionGap;
 
-            // Bottom row
             _bottomRow.SetBounds(L, y, w, BottomRowHeight);
             if (_bottomRow.Tag is BorderPanel logsCard)
                 logsCard.SetBounds(0, 0, w, BottomRowHeight);
@@ -421,7 +459,7 @@ namespace CarwashServices.Roles
                     string.IsNullOrWhiteSpace(r.AssignedStaff) ? "Unassigned" : r.AssignedStaff,
                     r.Status);
             }
-            _recentGrid.ClearSelection();          // don't leave the first row highlighted
+            _recentGrid.ClearSelection();
             _recentGrid.ResumeLayout();
 
             BuildFollowUpList();
@@ -429,7 +467,6 @@ namespace CarwashServices.Roles
             BuildLogs();
         }
 
-        // Remove and dispose everything in a list panel (Controls.Clear() alone leaks the controls)
         private static void ClearList(Panel p)
         {
             p.SuspendLayout();
@@ -470,10 +507,10 @@ namespace CarwashServices.Roles
                     Location = new Point(0, y),
                     Size = new Size(listW, 46),
                     BackColor = Color.White,
-                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                    Cursor = Cursors.Hand
                 };
 
-                // Status: coloured words only, right-aligned, vertically centred in the row
                 var status = MakeStatusLabel(f.Status);
                 status.Location = new Point(row.Width - status.Width - 2, (row.Height - status.Height) / 2);
                 status.Anchor = AnchorStyles.Top | AnchorStyles.Right;
@@ -481,7 +518,6 @@ namespace CarwashServices.Roles
 
                 int textW = Math.Max(60, row.Width - status.Width - 16);
 
-                // Fixed width + ellipsis so a long name can never run underneath the status text
                 row.Controls.Add(new Label
                 {
                     Text = f.Customer,
@@ -506,6 +542,7 @@ namespace CarwashServices.Roles
                     Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
                 });
 
+                BindClick(row, () => Navigate("Follow-Ups / Reminders"));
                 _followUpList.Controls.Add(row);
                 y += 52;
             }
@@ -539,7 +576,8 @@ namespace CarwashServices.Roles
                     Location = new Point(0, y),
                     Size = new Size(listW, 46),
                     BackColor = Color.White,
-                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                    Cursor = Cursors.Hand
                 };
 
                 row.Controls.Add(new Label
@@ -594,6 +632,7 @@ namespace CarwashServices.Roles
                 };
                 row.Controls.Add(dot);
 
+                BindClick(row, () => Navigate("Manage Users"));
                 _staffList.Controls.Add(row);
                 y += 50;
             }
@@ -620,8 +659,6 @@ namespace CarwashServices.Roles
             _logsGrid.ClearSelection();
             _logsGrid.ResumeLayout();
 
-            // The empty-state label used to be added AFTER the grid, which puts it behind the grid
-            // in z-order — so it was never visible. BringToFront() fixes that.
             _logsEmpty.Visible = items.Count == 0;
             if (_logsEmpty.Visible)
             {
@@ -641,7 +678,6 @@ namespace CarwashServices.Roles
             return (parts[0][0].ToString() + parts[parts.Length - 1][0].ToString()).ToUpper();
         }
 
-        // Status label for the Follow-Up Queue: coloured words only, no pill.
         private static Label MakeStatusLabel(string status)
         {
             var (bg, fg) = StatusColors(status);
@@ -699,8 +735,6 @@ namespace CarwashServices.Roles
                 PaintStatusText(e);
         }
 
-        // Name on the first line, plate on the second. Line heights now come from the fonts
-        // themselves (Font.Height) instead of hard-coded 16px / 14px boxes, which clipped the text.
         private static void PaintTwoLine(DataGridViewCellPaintingEventArgs e, Color topColor, Color bottomColor)
         {
             e.Paint(e.CellBounds, DataGridViewPaintParts.Background |
@@ -744,7 +778,6 @@ namespace CarwashServices.Roles
             e.Handled = true;
         }
 
-        // Status cell: coloured words only. No pill, no circle.
         private static void PaintStatusText(DataGridViewCellPaintingEventArgs e)
         {
             e.Paint(e.CellBounds, DataGridViewPaintParts.Background |
@@ -761,7 +794,7 @@ namespace CarwashServices.Roles
                 new Size(int.MaxValue, int.MaxValue),
                 TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
 
-            int x = b.X + 12;                          // lines up with the column header text
+            int x = b.X + 12;
             int maxW = Math.Max(10, b.Width - 20);
             int y = b.Y + (b.Height - size.Height) / 2;
 
