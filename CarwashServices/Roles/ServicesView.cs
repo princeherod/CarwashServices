@@ -1,12 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
+using CarwashServices.Auth;
 using CarwashServices.Dialogs;
 using CarwashServices.Dtos;
 
@@ -14,9 +16,7 @@ namespace CarwashServices.Roles
 {
     public class ServicesView : UserControl
     {
-        // -----------------------------------------------------------------
-        //  Palette (aligned with CustomersView)
-        // -----------------------------------------------------------------
+        // ---- Palette ----
         private static readonly Color Navy = Color.FromArgb(0x0A, 0x16, 0x33);
         private static readonly Color Muted = Color.FromArgb(0x6B, 0x7A, 0x9A);
         private static readonly Color Faint = Color.FromArgb(0x9A, 0xA7, 0xBF);
@@ -25,36 +25,66 @@ namespace CarwashServices.Roles
         private static readonly Color HeaderBg = Color.FromArgb(0xF8, 0xFA, 0xFD);
         private static readonly Color Accent = Color.FromArgb(0x1E, 0x88, 0xE5);
         private static readonly Color Green = Color.FromArgb(0x2E, 0xA0, 0x43);
+        private static readonly Color Amber = Color.FromArgb(0xC8, 0x6D, 0x00);
         private static readonly Color Red = Color.FromArgb(0xC6, 0x28, 0x28);
 
-        // Fonts used in the grid painter (created once, not on every paint)
         private static readonly Font NameFont = new Font("Segoe UI Semibold", 10f);
-        private static readonly Font DescFont = new Font("Segoe UI", 8.5f);
         private static readonly Font StatusFont = new Font("Segoe UI Semibold", 9.5f);
+        private static readonly Font ButtonFont = new Font("Segoe UI Semibold", 8.5f);
 
-        // -----------------------------------------------------------------
-        //  State
-        // -----------------------------------------------------------------
+        // ---- Actions column geometry ----
+        private const int ActionsColW = 280;
+        private const int ActionBtnW = 78;
+        private const int ActionBtnH = 30;
+        private const int ActionBtnGap = 8;
+        private const int ArchiveBtnW = 92;
+
+        // ---- Layout ----
+        private const int RowHeight = 56;
+        private const int PagerH = 48;
+        private const int PageBottom = 24;
+        private const int GridTop = 310;
+
         private readonly HttpClient _http = new HttpClient
         {
             BaseAddress = new Uri("http://localhost:5180/"),
             Timeout = TimeSpan.FromSeconds(10)
         };
 
+        private enum ListTab { Active, Archived }
+        private ListTab _tab = ListTab.Active;
+
         private List<ProductDto> _allServices = new();
+        private List<ProductDto> _filtered = new();
         private string _activeCategory = "All";
         private readonly System.Windows.Forms.Timer _searchDebounce = new() { Interval = 300 };
 
-        private Panel _root = null!;          // padded outer container
-        private Panel _contentPanel = null!;  // docked inner container (children are laid out inside it)
+        private int _page = 1;
+        private int _pageSize = 8;
+
+        private Panel _root = null!;
+        private Panel _contentPanel = null!;
+        private Panel _gridHost = null!;
         private DataGridView _grid = null!;
+        private Panel _pager = null!;
         private TextBox _searchBox = null!;
         private Button _addBtn = null!;
         private Panel _chipBar = null!;
+        private Panel _filterCard = null!;
+        private Panel _searchWrap = null!;
+        private Button _searchBtn = null!;
+        private Button _refreshBtn = null!;
+        private Panel _tabBar = null!;
 
-        // -----------------------------------------------------------------
-        //  Ctor
-        // -----------------------------------------------------------------
+        private Label _tabActive = null!;
+        private Label _tabArchived = null!;
+        private Panel _tabUnderline = null!;
+
+        private int _hoverAction = -1;
+
+        private string CurrentUserName =>
+            string.IsNullOrWhiteSpace(SessionUser.FullName) ? "Admin" : SessionUser.FullName;
+
         public ServicesView()
         {
             Dock = DockStyle.Fill;
@@ -62,20 +92,18 @@ namespace CarwashServices.Roles
             Font = new Font("Segoe UI", 9.5f);
             DoubleBuffered = true;
 
-            _searchDebounce.Tick += (s, e) => { _searchDebounce.Stop(); ApplyFilter(); };
+            _searchDebounce.Tick += (s, e) => { _searchDebounce.Stop(); ApplyFilter(resetPage: true); };
 
             InitializeUI();
 
             Load += async (s, e) => await LoadServicesAsync();
         }
 
-        // -----------------------------------------------------------------
+        // ================================================================
         //  UI
-        // -----------------------------------------------------------------
+        // ================================================================
         private void InitializeUI()
         {
-            // The padding must live on a container whose child is DOCKED,
-            // otherwise absolutely-positioned children ignore it.
             _root = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -84,14 +112,9 @@ namespace CarwashServices.Roles
             };
             Controls.Add(_root);
 
-            _contentPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = PageBg
-            };
+            _contentPanel = new Panel { Dock = DockStyle.Fill, BackColor = PageBg };
             _root.Controls.Add(_contentPanel);
 
-            // ---- Breadcrumb ----
             _contentPanel.Controls.Add(new Label
             {
                 Text = "Modules  ›  Manage Services",
@@ -101,7 +124,6 @@ namespace CarwashServices.Roles
                 AutoSize = true
             });
 
-            // ---- Header block (title + subtitle) ----
             _contentPanel.Controls.Add(new Label
             {
                 Text = "Manage Services",
@@ -116,11 +138,10 @@ namespace CarwashServices.Roles
                 Text = "SERVICES — service_id · service_name · description · price · duration_minutes",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
-                Location = new Point(0, 82),          // moved down so it no longer overlaps the title
+                Location = new Point(0, 82),
                 AutoSize = true
             });
 
-            // ---- Add Service button ----
             _addBtn = new Button
             {
                 Text = "+  Add Service",
@@ -138,10 +159,57 @@ namespace CarwashServices.Roles
             _addBtn.Click += (s, e) => OpenAddServiceDialog();
             _contentPanel.Controls.Add(_addBtn);
 
+            // ---- Tab strip ----
+            _tabBar = new Panel
+            {
+                Location = new Point(0, 118),
+                Height = 44,
+                BackColor = Color.White,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _tabBar.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder);
+                e.Graphics.DrawLine(pen, 0, _tabBar.Height - 1, _tabBar.Width, _tabBar.Height - 1);
+            };
+            _contentPanel.Controls.Add(_tabBar);
+
+            const int TabWidth = 160;
+            const int TabGap = 40;
+
+            _tabActive = MakeTab("Active Services", 0, TabWidth);
+            _tabArchived = MakeTab("Archived Services", TabWidth + TabGap, TabWidth);
+            _tabBar.Controls.Add(_tabActive);
+            _tabBar.Controls.Add(_tabArchived);
+
+            _tabUnderline = new Panel
+            {
+                Height = 2,
+                Width = TabWidth,
+                BackColor = Accent,
+                Location = new Point(_tabActive.Left, 42)
+            };
+            _tabBar.Controls.Add(_tabUnderline);
+
+            _tabActive.Click += async (s, e) =>
+            {
+                if (_tab == ListTab.Active) return;
+                _tab = ListTab.Active;
+                StyleTabs();
+                await LoadServicesAsync();
+            };
+            _tabArchived.Click += async (s, e) =>
+            {
+                if (_tab == ListTab.Archived) return;
+                _tab = ListTab.Archived;
+                StyleTabs();
+                await LoadServicesAsync();
+            };
+
             // ---- Category chips ----
             _chipBar = new Panel
             {
-                Location = new Point(0, 118),
+                Location = new Point(0, 172),
                 Height = 40,
                 BackColor = PageBg,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -149,21 +217,22 @@ namespace CarwashServices.Roles
             _contentPanel.Controls.Add(_chipBar);
             BuildChips();
 
-            // ---- Filter card (same look as Manage Customers) ----
-            var filterCard = new Panel
+            // ---- Filter card ----
+            _filterCard = new Panel
             {
                 BackColor = Color.White,
-                Location = new Point(0, 168),
-                Height = 76
+                Location = new Point(0, 222),
+                Height = 76,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            filterCard.Paint += (s, e) =>
+            _filterCard.Paint += (s, e) =>
             {
                 using var pen = new Pen(CardBorder);
-                e.Graphics.DrawRectangle(pen, 0, 0, filterCard.Width - 1, filterCard.Height - 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, _filterCard.Width - 1, _filterCard.Height - 1);
             };
-            _contentPanel.Controls.Add(filterCard);
+            _contentPanel.Controls.Add(_filterCard);
 
-            filterCard.Controls.Add(new Label
+            _filterCard.Controls.Add(new Label
             {
                 Text = "Search",
                 ForeColor = Muted,
@@ -172,13 +241,13 @@ namespace CarwashServices.Roles
                 AutoSize = true
             });
 
-            // Bordered wrapper + borderless TextBox = a clearly visible search field
-            var searchWrap = new Panel
+            _searchWrap = new Panel
             {
                 Location = new Point(16, 28),
                 Size = new Size(400, 36),
                 BackColor = Color.White,
-                Padding = new Padding(10, 7, 10, 0)
+                Padding = new Padding(10, 7, 10, 0),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _searchBox = new TextBox
             {
@@ -186,19 +255,19 @@ namespace CarwashServices.Roles
                 Font = new Font("Segoe UI", 10.5f),
                 BackColor = Color.White,
                 ForeColor = Navy,
-                PlaceholderText = "Search by service name, description or category",
+                PlaceholderText = "Search by service name or category",
                 Dock = DockStyle.Top
             };
-            searchWrap.Controls.Add(_searchBox);
+            _searchWrap.Controls.Add(_searchBox);
 
             bool focused = false;
-            _searchBox.Enter += (s, e) => { focused = true; searchWrap.Invalidate(); };
-            _searchBox.Leave += (s, e) => { focused = false; searchWrap.Invalidate(); };
-            searchWrap.Resize += (s, e) => searchWrap.Invalidate();
-            searchWrap.Paint += (s, e) =>
+            _searchBox.Enter += (s, e) => { focused = true; _searchWrap.Invalidate(); };
+            _searchBox.Leave += (s, e) => { focused = false; _searchWrap.Invalidate(); };
+            _searchWrap.Resize += (s, e) => _searchWrap.Invalidate();
+            _searchWrap.Paint += (s, e) =>
             {
                 using var pen = new Pen(focused ? Accent : Faint);
-                e.Graphics.DrawRectangle(pen, 0, 0, searchWrap.Width - 1, searchWrap.Height - 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, _searchWrap.Width - 1, _searchWrap.Height - 1);
             };
             _searchBox.TextChanged += (s, e) =>
             {
@@ -211,12 +280,12 @@ namespace CarwashServices.Roles
                 {
                     e.SuppressKeyPress = true;
                     _searchDebounce.Stop();
-                    ApplyFilter();
+                    ApplyFilter(resetPage: true);
                 }
             };
-            filterCard.Controls.Add(searchWrap);
+            _filterCard.Controls.Add(_searchWrap);
 
-            var searchBtn = new Button
+            _searchBtn = new Button
             {
                 Text = "Search",
                 FlatStyle = FlatStyle.Flat,
@@ -225,34 +294,45 @@ namespace CarwashServices.Roles
                 ForeColor = Color.White,
                 Size = new Size(100, 36),
                 Cursor = Cursors.Hand,
-                UseVisualStyleBackColor = false
+                UseVisualStyleBackColor = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
-            searchBtn.FlatAppearance.BorderSize = 0;
-            searchBtn.Click += (s, e) => ApplyFilter();
-            filterCard.Controls.Add(searchBtn);
+            _searchBtn.FlatAppearance.BorderSize = 0;
+            _searchBtn.Click += (s, e) => ApplyFilter(resetPage: true);
+            _filterCard.Controls.Add(_searchBtn);
 
-            var refreshBtn = new Button
+            _refreshBtn = new Button
             {
                 Text = "Refresh",
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 10f),
                 ForeColor = Navy,
                 Size = new Size(100, 36),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
-            refreshBtn.FlatAppearance.BorderColor = CardBorder;
-            StyleOutlineButton(refreshBtn);
-            refreshBtn.Click += async (s, e) => await LoadServicesAsync();
-            filterCard.Controls.Add(refreshBtn);
+            _refreshBtn.FlatAppearance.BorderColor = CardBorder;
+            StyleOutlineButton(_refreshBtn);
+            _refreshBtn.Click += async (s, e) => await LoadServicesAsync();
+            _filterCard.Controls.Add(_refreshBtn);
 
-            // ---- Grid ----
+            // ---- Grid host + pager ----
+            _gridHost = new Panel
+            {
+                BackColor = Color.White,
+                Location = new Point(0, GridTop),
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _contentPanel.Controls.Add(_gridHost);
+
             _grid = new DataGridView
             {
+                Dock = DockStyle.Fill,
                 BackgroundColor = Color.White,
                 BorderStyle = BorderStyle.None,
                 GridColor = CardBorder,
                 EnableHeadersVisualStyles = false,
-                Location = new Point(0, 256),
+                ScrollBars = ScrollBars.None,
                 ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
                 {
                     BackColor = HeaderBg,
@@ -267,7 +347,7 @@ namespace CarwashServices.Roles
                 ColumnHeadersHeight = 46,
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
                 ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
-                RowTemplate = { Height = 56 },
+                RowTemplate = { Height = RowHeight },
                 DefaultCellStyle = new DataGridViewCellStyle
                 {
                     Font = new Font("Segoe UI", 9.5f),
@@ -288,48 +368,147 @@ namespace CarwashServices.Roles
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal
             };
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ServiceId", HeaderText = "SERVICE_ID", Width = 110 });
+            // Column layout: two fill columns absorb the leftover width so the
+            // grid always fills the host. No spacer needed, no scrollbar.
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "ServiceId",
+                HeaderText = "SERVICE_ID",
+                Width = 100
+            });
+
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Name",
-                HeaderText = "SERVICE_NAME / DESCRIPTION",
+                HeaderText = "SERVICE_NAME",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 240,
-                FillWeight = 100
+                MinimumWidth = 200,
+                FillWeight = 60
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Price", HeaderText = "PRICE", Width = 110 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Duration", HeaderText = "DURATION", Width = 110 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Category", HeaderText = "CATEGORY", Width = 140 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "IsActive", HeaderText = "STATUS", Width = 110 });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Price",
+                HeaderText = "PRICE",
+                Width = 110
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Duration",
+                HeaderText = "DURATION",
+                Width = 110
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Category",
+                HeaderText = "CATEGORY",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = 120,
+                FillWeight = 40
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "IsActive",
+                HeaderText = "STATUS",
+                Width = 110
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Actions",
+                HeaderText = "ACTIONS",
+                Width = ActionsColW,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.White,
+                    SelectionBackColor = Color.FromArgb(0xEA, 0xF2, 0xFD),
+                    Padding = new Padding(0)
+                }
+            });
 
             _grid.CellPainting += Grid_CellPainting;
-            _grid.CellDoubleClick += (s, e) =>
+            _grid.CellMouseMove += Grid_CellMouseMove;
+            _grid.CellMouseLeave += (s, e) => SetHover(-1);
+            _grid.MouseLeave += (s, e) => SetHover(-1);
+            _grid.CellMouseClick += Grid_CellMouseClick;
+
+            _gridHost.Controls.Add(_grid);
+
+            _pager = new Panel
             {
-                if (e.RowIndex < 0) return;
-                var id = Convert.ToInt32(_grid.Rows[e.RowIndex].Cells["ServiceId"].Value);
-                EditServiceAsync(id);
+                BackColor = Color.White,
+                Height = PagerH,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
+            _pager.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder);
+                e.Graphics.DrawLine(pen, 0, 0, _pager.Width, 0);
+            };
+            _contentPanel.Controls.Add(_pager);
 
-            _contentPanel.Controls.Add(_grid);
-
-            // ---- Layout ----
             void Relayout()
             {
                 var w = _contentPanel.ClientSize.Width;
                 var h = _contentPanel.ClientSize.Height;
 
                 _addBtn.Location = new Point(w - _addBtn.Width, 30);
+
+                _tabBar.Width = w;
                 _chipBar.Width = w;
+                _filterCard.Width = w;
 
-                filterCard.Width = w;
-                refreshBtn.Location = new Point(w - 16 - refreshBtn.Width, 28);
-                searchBtn.Location = new Point(refreshBtn.Left - 10 - searchBtn.Width, 28);
-                searchWrap.Width = Math.Max(120, searchBtn.Left - 12 - searchWrap.Left);
+                _refreshBtn.Location = new Point(w - 16 - _refreshBtn.Width, 28);
+                _searchBtn.Location = new Point(_refreshBtn.Left - 10 - _searchBtn.Width, 28);
+                _searchWrap.Width = Math.Max(120, _searchBtn.Left - 12 - _searchWrap.Left);
 
-                _grid.SetBounds(0, 256, w, Math.Max(0, h - 256));
+                // Pager at the bottom, grid host occupies everything between
+                // GridTop and the pager.
+                _pager.SetBounds(0, h - PageBottom - PagerH, w, PagerH);
+                _gridHost.SetBounds(0, GridTop, w,
+                    Math.Max(0, (h - PageBottom - PagerH) - GridTop));
+
+                RecomputePageSize();
+                RenderCurrentPage();
+                RenderPager(CurrentTotalPages());
             }
             _contentPanel.Resize += (s, e) => Relayout();
             Relayout();
+
+            StyleTabs();
+        }
+
+        private Label MakeTab(string text, int x, int width) => new Label
+        {
+            Text = text,
+            Font = new Font("Segoe UI Semibold", 10.5f),
+            ForeColor = Muted,
+            AutoSize = false,
+            Size = new Size(width, 42),
+            Location = new Point(x, 0),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand,
+            BackColor = Color.White
+        };
+
+        private void StyleTabs()
+        {
+            bool activeIsActive = _tab == ListTab.Active;
+
+            _tabActive.ForeColor = activeIsActive ? Navy : Muted;
+            _tabArchived.ForeColor = activeIsActive ? Muted : Navy;
+
+            if (_tabUnderline != null)
+            {
+                _tabUnderline.Left = activeIsActive ? _tabActive.Left : _tabArchived.Left;
+                _tabUnderline.Width = activeIsActive ? _tabActive.Width : _tabArchived.Width;
+            }
+
+            if (_chipBar != null) _chipBar.Visible = activeIsActive;
+            if (_addBtn != null) _addBtn.Visible = activeIsActive;
         }
 
         private static void StyleOutlineButton(Button b)
@@ -344,7 +523,6 @@ namespace CarwashServices.Roles
         private void BuildChips()
         {
             _chipBar.Controls.Clear();
-
             var categories = new[] { "All", "Exterior", "Interior", "Full Service", "Specialty" };
             int x = 0;
 
@@ -373,7 +551,7 @@ namespace CarwashServices.Roles
                 {
                     _activeCategory = captured;
                     BuildChips();
-                    ApplyFilter();
+                    ApplyFilter(resetPage: true);
                 };
 
                 _chipBar.Controls.Add(chip);
@@ -381,9 +559,9 @@ namespace CarwashServices.Roles
             }
         }
 
-        // -----------------------------------------------------------------
-        //  Data
-        // -----------------------------------------------------------------
+        // ================================================================
+        //  DATA
+        // ================================================================
         private async Task LoadServicesAsync()
         {
             try
@@ -391,9 +569,13 @@ namespace CarwashServices.Roles
                 _addBtn.Enabled = false;
                 Cursor = Cursors.WaitCursor;
 
-                var list = await _http.GetFromJsonAsync<List<ProductDto>>("api/tenant/1/products");
+                var url = _tab == ListTab.Active
+                    ? "api/tenant/1/products"
+                    : "api/tenant/1/products/archived";
+
+                var list = await _http.GetFromJsonAsync<List<ProductDto>>(url);
                 _allServices = list ?? new List<ProductDto>();
-                ApplyFilter();
+                ApplyFilter(resetPage: true);
             }
             catch (Exception ex)
             {
@@ -408,41 +590,94 @@ namespace CarwashServices.Roles
             }
         }
 
-        private void ApplyFilter()
+        // ================================================================
+        //  FILTER + PAGINATION
+        // ================================================================
+        private void ApplyFilter(bool resetPage)
         {
+            if (InvokeRequired)
+            {
+                Invoke(new Action(() => ApplyFilter(resetPage)));
+                return;
+            }
+
             var search = _searchBox.Text?.Trim().ToLower() ?? "";
 
+            _filtered = _allServices.Where(s =>
+            {
+                if (_tab == ListTab.Active &&
+                    _activeCategory != "All" &&
+                    !string.Equals(s.Category, _activeCategory, StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                if (string.IsNullOrEmpty(search)) return true;
+
+                return (s.ProductName?.ToLower().Contains(search) ?? false)
+                    || (s.Description?.ToLower().Contains(search) ?? false)
+                    || (s.Category?.ToLower().Contains(search) ?? false);
+            }).ToList();
+
+            if (resetPage) _page = 1;
+
+            int totalPages = CurrentTotalPages();
+            if (_page > totalPages) _page = totalPages;
+
+            RenderCurrentPage();
+            RenderPager(totalPages);
+        }
+
+        private int CurrentTotalPages()
+        {
+            if (_filtered == null) return 1;
+            return Math.Max(1, (int)Math.Ceiling(_filtered.Count / (double)_pageSize));
+        }
+
+        private void RecomputePageSize()
+        {
+            int headerH = _grid.ColumnHeadersHeight;
+            int available = _gridHost.ClientSize.Height - headerH;
+            if (available < RowHeight) available = RowHeight;
+            _pageSize = Math.Max(1, available / RowHeight);
+        }
+
+        private void RenderCurrentPage()
+        {
+            if (_filtered == null) return;
+
+            _hoverAction = -1;
             _grid.SuspendLayout();
             _grid.Rows.Clear();
 
-            foreach (var s in _allServices)
+            int from = (_page - 1) * _pageSize;
+            int take = Math.Min(_pageSize, Math.Max(0, _filtered.Count - from));
+
+            for (int i = from; i < from + take; i++)
             {
-                if (_activeCategory != "All" &&
-                    !string.Equals(s.Category, _activeCategory, StringComparison.OrdinalIgnoreCase))
-                    continue;
+                var s = _filtered[i];
 
-                if (!string.IsNullOrEmpty(search) &&
-                    !(s.ProductName?.ToLower().Contains(search) ?? false) &&
-                    !(s.Description?.ToLower().Contains(search) ?? false) &&
-                    !(s.Category?.ToLower().Contains(search) ?? false))
-                    continue;
-
-                // Two lines joined with "\n" — the CellPainting handler renders them on separate rows
-                var nameCell = s.ProductName ?? "";
-                if (!string.IsNullOrWhiteSpace(s.Description))
-                    nameCell += "\n" + s.Description;
+                string statusText;
+                Color statusColor;
+                if (_tab == ListTab.Active)
+                {
+                    statusText = s.IsActive ? "Active" : "Inactive";
+                    statusColor = s.IsActive ? Green : Red;
+                }
+                else
+                {
+                    statusText = "Archived";
+                    statusColor = Amber;
+                }
 
                 int idx = _grid.Rows.Add(
                     s.ProductId,
-                    nameCell,
+                    s.ProductName ?? "",
                     $"₱{s.UnitPrice:N0}",
                     $"{s.DurationMinutes} min",
                     string.IsNullOrWhiteSpace(s.Category) ? "—" : s.Category,
-                    s.IsActive ? "Active" : "Inactive");
+                    statusText,
+                    "");
 
-                // Status — plain colored text (no pill), same as Manage Customers
                 var statusCell = _grid.Rows[idx].Cells["IsActive"];
-                var statusColor = s.IsActive ? Green : Red;
                 statusCell.Style.ForeColor = statusColor;
                 statusCell.Style.SelectionForeColor = statusColor;
                 statusCell.Style.Font = StatusFont;
@@ -452,61 +687,264 @@ namespace CarwashServices.Roles
             _grid.ResumeLayout();
         }
 
+        private void RenderPager(int totalPages)
+        {
+            _pager.SuspendLayout();
+            foreach (Control c in _pager.Controls.OfType<Control>().ToList())
+            {
+                if (c is Button || c is Label)
+                {
+                    _pager.Controls.Remove(c);
+                    c.Dispose();
+                }
+            }
+
+            int total = _filtered?.Count ?? 0;
+            int from = total == 0 ? 0 : (_page - 1) * _pageSize + 1;
+            int to = Math.Min(_page * _pageSize, total);
+
+            _pager.Controls.Add(new Label
+            {
+                Text = $"Showing {from}–{to} of {total}",
+                ForeColor = Muted,
+                Font = new Font("Segoe UI", 9f),
+                AutoSize = true,
+                Location = new Point(16, 15)
+            });
+
+            if (totalPages > 1)
+            {
+                int start = Math.Max(1, _page - 2);
+                int end = Math.Min(totalPages, start + 4);
+                start = Math.Max(1, end - 4);
+
+                var items = new List<(string Text, int Page, bool Active, bool Enabled)>
+                {
+                    ("‹", _page - 1, false, _page > 1)
+                };
+                for (int p = start; p <= end; p++) items.Add((p.ToString(), p, p == _page, true));
+                items.Add(("›", _page + 1, false, _page < totalPages));
+
+                const int bw = 36, bh = 34, gap = 6;
+                int x = _pager.Width - 16 - (items.Count * bw + (items.Count - 1) * gap);
+
+                foreach (var it in items)
+                {
+                    var b = PagerButton(it.Text, it.Active, it.Enabled);
+                    b.SetBounds(x, 7, bw, bh);
+                    int target = it.Page;
+                    b.Click += (s, e) =>
+                    {
+                        _page = target;
+                        RenderCurrentPage();
+                        RenderPager(totalPages);
+                    };
+                    _pager.Controls.Add(b);
+                    x += bw + gap;
+                }
+            }
+
+            _pager.ResumeLayout();
+        }
+
+        private static Button PagerButton(string text, bool active, bool enabled)
+        {
+            var b = new Button
+            {
+                Text = text,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Semibold", 10f),
+                BackColor = active ? Navy : Color.White,
+                ForeColor = active ? Color.White : Navy,
+                Enabled = enabled,
+                Cursor = enabled ? Cursors.Hand : Cursors.Default,
+                TabStop = false,
+                UseVisualStyleBackColor = false
+            };
+            b.FlatAppearance.BorderColor = active ? Navy : CardBorder;
+            b.FlatAppearance.MouseOverBackColor = active ? Navy : Color.FromArgb(0xF5, 0xF7, 0xFA);
+            return b;
+        }
+
         // ================================================================
-        //  CELL PAINTING — two-line name cell
+        //  CELL PAINTING
         // ================================================================
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
-
-            if (_grid.Columns[e.ColumnIndex].Name == "Name")
-                PaintTwoLine(e);
+            if (_grid.Columns[e.ColumnIndex].Name == "Actions")
+                PaintActionsCell(e);
         }
 
-        private static void PaintTwoLine(DataGridViewCellPaintingEventArgs e)
+        private void PaintActionsCell(DataGridViewCellPaintingEventArgs e)
         {
             e.Paint(e.CellBounds, DataGridViewPaintParts.Background |
                                   DataGridViewPaintParts.Border |
                                   DataGridViewPaintParts.SelectionBackground);
 
-            var text = Convert.ToString(e.Value) ?? "";
-            var parts = text.Split('\n');
-            var l1 = parts[0];
-            var l2 = parts.Length > 1 ? parts[1] : null;
-
-            var b = e.CellBounds;
-            int x = b.X + 16;
-            int w = Math.Max(10, b.Width - 24);
-            var flags = TextFormatFlags.Left | TextFormatFlags.EndEllipsis |
-                        TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter;
-
-            if (l2 == null)
+            if (_tab == ListTab.Active)
             {
-                TextRenderer.DrawText(e.Graphics, l1, NameFont,
-                    new Rectangle(x, b.Y, w, b.Height),
-                    Navy, flags);
+                var (viewRect, editRect, arcRect) = ActiveButtonRects(e.CellBounds);
+                PaintOutlineButton(e.Graphics, viewRect, "View",
+                    _hoverAction == (e.RowIndex << 2) + 0, Accent);
+                PaintOutlineButton(e.Graphics, editRect, "Edit",
+                    _hoverAction == (e.RowIndex << 2) + 1, Accent);
+                PaintOutlineButton(e.Graphics, arcRect, "Archive",
+                    _hoverAction == (e.RowIndex << 2) + 2, Red);
             }
             else
             {
-                // Heights come from the fonts, so nothing gets clipped on high-DPI screens
-                int h1 = NameFont.Height, h2 = DescFont.Height, gap = 2;
-                int top = b.Y + (b.Height - (h1 + h2 + gap)) / 2;
-
-                TextRenderer.DrawText(e.Graphics, l1, NameFont,
-                    new Rectangle(x, top, w, h1),
-                    Navy, flags);
-
-                TextRenderer.DrawText(e.Graphics, l2, DescFont,
-                    new Rectangle(x, top + h1 + gap, w, h2),
-                    Muted, flags);
+                var restoreRect = RestoreButtonRect(e.CellBounds);
+                PaintOutlineButton(e.Graphics, restoreRect, "Restore",
+                    _hoverAction == (e.RowIndex << 2) + 2, Green);
             }
 
             e.Handled = true;
         }
 
-        // -----------------------------------------------------------------
-        //  Dialogs
-        // -----------------------------------------------------------------
+        private static (Rectangle view, Rectangle edit, Rectangle archive) ActiveButtonRects(Rectangle cell)
+        {
+            int totalW = ActionBtnW * 2 + ArchiveBtnW + ActionBtnGap * 2;
+            int x0 = cell.X + (cell.Width - totalW) / 2;
+            int y0 = cell.Y + (cell.Height - ActionBtnH) / 2;
+
+            return (
+                new Rectangle(x0, y0, ActionBtnW, ActionBtnH),
+                new Rectangle(x0 + ActionBtnW + ActionBtnGap, y0, ActionBtnW, ActionBtnH),
+                new Rectangle(x0 + ActionBtnW * 2 + ActionBtnGap * 2, y0, ArchiveBtnW, ActionBtnH)
+            );
+        }
+
+        private static Rectangle RestoreButtonRect(Rectangle cell)
+        {
+            int w = 110;
+            int x0 = cell.X + (cell.Width - w) / 2;
+            int y0 = cell.Y + (cell.Height - ActionBtnH) / 2;
+            return new Rectangle(x0, y0, w, ActionBtnH);
+        }
+
+        private static void PaintOutlineButton(Graphics g, Rectangle rect, string text, bool hover, Color tone)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            Color fill = hover ? tone : Color.White;
+            Color fore = hover ? Color.White : tone;
+
+            using (var path = RoundedRect(rect, 6))
+            using (var fillBrush = new SolidBrush(fill))
+            using (var pen = new Pen(tone, 1f))
+            {
+                g.FillPath(fillBrush, path);
+                g.DrawPath(pen, path);
+            }
+
+            TextRenderer.DrawText(g, text, ButtonFont, rect, fore,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        }
+
+        private static GraphicsPath RoundedRect(Rectangle r, int radius)
+        {
+            int d = radius * 2;
+            var p = new GraphicsPath();
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+
+        // ================================================================
+        //  HOVER + CLICK
+        // ================================================================
+        private void Grid_CellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 ||
+                _grid.Columns[e.ColumnIndex].Name != "Actions")
+            {
+                SetHover(-1);
+                return;
+            }
+
+            SetHover(HitTestActions(e.RowIndex, e.Location));
+        }
+
+        private int HitTestActions(int rowIndex, Point local)
+        {
+            var cellBounds = _grid.GetCellDisplayRectangle(
+                _grid.Columns["Actions"].Index, rowIndex, false);
+
+            var absolute = new Point(cellBounds.X + local.X, cellBounds.Y + local.Y);
+
+            if (_tab == ListTab.Active)
+            {
+                var (viewRect, editRect, arcRect) = ActiveButtonRects(cellBounds);
+                if (viewRect.Contains(absolute)) return (rowIndex << 2) + 0;
+                if (editRect.Contains(absolute)) return (rowIndex << 2) + 1;
+                if (arcRect.Contains(absolute)) return (rowIndex << 2) + 2;
+            }
+            else
+            {
+                var restoreRect = RestoreButtonRect(cellBounds);
+                if (restoreRect.Contains(absolute)) return (rowIndex << 2) + 2;
+            }
+
+            return -1;
+        }
+
+        private void SetHover(int encoded)
+        {
+            if (encoded == _hoverAction) return;
+
+            int old = _hoverAction;
+            _hoverAction = encoded;
+
+            var col = _grid.Columns["Actions"];
+            if (col != null)
+            {
+                if (old >= 0) _grid.InvalidateCell(col.Index, old >> 2);
+                if (encoded >= 0) _grid.InvalidateCell(col.Index, encoded >> 2);
+            }
+
+            _grid.Cursor = encoded >= 0 ? Cursors.Hand : Cursors.Default;
+        }
+
+        private void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (_grid.Columns[e.ColumnIndex].Name != "Actions") return;
+
+            int hit = HitTestActions(e.RowIndex, e.Location);
+            if (hit < 0) return;
+
+            int buttonIndex = hit & 0b11;
+
+            var idText = _grid.Rows[e.RowIndex].Cells["ServiceId"].Value?.ToString() ?? "";
+            if (!int.TryParse(idText, out var id)) return;
+
+            var svc = _allServices.FirstOrDefault(x => x.ProductId == id);
+            if (svc == null) return;
+
+            if (_tab == ListTab.Active)
+            {
+                switch (buttonIndex)
+                {
+                    case 0: OpenViewServiceDialog(svc); break;
+                    case 1: OpenEditServiceDialog(id); break;
+                    case 2: ArchiveServiceAsync(svc); break;
+                }
+            }
+            else
+            {
+                if (buttonIndex == 2) RestoreServiceAsync(svc);
+            }
+        }
+
+        // ================================================================
+        //  ACTIONS
+        // ================================================================
         private async void OpenAddServiceDialog()
         {
             using var dlg = new ServiceEditDialog(null);
@@ -514,11 +952,85 @@ namespace CarwashServices.Roles
             await LoadServicesAsync();
         }
 
-        private async void EditServiceAsync(int serviceId)
+        private async void OpenEditServiceDialog(int serviceId)
         {
             using var dlg = new ServiceEditDialog(serviceId);
             dlg.ShowDialog(FindForm());
             await LoadServicesAsync();
+        }
+
+        private void OpenViewServiceDialog(ProductDto svc)
+        {
+            MessageBox.Show(
+                $"Service ID       : {svc.ProductId}\n" +
+                $"Code             : {svc.ProductCode}\n" +
+                $"Name             : {svc.ProductName}\n" +
+                $"Category         : {(string.IsNullOrWhiteSpace(svc.Category) ? "—" : svc.Category)}\n" +
+                $"Price            : ₱{svc.UnitPrice:N0}\n" +
+                $"Duration         : {svc.DurationMinutes} min\n" +
+                $"Status           : {(svc.IsActive ? "Active" : "Inactive")}\n" +
+                $"Created          : {svc.CreatedAt:yyyy-MM-dd}\n\n" +
+                $"Description:\n{(string.IsNullOrWhiteSpace(svc.Description) ? "(none)" : svc.Description)}",
+                $"Service — {svc.ProductName}",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        private async void ArchiveServiceAsync(ProductDto svc)
+        {
+            if (!ArchiveConfirmDialog.ConfirmArchive("service")) return;
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                var resp = await _http.PutAsJsonAsync(
+                    $"api/tenant/1/products/{svc.ProductId}/archive",
+                    new { archivedBy = CurrentUserName });
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Archive failed: {resp.StatusCode}\n\n{body}",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                await LoadServicesAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Archive failed.\n\n{ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally { Cursor = Cursors.Default; }
+        }
+
+        private async void RestoreServiceAsync(ProductDto svc)
+        {
+            if (!ArchiveConfirmDialog.ConfirmRestore("service")) return;
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                var resp = await _http.PutAsync(
+                    $"api/tenant/1/products/{svc.ProductId}/restore", null);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Restore failed: {resp.StatusCode}\n\n{body}",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                await LoadServicesAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Restore failed.\n\n{ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally { Cursor = Cursors.Default; }
         }
     }
 }

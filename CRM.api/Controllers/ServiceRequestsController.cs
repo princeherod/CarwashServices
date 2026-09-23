@@ -17,12 +17,13 @@ public class ServiceRequestsController : ControllerBase
         _db = db;
     }
 
-    // GET: api/service-requests
+    // GET: api/service-requests          → active only
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
         var list = await _db.ServiceRequests
             .AsNoTracking()
+            .Where(r => !r.IsArchived)
             .OrderByDescending(r => r.RequestId)
             .Select(r => new
             {
@@ -36,7 +37,40 @@ public class ServiceRequestsController : ControllerBase
                 r.RequestedDate,
                 r.ScheduledDate,
                 r.CompletedDate,
-                r.Notes
+                r.Notes,
+                r.IsArchived,
+                r.ArchivedAt,
+                r.ArchivedBy
+            })
+            .ToListAsync();
+
+        return Ok(list);
+    }
+
+    // GET: api/service-requests/archived  → archived only
+    [HttpGet("archived")]
+    public async Task<IActionResult> GetArchived()
+    {
+        var list = await _db.ServiceRequests
+            .AsNoTracking()
+            .Where(r => r.IsArchived)
+            .OrderByDescending(r => r.ArchivedAt)
+            .Select(r => new
+            {
+                r.RequestId,
+                r.CustomerId,
+                r.ServiceId,
+                r.AssignedStaffId,
+                r.CreatedBy,
+                r.Status,
+                r.Priority,
+                r.RequestedDate,
+                r.ScheduledDate,
+                r.CompletedDate,
+                r.Notes,
+                r.IsArchived,
+                r.ArchivedAt,
+                r.ArchivedBy
             })
             .ToListAsync();
 
@@ -58,7 +92,6 @@ public class ServiceRequestsController : ControllerBase
     }
 
     // POST: api/service-requests
-    // Status is forced to "Pending". Staff / CreatedBy are set server-side.
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ServiceRequest req)
     {
@@ -69,8 +102,10 @@ public class ServiceRequestsController : ControllerBase
         if (req.RequestedDate == default) req.RequestedDate = DateTime.Now;
 
         req.AssignedStaffId = null;
+        req.IsArchived = false;
+        req.ArchivedAt = null;
+        req.ArchivedBy = null;
 
-        // Pick the first existing user as creator (replace with logged-in user later).
         req.CreatedBy = await _db.Users
             .OrderBy(u => u.UserId)
             .Select(u => u.UserId)
@@ -86,8 +121,6 @@ public class ServiceRequestsController : ControllerBase
     }
 
     // PUT: api/service-requests/5
-    // Only editable fields are updated. Status / AssignedStaffId / CreatedBy
-    // are deliberately left alone.
     [HttpPut("{requestId:int}")]
     public async Task<IActionResult> Update(int requestId, [FromBody] ServiceRequest req)
     {
@@ -99,7 +132,7 @@ public class ServiceRequestsController : ControllerBase
         if (existing is null)
             return NotFound(new { message = $"ServiceRequest {requestId} not found." });
 
-        // ---- Editable fields ----
+        // Editable fields
         existing.CustomerId = req.CustomerId;
         existing.ServiceId = req.ServiceId;
         existing.Priority = req.Priority;
@@ -108,17 +141,13 @@ public class ServiceRequestsController : ControllerBase
         existing.CompletedDate = req.CompletedDate;
         existing.Notes = req.Notes;
 
-        // ---- Not touched ----
-        // existing.Status
-        // existing.AssignedStaffId
-        // existing.CreatedBy
-
+        // Status / AssignedStaffId / CreatedBy / archive fields are managed by
+        // their own dedicated endpoints, NOT by the generic update.
         await _db.SaveChangesAsync();
         return Ok(existing);
     }
 
     // PUT: api/service-requests/5/status
-    // Only Service Staff should call this.
     [HttpPut("{requestId:int}/status")]
     public async Task<IActionResult> UpdateStatus(int requestId, [FromBody] StatusUpdateDto dto)
     {
@@ -140,7 +169,50 @@ public class ServiceRequestsController : ControllerBase
         return Ok(existing);
     }
 
+    // PUT: api/service-requests/5/archive
+    public class ArchiveRequest { public string? ArchivedBy { get; set; } }
+
+    [HttpPut("{requestId:int}/archive")]
+    public async Task<IActionResult> Archive(int requestId, [FromBody] ArchiveRequest? req)
+    {
+        var existing = await _db.ServiceRequests
+            .FirstOrDefaultAsync(r => r.RequestId == requestId);
+
+        if (existing is null)
+            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+        if (existing.IsArchived)
+            return Conflict(new { message = "This request is already archived." });
+
+        existing.IsArchived = true;
+        existing.ArchivedAt = DateTime.UtcNow;
+        existing.ArchivedBy = string.IsNullOrWhiteSpace(req?.ArchivedBy) ? "Admin" : req!.ArchivedBy;
+
+        await _db.SaveChangesAsync();
+        return Ok(existing);
+    }
+
+    // PUT: api/service-requests/5/restore
+    [HttpPut("{requestId:int}/restore")]
+    public async Task<IActionResult> Restore(int requestId)
+    {
+        var existing = await _db.ServiceRequests
+            .FirstOrDefaultAsync(r => r.RequestId == requestId);
+
+        if (existing is null)
+            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+        if (!existing.IsArchived)
+            return Conflict(new { message = "This request is not archived." });
+
+        existing.IsArchived = false;
+        existing.ArchivedAt = null;
+        existing.ArchivedBy = null;
+
+        await _db.SaveChangesAsync();
+        return Ok(existing);
+    }
+
     // DELETE: api/service-requests/5
+    // Kept for parity but no longer used by the UI. Archive replaces it.
     [HttpDelete("{requestId:int}")]
     public async Task<IActionResult> Delete(int requestId)
     {

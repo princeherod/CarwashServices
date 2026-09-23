@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -10,6 +9,7 @@ using System.Net.Http.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
+using CarwashServices.Auth;
 using CarwashServices.Dialogs;
 using CarwashServices.Dtos;
 
@@ -44,27 +44,33 @@ namespace CarwashServices.Roles
         };
 
         private List<TenantCustomerDto> _allCustomers = new();
+        private List<TenantCustomerDto> _archivedCustomers = new();
         private readonly System.Windows.Forms.Timer _searchDebounce = new() { Interval = 300 };
 
-        // Pagination
+        private enum ListTab { Active, Archived }
+        private ListTab _tab = ListTab.Active;
+
         private int _page = 1;
         private int _pageSize = 6;
         private const int RowHeight = 92;
         private const int RowGap = 12;
 
-        // Root — swapped between list / detail
-        private Panel _root;
+        // Tab strip geometry
+        private const int TabWidth = 170;
+        private const int TabGap = 40;
 
-        // List-screen controls
-        private Panel _listScreen;
+        private Panel _root = null!;
+        private Panel _listScreen = null!;
+        private Label _tabActive = null!;
+        private Label _tabArchived = null!;
+        private Panel _tabUnderline = null!;
 
-        // Detail-screen controls
-        private Panel _detailScreen;
+        private Panel? _detailScreen;
         private TenantCustomerDto? _currentCustomer;
 
-        // -----------------------------------------------------------------
-        //  Ctor
-        // -----------------------------------------------------------------
+        private string CurrentUserName =>
+            string.IsNullOrWhiteSpace(SessionUser.FullName) ? "Admin" : SessionUser.FullName;
+
         public CustomersView()
         {
             Dock = DockStyle.Fill;
@@ -80,9 +86,6 @@ namespace CarwashServices.Roles
             Load += async (s, e) => await LoadCustomersAsync();
         }
 
-        // -----------------------------------------------------------------
-        //  Root container
-        // -----------------------------------------------------------------
         private void BuildRoot()
         {
             _root = new Panel
@@ -101,14 +104,9 @@ namespace CarwashServices.Roles
         {
             _root.Controls.Clear();
 
-            _listScreen = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = PageBg
-            };
+            _listScreen = new Panel { Dock = DockStyle.Fill, BackColor = PageBg };
             _root.Controls.Add(_listScreen);
 
-            // ---- Breadcrumb ----
             _listScreen.Controls.Add(new Label
             {
                 Text = "Modules  ›  Manage Customers",
@@ -118,7 +116,6 @@ namespace CarwashServices.Roles
                 AutoSize = true
             });
 
-            // ---- Header ----
             _listScreen.Controls.Add(new Label
             {
                 Text = "Manage Customers",
@@ -137,7 +134,6 @@ namespace CarwashServices.Roles
                 AutoSize = true
             });
 
-            // ---- New Customer button ----
             var newCustomerBtn = new Button
             {
                 Text = "+  New Customer",
@@ -158,11 +154,55 @@ namespace CarwashServices.Roles
             };
             _listScreen.Controls.Add(newCustomerBtn);
 
-            // ---- Filter card (search only) ----
+            // ---- Tab strip (Active / Archived) ----
+            var tabBar = new Panel
+            {
+                Location = new Point(0, 118),
+                Height = 44,
+                BackColor = Color.White,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            tabBar.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder);
+                e.Graphics.DrawLine(pen, 0, tabBar.Height - 1, tabBar.Width, tabBar.Height - 1);
+            };
+            _listScreen.Controls.Add(tabBar);
+
+            _tabActive = MakeTab("Active Customers", 0);
+            _tabArchived = MakeTab("Archived Customers", TabWidth + TabGap);
+            tabBar.Controls.Add(_tabActive);
+            tabBar.Controls.Add(_tabArchived);
+
+            _tabUnderline = new Panel
+            {
+                Height = 2,
+                Width = TabWidth,
+                BackColor = Accent,
+                Location = new Point(_tabActive.Left, 42)
+            };
+            tabBar.Controls.Add(_tabUnderline);
+
+            _tabActive.Click += async (s, e) =>
+            {
+                if (_tab == ListTab.Active) return;
+                _tab = ListTab.Active;
+                StyleTabs();
+                await LoadCustomersAsync();
+            };
+            _tabArchived.Click += async (s, e) =>
+            {
+                if (_tab == ListTab.Archived) return;
+                _tab = ListTab.Archived;
+                StyleTabs();
+                await LoadCustomersAsync();
+            };
+
+            // ---- Filter card ----
             var filterCard = new Panel
             {
                 BackColor = Color.White,
-                Location = new Point(0, 118),
+                Location = new Point(0, 178),
                 Height = 76
             };
             filterCard.Paint += (s, e) =>
@@ -181,7 +221,6 @@ namespace CarwashServices.Roles
                 AutoSize = true
             });
 
-            // Bordered wrapper + borderless TextBox = a clearly visible search field
             var searchWrap = new Panel
             {
                 Location = new Point(16, 28),
@@ -254,12 +293,8 @@ namespace CarwashServices.Roles
             refreshBtn.Click += async (s, e) => await LoadCustomersAsync();
             filterCard.Controls.Add(refreshBtn);
 
-            // ---- List panel (no scroll) + pager ----
-            var listPanel = new Panel
-            {
-                BackColor = PageBg,
-                AutoScroll = false
-            };
+            // ---- List + pager ----
+            var listPanel = new Panel { BackColor = PageBg, AutoScroll = false };
             _listScreen.Controls.Add(listPanel);
 
             var pager = new Panel { BackColor = PageBg };
@@ -272,7 +307,7 @@ namespace CarwashServices.Roles
                 Pager = pager
             };
 
-            const int listTop = 206;
+            const int listTop = 266;
             const int pagerH = 44;
 
             void Relayout()
@@ -282,6 +317,7 @@ namespace CarwashServices.Roles
 
                 newCustomerBtn.Location = new Point(w - newCustomerBtn.Width, 30);
                 filterCard.Width = w;
+                tabBar.Width = w;
 
                 refreshBtn.Location = new Point(w - 16 - refreshBtn.Width, 28);
                 searchBtn.Location = new Point(refreshBtn.Left - 10 - searchBtn.Width, 28);
@@ -290,10 +326,39 @@ namespace CarwashServices.Roles
                 pager.SetBounds(0, Math.Max(listTop, h - pagerH), w, pagerH);
                 listPanel.SetBounds(0, listTop, w, Math.Max(0, h - listTop - pagerH - 6));
 
-                ApplyFilter(false);   // page size depends on available height
+                ApplyFilter(false);
             }
             _listScreen.Resize += (s, e) => Relayout();
             Relayout();
+
+            StyleTabs();
+        }
+
+        private Label MakeTab(string text, int x) => new Label
+        {
+            Text = text,
+            Font = new Font("Segoe UI Semibold", 10.5f),
+            ForeColor = Muted,
+            AutoSize = false,
+            Size = new Size(TabWidth, 42),
+            Location = new Point(x, 0),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand,
+            BackColor = Color.White
+        };
+
+        private void StyleTabs()
+        {
+            bool activeIsActive = _tab == ListTab.Active;
+
+            _tabActive.ForeColor = activeIsActive ? Navy : Muted;
+            _tabArchived.ForeColor = activeIsActive ? Muted : Navy;
+
+            if (_tabUnderline != null)
+            {
+                _tabUnderline.Left = activeIsActive ? _tabActive.Left : _tabArchived.Left;
+                _tabUnderline.Width = TabWidth;
+            }
         }
 
         private sealed class ListScreenState
@@ -315,10 +380,21 @@ namespace CarwashServices.Roles
             try
             {
                 Cursor = Cursors.WaitCursor;
-                var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                    "api/tenant/1/tenant-customers");
-                _allCustomers = list ?? new List<TenantCustomerDto>();
-                ApplyFilter(false);   // stay on the current page
+
+                if (_tab == ListTab.Active)
+                {
+                    var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
+                        "api/tenant/1/tenant-customers");
+                    _allCustomers = list ?? new List<TenantCustomerDto>();
+                }
+                else
+                {
+                    var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
+                        "api/tenant/1/tenant-customers/archived");
+                    _archivedCustomers = list ?? new List<TenantCustomerDto>();
+                }
+
+                ApplyFilter(false);
             }
             catch (Exception ex)
             {
@@ -332,6 +408,9 @@ namespace CarwashServices.Roles
             }
         }
 
+        private List<TenantCustomerDto> CurrentSource =>
+            _tab == ListTab.Active ? _allCustomers : _archivedCustomers;
+
         private void ApplyFilter(bool resetPage = true)
         {
             var st = ListState;
@@ -339,7 +418,7 @@ namespace CarwashServices.Roles
 
             var search = st.SearchBox.Text?.Trim().ToLower() ?? "";
 
-            var filtered = _allCustomers.Where(c =>
+            var filtered = CurrentSource.Where(c =>
                 string.IsNullOrEmpty(search) ||
                 (c.CustomerName?.ToLower().Contains(search) ?? false) ||
                 (c.EmailAddress?.ToLower().Contains(search) ?? false) ||
@@ -349,7 +428,6 @@ namespace CarwashServices.Roles
             ).ToList();
 
             _pageSize = Math.Max(1, (st.ListPanel.ClientSize.Height + RowGap) / (RowHeight + RowGap));
-
             int totalPages = Math.Max(1, (int)Math.Ceiling(filtered.Count / (double)_pageSize));
             if (resetPage) _page = 1;
             _page = Math.Min(Math.Max(1, _page), totalPages);
@@ -362,7 +440,10 @@ namespace CarwashServices.Roles
             int y = 0;
             foreach (var c in pageItems)
             {
-                var row = BuildCustomerRow(c);
+                var row = _tab == ListTab.Active
+                    ? BuildActiveCustomerRow(c)
+                    : BuildArchivedCustomerRow(c);
+
                 row.Location = new Point(0, y);
                 row.Width = st.ListPanel.ClientSize.Width;
                 row.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -374,7 +455,7 @@ namespace CarwashServices.Roles
             {
                 st.ListPanel.Controls.Add(new Label
                 {
-                    Text = "No customers match your search.",
+                    Text = _tab == ListTab.Active ? "No active customers." : "No archived customers.",
                     ForeColor = Muted,
                     Font = new Font("Segoe UI", 10f),
                     AutoSize = true,
@@ -386,7 +467,6 @@ namespace CarwashServices.Roles
             RenderPager(st, filtered.Count, totalPages);
         }
 
-        // ---- Pager ----
         private void RenderPager(ListScreenState st, int total, int totalPages)
         {
             var pager = st.Pager;
@@ -415,8 +495,7 @@ namespace CarwashServices.Roles
                 {
                     ("‹", _page - 1, false, _page > 1)
                 };
-                for (int p = start; p <= end; p++)
-                    items.Add((p.ToString(), p, p == _page, true));
+                for (int p = start; p <= end; p++) items.Add((p.ToString(), p, p == _page, true));
                 items.Add(("›", _page + 1, false, _page < totalPages));
 
                 const int bw = 36, bh = 34, gap = 6;
@@ -455,8 +534,10 @@ namespace CarwashServices.Roles
             return b;
         }
 
-        // ---- One row of the customer list ----
-        private Panel BuildCustomerRow(TenantCustomerDto c)
+        // =================================================================
+        //  ROW BUILDERS
+        // =================================================================
+        private Panel BuildActiveCustomerRow(TenantCustomerDto c)
         {
             var row = new Panel
             {
@@ -470,10 +551,10 @@ namespace CarwashServices.Roles
                 e.Graphics.DrawRectangle(pen, 0, 0, row.Width - 1, row.Height - 1);
             };
 
-            var initials = Initials(c.CustomerName);
+            // ---- Avatar ----
             var avatar = new Label
             {
-                Text = initials,
+                Text = Initials(c.CustomerName),
                 ForeColor = Accent,
                 BackColor = BlueSoft,
                 Font = new Font("Segoe UI Semibold", 11f),
@@ -483,60 +564,171 @@ namespace CarwashServices.Roles
             };
             row.Controls.Add(avatar);
 
-            var name = new Label
+            // ---- Name / email / meta ----
+            row.Controls.Add(new Label
             {
                 Text = c.CustomerName ?? "",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 11.5f),
                 Location = new Point(88, 16),
                 AutoSize = true
-            };
-            row.Controls.Add(name);
+            });
 
-            var email = new Label
+            row.Controls.Add(new Label
             {
                 Text = c.EmailAddress ?? "",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9.5f),
                 Location = new Point(88, 40),
                 AutoSize = true
-            };
-            row.Controls.Add(email);
+            });
 
             var meta = string.Join(" · ", new[]
             {
-                c.ContactNumber,
-                c.PlateNumber,
-                c.CustomerCode
+                c.ContactNumber, c.PlateNumber, c.CustomerCode
             }.Where(x => !string.IsNullOrWhiteSpace(x)));
 
-            var metaLbl = new Label
+            row.Controls.Add(new Label
             {
                 Text = meta,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 8.5f),
                 Location = new Point(88, 62),
                 AutoSize = true
-            };
-            row.Controls.Add(metaLbl);
+            });
 
+            // ---- Right cluster: status above, Archive button below ----
             var statusLbl = new Label
             {
                 Text = c.IsActive ? "Active" : "Inactive",
                 ForeColor = c.IsActive ? Green : Red,
                 Font = new Font("Segoe UI Semibold", 9.5f),
                 TextAlign = ContentAlignment.MiddleRight,
-                Size = new Size(90, 24),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                Size = new Size(100, 20),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Location = new Point(0, 12)
             };
             row.Controls.Add(statusLbl);
-            row.Resize += (s, e) => statusLbl.Location = new Point(row.Width - 110, 34);
-            statusLbl.Location = new Point(row.Width - 110, 34);
 
+            var archiveBtn = new Button
+            {
+                Text = "Archive",
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Semibold", 9f),
+                ForeColor = Red,
+                BackColor = Color.White,
+                Size = new Size(100, 32),
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Location = new Point(0, 40)
+            };
+            archiveBtn.FlatAppearance.BorderColor = Red;
+            archiveBtn.FlatAppearance.MouseOverBackColor = RedSoft;
+            archiveBtn.Click += async (s, e) => await ArchiveCustomerAsync(c);
+            row.Controls.Add(archiveBtn);
+
+            void PositionRightCluster()
+            {
+                int right = row.Width - 20;
+                statusLbl.Location = new Point(right - statusLbl.Width, 12);
+                archiveBtn.Location = new Point(right - archiveBtn.Width, 40);
+            }
+            row.Resize += (s, e) => PositionRightCluster();
+            PositionRightCluster();
+
+            // ---- Click-to-open detail handler ----
             void OpenDetail(object? s, EventArgs e) => ShowDetail(c);
             row.Click += OpenDetail;
+            avatar.Click += OpenDetail;
             foreach (Control child in row.Controls)
-                child.Click += OpenDetail;
+            {
+                if (child is Label) child.Click += OpenDetail;
+            }
+
+            return row;
+        }
+
+        private Panel BuildArchivedCustomerRow(TenantCustomerDto c)
+        {
+            var row = new Panel
+            {
+                Height = RowHeight,
+                BackColor = Color.White
+            };
+            row.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder);
+                e.Graphics.DrawRectangle(pen, 0, 0, row.Width - 1, row.Height - 1);
+                using var bar = new SolidBrush(Amber);
+                e.Graphics.FillRectangle(bar, 0, 0, 4, row.Height);
+            };
+
+            var avatar = new Label
+            {
+                Text = Initials(c.CustomerName),
+                ForeColor = Faint,
+                BackColor = Color.FromArgb(0xF1, 0xF4, 0xF9),
+                Font = new Font("Segoe UI Semibold", 11f),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Size = new Size(48, 48),
+                Location = new Point(20, 22)
+            };
+            row.Controls.Add(avatar);
+
+            row.Controls.Add(new Label
+            {
+                Text = c.CustomerName ?? "",
+                ForeColor = Navy,
+                Font = new Font("Segoe UI Semibold", 11.5f),
+                Location = new Point(88, 16),
+                AutoSize = true
+            });
+
+            row.Controls.Add(new Label
+            {
+                Text = c.EmailAddress ?? "",
+                ForeColor = Muted,
+                Font = new Font("Segoe UI", 9.5f),
+                Location = new Point(88, 40),
+                AutoSize = true
+            });
+
+            var archivedAt = c.ArchivedAt?.ToString("MMM d, yyyy h:mm tt") ?? "—";
+            var archivedBy = string.IsNullOrWhiteSpace(c.ArchivedBy) ? "—" : c.ArchivedBy;
+
+            row.Controls.Add(new Label
+            {
+                Text = $"Archived {archivedAt}  ·  by {archivedBy}",
+                ForeColor = Amber,
+                Font = new Font("Segoe UI Semibold", 8.5f),
+                Location = new Point(88, 62),
+                AutoSize = true
+            });
+
+            var restoreBtn = new Button
+            {
+                Text = "Restore",
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Semibold", 9f),
+                ForeColor = Green,
+                BackColor = Color.White,
+                Size = new Size(100, 32),
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Location = new Point(0, 30)
+            };
+            restoreBtn.FlatAppearance.BorderColor = Green;
+            restoreBtn.FlatAppearance.MouseOverBackColor = GreenSoft;
+            restoreBtn.Click += async (s, e) => await RestoreCustomerAsync(c);
+            row.Controls.Add(restoreBtn);
+
+            void PositionRestore()
+            {
+                int right = row.Width - 20;
+                restoreBtn.Location = new Point(right - restoreBtn.Width, (RowHeight - restoreBtn.Height) / 2);
+            }
+            row.Resize += (s, e) => PositionRestore();
+            PositionRestore();
 
             return row;
         }
@@ -548,6 +740,66 @@ namespace CarwashServices.Roles
             if (parts.Length == 1)
                 return parts[0].Length >= 2 ? parts[0].Substring(0, 2).ToUpper() : parts[0].ToUpper();
             return (parts[0][0].ToString() + parts[parts.Length - 1][0].ToString()).ToUpper();
+        }
+
+        // =================================================================
+        //  ARCHIVE / RESTORE
+        // =================================================================
+        private async Task ArchiveCustomerAsync(TenantCustomerDto c)
+        {
+            if (!ArchiveConfirmDialog.ConfirmArchive("customer")) return;
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                var resp = await _http.PutAsJsonAsync(
+                    $"api/tenant/1/tenant-customers/{c.TenantCustomerId}/archive",
+                    new { archivedBy = CurrentUserName });
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Archive failed: {resp.StatusCode}\n\n{body}",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                await LoadCustomersAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Archive failed.\n\n{ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally { Cursor = Cursors.Default; }
+        }
+
+        private async Task RestoreCustomerAsync(TenantCustomerDto c)
+        {
+            if (!ArchiveConfirmDialog.ConfirmRestore("customer")) return;
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                var resp = await _http.PutAsync(
+                    $"api/tenant/1/tenant-customers/{c.TenantCustomerId}/restore", null);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Restore failed: {resp.StatusCode}\n\n{body}",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                await LoadCustomersAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Restore failed.\n\n{ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally { Cursor = Cursors.Default; }
         }
 
         // =================================================================
@@ -714,7 +966,7 @@ namespace CarwashServices.Roles
                 ForeColor = Muted,
                 AutoSize = false,
                 Size = new Size(130, 42),
-                Location = new Point(100, 0),
+                Location = new Point(140, 0),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Cursor = Cursors.Hand
             };
@@ -779,11 +1031,6 @@ namespace CarwashServices.Roles
             SelectProfile();
         }
 
-        // =================================================================
-        //  SHARED HELPERS
-        // =================================================================
-        private static string Dash(string? s) => string.IsNullOrWhiteSpace(s) ? "—" : s.Trim();
-
         private static void StyleOutlineButton(Button b)
         {
             b.UseVisualStyleBackColor = false;
@@ -791,27 +1038,6 @@ namespace CarwashServices.Roles
             b.BackColor = Color.White;
             b.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xF5, 0xF7, 0xFA);
             b.FlatAppearance.MouseDownBackColor = Color.FromArgb(0xE9, 0xEE, 0xF6);
-        }
-
-        private Button ActionButton(string text, Color back, int x)
-        {
-            var b = new Button
-            {
-                Text = text,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI Semibold", 10f),
-                ForeColor = Color.White,
-                BackColor = back,
-                Size = new Size(190, 40),
-                Location = new Point(x, 0),
-                Cursor = Cursors.Hand,
-                TabStop = false,
-                UseVisualStyleBackColor = false
-            };
-            b.FlatAppearance.BorderSize = 0;
-            b.FlatAppearance.MouseOverBackColor = ControlPaint.Dark(back, 0.08f);
-            b.FlatAppearance.MouseDownBackColor = ControlPaint.Dark(back, 0.15f);
-            return b;
         }
 
         // =================================================================
@@ -835,14 +1061,12 @@ namespace CarwashServices.Roles
             int left = 28;
             int right = left + colW + 40;
 
-            // CONTACT
             card.Controls.Add(SectionHeader("CONTACT", left, 22));
             int y = 52;
             y = Field(card, "Email", Dash(c.EmailAddress), left, y, colW);
             y = Field(card, "Phone", Dash(c.ContactNumber), left, y, colW);
             y = Field(card, "Address", Dash(c.Address), left, y, colW);
 
-            // VEHICLE
             card.Controls.Add(SectionHeader("VEHICLE", right, 22));
             int y2 = 52;
             y2 = Field(card, "Plate number", Dash(c.PlateNumber), right, y2, colW);
@@ -852,7 +1076,6 @@ namespace CarwashServices.Roles
             y2 = Field(card, "Color", Dash(c.VehicleColor), right, y2, colW);
             y2 = Field(card, "Type", Dash(c.VehicleType), right, y2, colW);
 
-            // OTHER
             int bottom = Math.Max(y, y2) + 14;
             card.Controls.Add(SectionHeader("OTHER", left, bottom));
             int y3 = bottom + 30;
@@ -862,6 +1085,17 @@ namespace CarwashServices.Roles
             card.Height = y3 + 16;
             return card;
         }
+
+        private static string Dash(string? s) => string.IsNullOrWhiteSpace(s) ? "—" : s.Trim();
+
+        private static Label SectionHeader(string text, int x, int y) => new Label
+        {
+            Text = text,
+            ForeColor = Muted,
+            Font = new Font("Segoe UI Semibold", 8.5f),
+            Location = new Point(x, y),
+            AutoSize = true
+        };
 
         private int Field(Control parent, string label, string value, int x, int y, int colW)
         {
@@ -888,18 +1122,30 @@ namespace CarwashServices.Roles
             return y + 28;
         }
 
-        private Label SectionHeader(string text, int x, int y) => new Label
-        {
-            Text = text,
-            ForeColor = Muted,
-            Font = new Font("Segoe UI Semibold", 8.5f),
-            Location = new Point(x, y),
-            AutoSize = true
-        };
-
         // =================================================================
         //  INTERACTIONS TAB
         // =================================================================
+        private Button ActionButton(string text, Color back, int x)
+        {
+            var b = new Button
+            {
+                Text = text,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Semibold", 10f),
+                ForeColor = Color.White,
+                BackColor = back,
+                Size = new Size(190, 40),
+                Location = new Point(x, 0),
+                Cursor = Cursors.Hand,
+                TabStop = false,
+                UseVisualStyleBackColor = false
+            };
+            b.FlatAppearance.BorderSize = 0;
+            b.FlatAppearance.MouseOverBackColor = ControlPaint.Dark(back, 0.08f);
+            b.FlatAppearance.MouseDownBackColor = ControlPaint.Dark(back, 0.15f);
+            return b;
+        }
+
         private Control BuildInteractionsTab(TenantCustomerDto c)
         {
             var host = new Panel
@@ -908,13 +1154,11 @@ namespace CarwashServices.Roles
                 BackColor = PageBg
             };
 
-            // ---- Action row (red / green) ----
             var recordComplaint = ActionButton("+  Record Complaint", Red, 0);
             var recordFeedback = ActionButton("+  Record Feedback", Green, 200);
             host.Controls.Add(recordComplaint);
             host.Controls.Add(recordFeedback);
 
-            // ---- Heading ----
             var heading = new Label
             {
                 Text = "Interactions",
@@ -925,7 +1169,6 @@ namespace CarwashServices.Roles
             };
             host.Controls.Add(heading);
 
-            // ---- Scrollable list ----
             var listPanel = new Panel
             {
                 Location = new Point(0, 94),
@@ -1011,7 +1254,6 @@ namespace CarwashServices.Roles
             return host;
         }
 
-        // ---- One interaction card (with optional inline Edit button) ----
         private Panel BuildInteractionRow(CustomerInteractionDto it, Func<Task> reload)
         {
             bool isComplaint = string.Equals(it.Kind, "Complaint", StringComparison.OrdinalIgnoreCase);
@@ -1055,7 +1297,6 @@ namespace CarwashServices.Roles
             };
             row.Controls.Add(sev);
 
-            // ---- Status pill ----
             var statusPill = new Label
             {
                 Text = it.Status ?? "Open",
@@ -1070,7 +1311,6 @@ namespace CarwashServices.Roles
             row.Controls.Add(statusPill);
             row.Resize += (s, e) => statusPill.Location = new Point(row.Width - 100, 12);
 
-            // ---- Inline Edit button (only when the record is still Open) ----
             if (!resolved)
             {
                 var editBtn = new Button

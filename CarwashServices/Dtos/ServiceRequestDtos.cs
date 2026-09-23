@@ -20,5 +20,10 @@ namespace CarwashServices.Dtos
         public DateTime? ScheduledDate { get; set; }
         public DateTime? CompletedDate { get; set; }
         public string? Notes { get; set; }
+
+        // Archive fields
+        public bool IsArchived { get; set; }
+        public DateTime? ArchivedAt { get; set; }
+        public string? ArchivedBy { get; set; }
     }
 }

@@ -10,23 +10,34 @@ using CarwashServices.Dtos;
 
 namespace CarwashServices.Dialogs
 {
-    
+    /// <summary>
+    /// Create / edit a service request.
+    ///
+    /// On CREATE:
+    ///   - Status is fixed to "Pending" and shown as a read-only label.
+    ///   - Status cannot be changed here — it's managed later by Service Staff.
+    ///   On EDIT:
+    ///   - Status becomes an editable combo (Pending / Assigned / InProgress /
+    ///     Completed / Cancelled).
+    /// </summary>
     public class ServiceRequestEditDialog : Form
     {
         private readonly int? _requestId;
         private readonly List<CustomerDto> _customers;
         private readonly List<ServiceDto> _services;
 
-        private ComboBox _customerCombo;
-        private ComboBox _serviceCombo;
-        private TextBox _statusTxt;
-        private ComboBox _priorityCombo;
-        private DateTimePicker _requestedPicker;
-        private DateTimePicker _scheduledPicker;
-        private DateTimePicker _completedPicker;
-        private CheckBox _completedEnabled;
-        private TextBox _notesTxt;
+        private ComboBox _customerCombo = null!;
+        private ComboBox _serviceCombo = null!;
+        private Label _statusReadOnly = null!;   // shown on create
+        private ComboBox _statusCombo = null!;   // shown on edit
+        private ComboBox _priorityCombo = null!;
+        private DateTimePicker _requestedPicker = null!;
+        private DateTimePicker _scheduledPicker = null!;
+        private DateTimePicker _completedPicker = null!;
+        private CheckBox _completedEnabled = null!;
+        private TextBox _notesTxt = null!;
 
+        // ---- Palette ----
         private static readonly Color Navy = Color.FromArgb(10, 22, 51);
         private static readonly Color TextDark = Color.FromArgb(10, 22, 51);
         private static readonly Color TextMuted = Color.FromArgb(107, 122, 154);
@@ -56,7 +67,9 @@ namespace CarwashServices.Dialogs
 
         private void InitializeForm()
         {
-            Text = _requestId.HasValue
+            bool isEdit = _requestId.HasValue;
+
+            Text = isEdit
                 ? $"Edit SERVICE_REQUEST — #{_requestId}"
                 : "New Service Request";
             Size = new Size(860, 780);
@@ -113,62 +126,83 @@ namespace CarwashServices.Dialogs
 
             int y = 20;
 
-            // ============ FK REFERENCES ============
-            body.Controls.Add(SectionDivider("FK REFERENCES", y, body.Width - 60));
+            // ============ REQUEST DETAILS ============
+            body.Controls.Add(SectionDivider("Request Details", y, body.Width - 60));
             y += 40;
 
-            // ---- CUSTOMER_ID (full width) ----
-            body.Controls.Add(MakeLabel("CUSTOMER_ID (FK → CUSTOMERS) *", 30, y));
+            // ---- Customer (full width) ----
+            body.Controls.Add(MakeLabel("Customer *", 30, y));
             _customerCombo = MakeCombo(30, y + 22, 745);
             foreach (var c in _customers)
-                _customerCombo.Items.Add(new ComboItem(c.CustomerId, $"{c.CustomerId} — {c.FullName}"));
+                _customerCombo.Items.Add(new ComboItem(c.CustomerId, c.FullName));
             body.Controls.Add(_customerCombo);
             y += 75;
 
-            // ---- SERVICE_ID (full width) ----
-            body.Controls.Add(MakeLabel("SERVICE_ID (FK → SERVICES) *", 30, y));
+            // ---- Service (full width) ----
+            body.Controls.Add(MakeLabel("Service *", 30, y));
             _serviceCombo = MakeCombo(30, y + 22, 745);
             foreach (var s in _services)
-                _serviceCombo.Items.Add(new ComboItem(s.ServiceId, $"{s.ServiceId} — {s.ServiceName} (₱{s.Price:N0})"));
+                _serviceCombo.Items.Add(new ComboItem(s.ServiceId, $"{s.ServiceName} (₱{s.Price:N0})"));
             body.Controls.Add(_serviceCombo);
             y += 75;
 
-            // ============ SERVICE_REQUESTS FIELDS ============
-            body.Controls.Add(SectionDivider("SERVICE_REQUESTS FIELDS", y, body.Width - 60));
+            // ============ SCHEDULING ============
+            body.Controls.Add(SectionDivider("Scheduling", y, body.Width - 60));
             y += 40;
 
-            // ---- STATUS (read-only) ----
-            body.Controls.Add(MakeLabel("STATUS *", 30, y));
-            _statusTxt = MakeTextBox(30, y + 22, 360);
-            _statusTxt.Text = "Pending";
-            _statusTxt.ReadOnly = true;
-            _statusTxt.BackColor = ReadOnlyBg;
-            _statusTxt.TabStop = false;
-            body.Controls.Add(_statusTxt);
+            // ---- Status (read-only on create, combo on edit) ----
+            body.Controls.Add(MakeLabel("Status", 30, y));
 
-            // ---- PRIORITY ----
-            body.Controls.Add(MakeLabel("PRIORITY", 415, y));
+            // Read-only version (create mode)
+            _statusReadOnly = new Label
+            {
+                Location = new Point(30, y + 26),
+                Size = new Size(360, 26),
+                Text = "Pending",
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                ForeColor = Navy,
+                BackColor = ReadOnlyBg,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(10, 0, 0, 0),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            body.Controls.Add(_statusReadOnly);
+
+            // Editable version (edit mode)
+            _statusCombo = MakeCombo(30, y + 22, 360);
+            _statusCombo.Items.AddRange(new object[]
+            {
+                "Pending", "Assigned", "InProgress", "Completed", "Cancelled"
+            });
+            _statusCombo.SelectedIndex = 0;
+            body.Controls.Add(_statusCombo);
+
+            _statusReadOnly.Visible = !isEdit;
+            _statusCombo.Visible = isEdit;
+
+            // ---- Priority ----
+            body.Controls.Add(MakeLabel("Priority", 415, y));
             _priorityCombo = MakeCombo(415, y + 22, 360);
             _priorityCombo.Items.AddRange(new object[] { "Normal", "High", "VIP" });
             _priorityCombo.SelectedIndex = 0;
             body.Controls.Add(_priorityCombo);
             y += 75;
 
-            // ---- REQUESTED_DATE ----
-            body.Controls.Add(MakeLabel("REQUESTED_DATE *", 30, y));
+            // ---- Requested date ----
+            body.Controls.Add(MakeLabel("Requested date *", 30, y));
             _requestedPicker = MakeDatePicker(30, y + 22, 360);
             _requestedPicker.Value = DateTime.Now;
             body.Controls.Add(_requestedPicker);
 
-            // ---- SCHEDULED_DATE ----
-            body.Controls.Add(MakeLabel("SCHEDULED_DATE *", 415, y));
+            // ---- Scheduled date ----
+            body.Controls.Add(MakeLabel("Scheduled date *", 415, y));
             _scheduledPicker = MakeDatePicker(415, y + 22, 360);
             _scheduledPicker.Value = DateTime.Now;
             body.Controls.Add(_scheduledPicker);
             y += 75;
 
-            // ---- COMPLETED_DATE (optional) ----
-            body.Controls.Add(MakeLabel("COMPLETED_DATE (nullable)", 30, y));
+            // ---- Completed date (nullable) ----
+            body.Controls.Add(MakeLabel("Completed date (optional)", 30, y));
             _completedPicker = MakeDatePicker(30, y + 22, 320);
             _completedPicker.Enabled = false;
 
@@ -186,8 +220,8 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(_completedEnabled);
             y += 75;
 
-            // ---- NOTES ----
-            body.Controls.Add(MakeLabel("NOTES", 30, y));
+            // ---- Notes ----
+            body.Controls.Add(MakeLabel("Notes", 30, y));
             _notesTxt = new TextBox
             {
                 Location = new Point(30, y + 22),
@@ -197,18 +231,22 @@ namespace CarwashServices.Dialogs
                 Font = new Font("Segoe UI", 10f),
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.White,
-                PlaceholderText = "Optional notes..."
+                PlaceholderText = "Optional notes...",
+                ScrollBars = ScrollBars.Vertical
             };
             body.Controls.Add(_notesTxt);
             y += 125;
 
             body.Controls.Add(new Label
             {
-                Text = "Note: Status and staff assignment are managed by Service Staff.",
+                Text = isEdit
+                    ? "Note: Status is normally managed by Service Staff."
+                    : "Note: New requests are created with status Pending. Use the Edit button later to change status.",
                 ForeColor = AccentBlue,
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Italic),
                 Location = new Point(30, y),
-                AutoSize = true
+                AutoSize = false,
+                Size = new Size(745, 20)
             });
 
             // ---- Footer ----
@@ -237,7 +275,7 @@ namespace CarwashServices.Dialogs
 
             var saveBtn = new Button
             {
-                Text = _requestId.HasValue ? "Save Changes" : "Create Request",
+                Text = isEdit ? "Save Changes" : "Create Request",
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI Semibold", 10f),
                 ForeColor = Color.White,
@@ -263,16 +301,6 @@ namespace CarwashServices.Dialogs
             Font = new Font("Segoe UI Semibold", 8.5f),
             Location = new Point(x, y),
             AutoSize = true
-        };
-
-        private TextBox MakeTextBox(int x, int y, int width) => new TextBox
-        {
-            Location = new Point(x, y),
-            Width = width,
-            Height = 32,
-            Font = new Font("Segoe UI", 10f),
-            BorderStyle = BorderStyle.FixedSingle,
-            BackColor = Color.White
         };
 
         private ComboBox MakeCombo(int x, int y, int width) => new ComboBox
@@ -308,7 +336,7 @@ namespace CarwashServices.Dialogs
                 Text = text,
                 ForeColor = AccentBlue,
                 Font = new Font("Segoe UI Semibold", 8.5f),
-                Location = new Point(width / 2 - 90, 0),
+                Location = new Point(width / 2 - 60, 0),
                 AutoSize = true,
                 BackColor = Color.White
             };
@@ -317,20 +345,22 @@ namespace CarwashServices.Dialogs
             p.Controls.Add(new Panel
             {
                 Location = new Point(0, 9),
-                Size = new Size(width / 2 - 110, 1),
+                Size = new Size(width / 2 - 80, 1),
                 BackColor = BorderSoft
             });
             p.Controls.Add(new Panel
             {
-                Location = new Point(width / 2 + 100, 9),
-                Size = new Size(width / 2 - 100, 1),
+                Location = new Point(width / 2 + 70, 9),
+                Size = new Size(width / 2 - 70, 1),
                 BackColor = BorderSoft
             });
 
             return p;
         }
 
-        // ---- DATA LOAD ----
+        // ================================================================
+        //  DATA LOAD (edit mode)
+        // ================================================================
         private async Task LoadAsync(int id)
         {
             try
@@ -343,7 +373,14 @@ namespace CarwashServices.Dialogs
                 SelectComboById(_customerCombo, req.CustomerId);
                 SelectComboById(_serviceCombo, req.ServiceId);
 
-                _statusTxt.Text = req.Status;
+                // Populate the combo with the current value and select it.
+                if (!string.IsNullOrWhiteSpace(req.Status) &&
+                    !_statusCombo.Items.Contains(req.Status))
+                {
+                    _statusCombo.Items.Add(req.Status);
+                }
+                _statusCombo.SelectedItem = req.Status ?? "Pending";
+
                 _priorityCombo.SelectedItem = req.Priority ?? "Normal";
 
                 if (req.RequestedDate != default)
@@ -380,9 +417,13 @@ namespace CarwashServices.Dialogs
             }
         }
 
-        // ---- SAVE ----
+        // ================================================================
+        //  SAVE
+        // ================================================================
         private async Task SaveAsync()
         {
+            bool isEdit = _requestId.HasValue;
+
             if (_customerCombo.SelectedItem is not ComboItem custItem || custItem.Id == null)
             {
                 MessageBox.Show("Please select a customer.",
@@ -397,14 +438,18 @@ namespace CarwashServices.Dialogs
                 return;
             }
 
-            // Send DTO without assignedStaffId / createdBy.
-            // Server fills them with defaults on POST, ignores them on PUT.
+            // On create, status is always "Pending" (read-only label).
+            // On edit, read from the combo.
+            string status = isEdit
+                ? (_statusCombo.SelectedItem?.ToString() ?? "Pending")
+                : "Pending";
+
             var dto = new
             {
                 requestId = _requestId ?? 0,
                 customerId = custItem.Id.Value,
                 serviceId = svcItem.Id.Value,
-                status = _statusTxt.Text,
+                status,
                 priority = _priorityCombo.SelectedItem?.ToString() ?? "Normal",
                 requestedDate = _requestedPicker.Value,
                 scheduledDate = (DateTime?)_scheduledPicker.Value,

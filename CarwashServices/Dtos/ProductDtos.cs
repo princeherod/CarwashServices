@@ -19,6 +19,11 @@ namespace CarwashServices.Dtos
         public string? Category { get; set; }
         public bool IsActive { get; set; }
         public DateTime CreatedAt { get; set; }
+
+        // Archive fields
+        public bool IsArchived { get; set; }
+        public DateTime? ArchivedAt { get; set; }
+        public string? ArchivedBy { get; set; }
     }
 
     public class ServiceDto

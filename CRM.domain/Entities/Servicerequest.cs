@@ -1,31 +1,30 @@
-﻿using System;
-using System.Collections.Generic;
+﻿namespace CRM.domain.Entities;
 
-namespace CRM.domain.Entities
+public class ServiceRequest
 {
-    public class ServiceRequest
-    {
-        public int RequestId { get; set; }
-        public int CustomerId { get; set; }
-        public int ServiceId { get; set; }
-        public int? AssignedStaffId { get; set; }
-        public int CreatedBy { get; set; }
+    public int RequestId { get; set; }
+    public int CustomerId { get; set; }
+    public int ServiceId { get; set; }
+    public int? AssignedStaffId { get; set; }
+    public int CreatedBy { get; set; }
 
-        public string Status { get; set; } = "Pending";
-        public string? Priority { get; set; } = "Normal";
-        public string? Notes { get; set; }
+    public string Status { get; set; } = "Pending";
+    public string? Priority { get; set; } = "Normal";
+    public string? Notes { get; set; }
 
-        public DateTime RequestedDate { get; set; } = DateTime.Now;
-        public DateTime? ScheduledDate { get; set; }
-        public DateTime? CompletedDate { get; set; }
+    public DateTime RequestedDate { get; set; } = DateTime.Now;
+    public DateTime? ScheduledDate { get; set; }
+    public DateTime? CompletedDate { get; set; }
 
-        public User? AssignedStaff { get; set; }
-        public User? CreatedByUser { get; set; }
+    // ---- Archive extension ----
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
+    public string? ArchivedBy { get; set; }
 
-        public ICollection<ServiceStatusLog> StatusLogs { get; set; } = new List<ServiceStatusLog>();
-        public ICollection<FollowUp> FollowUps { get; set; } = new List<FollowUp>();
-        public ICollection<BillingTransaction> BillingTransactions { get; set; } = new List<BillingTransaction>();
+    public User? AssignedStaff { get; set; }
+    public User? CreatedByUser { get; set; }
 
-
-    }
+    public ICollection<ServiceStatusLog> StatusLogs { get; set; } = new List<ServiceStatusLog>();
+    public ICollection<FollowUp> FollowUps { get; set; } = new List<FollowUp>();
+    public ICollection<BillingTransaction> BillingTransactions { get; set; } = new List<BillingTransaction>();
 }

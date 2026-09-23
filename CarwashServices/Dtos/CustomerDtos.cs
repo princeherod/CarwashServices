@@ -21,7 +21,6 @@ namespace CarwashServices.Dtos
         public bool IsActive { get; set; }
         public DateTime CreatedAt { get; set; }
 
-        // Vehicle extension fields
         public string? PlateNumber { get; set; }
         public string? VehicleMake { get; set; }
         public string? VehicleModel { get; set; }
@@ -29,6 +28,11 @@ namespace CarwashServices.Dtos
         public string? VehicleColor { get; set; }
         public string? VehicleType { get; set; }
         public string? Source { get; set; }
+
+        // Archive fields
+        public bool IsArchived { get; set; }
+        public DateTime? ArchivedAt { get; set; }
+        public string? ArchivedBy { get; set; }
     }
 
     public class CustomerDto

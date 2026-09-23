@@ -23,6 +23,11 @@ namespace CarwashServices.Dtos
         public DateTime? SentAt { get; set; }
         public DateTime CreatedAt { get; set; }
         public int? CreatedBy { get; set; }
+
+        // Archive fields
+        public bool IsArchived { get; set; }
+        public DateTime? ArchivedAt { get; set; }
+        public string? ArchivedBy { get; set; }
     }
 
     public class FollowUpStatsDto

@@ -17,64 +17,64 @@ public class FollowUpsController : ControllerBase
         _db = db;
     }
 
-    // GET: api/follow-ups
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
         var list = await _db.FollowUps
             .AsNoTracking()
+            .Where(f => !f.IsArchived)
             .OrderByDescending(f => f.FollowUpId)
             .ToListAsync();
-
         return Ok(list);
     }
 
-    // GET: api/follow-ups/5
+    [HttpGet("archived")]
+    public async Task<IActionResult> GetArchived()
+    {
+        var list = await _db.FollowUps
+            .AsNoTracking()
+            .Where(f => f.IsArchived)
+            .OrderByDescending(f => f.ArchivedAt)
+            .ToListAsync();
+        return Ok(list);
+    }
+
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
-        var row = await _db.FollowUps
-            .AsNoTracking()
-            .FirstOrDefaultAsync(f => f.FollowUpId == id);
-
+        var row = await _db.FollowUps.AsNoTracking().FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (row is null)
             return NotFound(new { message = $"FollowUp {id} not found." });
-
         return Ok(row);
     }
 
-    // GET: api/follow-ups/stats
     [HttpGet("stats")]
     public async Task<IActionResult> GetStats()
     {
         var today = DateTime.Today;
 
+        // Stats only count active (non-archived) follow-ups.
         var dueToday = await _db.FollowUps
-            .CountAsync(f => f.ScheduledDate.Date == today && f.Status != "Sent"
-                                                       && f.Status != "Redeemed"
-                                                       && f.Status != "Expired");
+            .CountAsync(f => !f.IsArchived
+                          && f.ScheduledDate.Date == today
+                          && f.Status != "Sent"
+                          && f.Status != "Redeemed"
+                          && f.Status != "Expired");
 
         var offersSent = await _db.FollowUps
-            .CountAsync(f => f.Status == "Sent" || f.Status == "Contacted");
+            .CountAsync(f => !f.IsArchived && (f.Status == "Sent" || f.Status == "Contacted"));
 
         var redeemed = await _db.FollowUps
-            .CountAsync(f => f.Status == "Redeemed");
+            .CountAsync(f => !f.IsArchived && f.Status == "Redeemed");
 
         var expired = await _db.FollowUps
-            .CountAsync(f => f.Status == "Expired"
-                          || (f.ValidUntil.HasValue && f.ValidUntil.Value.Date < today
-                              && f.Status != "Redeemed"));
+            .CountAsync(f => !f.IsArchived
+                          && (f.Status == "Expired"
+                              || (f.ValidUntil.HasValue && f.ValidUntil.Value.Date < today && f.Status != "Redeemed")));
 
-        return Ok(new
-        {
-            dueToday,
-            offersSent,
-            redeemed,
-            expired
-        });
+        return Ok(new { dueToday, offersSent, redeemed, expired });
     }
 
-    // POST: api/follow-ups
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FollowUp req)
     {
@@ -83,19 +83,18 @@ public class FollowUpsController : ControllerBase
         req.CreatedAt = DateTime.UtcNow;
         if (req.ScheduledDate == default) req.ScheduledDate = DateTime.Now;
 
-        if (req.ValidUntil.HasValue
-            && req.ValidUntil.Value.Date < DateTime.Today
-            && req.Status != "Redeemed")
+        if (req.ValidUntil.HasValue && req.ValidUntil.Value.Date < DateTime.Today && req.Status != "Redeemed")
             req.Status = "Expired";
+
+        req.IsArchived = false;
+        req.ArchivedAt = null;
+        req.ArchivedBy = null;
 
         _db.FollowUps.Add(req);
         await _db.SaveChangesAsync();
-
         return CreatedAtAction(nameof(GetById), new { id = req.FollowUpId }, req);
     }
 
-    // POST: api/follow-ups/bulk
-    // Rejects any customer who already has an open follow-up (anything except Expired).
     [HttpPost("bulk")]
     public async Task<IActionResult> BulkCreate([FromBody] BulkFollowUpRequest req)
     {
@@ -104,22 +103,20 @@ public class FollowUpsController : ControllerBase
 
         var today = DateTime.Today;
 
-        // Customers who already have a non-expired follow-up cannot receive another.
         var blockedIds = await _db.FollowUps
             .Where(f => req.CustomerIds.Contains(f.CustomerId)
+                     && !f.IsArchived
                      && f.Status != "Expired")
             .Select(f => f.CustomerId)
             .Distinct()
             .ToListAsync();
 
         var allowedIds = req.CustomerIds.Except(blockedIds).ToList();
-
         if (allowedIds.Count == 0)
         {
             return Conflict(new
             {
-                message = "All selected customers already have an open follow-up. " +
-                          "Wait for it to expire or resolve before contacting again.",
+                message = "All selected customers already have an open follow-up.",
                 blockedIds,
                 skipped = blockedIds.Count,
                 count = 0
@@ -142,7 +139,10 @@ public class FollowUpsController : ControllerBase
                 ValidUntil = req.ValidUntil,
                 Status = req.ScheduledNow ? "Sent" : "Scheduled",
                 SentAt = req.ScheduledNow ? DateTime.Now : null,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                IsArchived = false,
+                ArchivedAt = null,
+                ArchivedBy = null
             };
 
             if (f.ValidUntil.HasValue && f.ValidUntil.Value.Date < today)
@@ -160,12 +160,11 @@ public class FollowUpsController : ControllerBase
             skipped = blockedIds.Count,
             skippedIds = blockedIds,
             message = blockedIds.Count > 0
-                ? $"{created.Count} created, {blockedIds.Count} skipped (already had an open follow-up)."
+                ? $"{created.Count} created, {blockedIds.Count} skipped."
                 : $"{created.Count} created."
         });
     }
 
-    // PUT: api/follow-ups/5
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] FollowUp req)
     {
@@ -191,7 +190,42 @@ public class FollowUpsController : ControllerBase
         return Ok(existing);
     }
 
-    // DELETE: api/follow-ups/5
+    public class ArchiveRequest { public string? ArchivedBy { get; set; } }
+
+    [HttpPut("{id:int}/archive")]
+    public async Task<IActionResult> Archive(int id, [FromBody] ArchiveRequest? req)
+    {
+        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        if (existing is null)
+            return NotFound(new { message = $"FollowUp {id} not found." });
+        if (existing.IsArchived)
+            return Conflict(new { message = "This follow-up is already archived." });
+
+        existing.IsArchived = true;
+        existing.ArchivedAt = DateTime.UtcNow;
+        existing.ArchivedBy = string.IsNullOrWhiteSpace(req?.ArchivedBy) ? "Admin" : req!.ArchivedBy;
+
+        await _db.SaveChangesAsync();
+        return Ok(existing);
+    }
+
+    [HttpPut("{id:int}/restore")]
+    public async Task<IActionResult> Restore(int id)
+    {
+        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        if (existing is null)
+            return NotFound(new { message = $"FollowUp {id} not found." });
+        if (!existing.IsArchived)
+            return Conflict(new { message = "This follow-up is not archived." });
+
+        existing.IsArchived = false;
+        existing.ArchivedAt = null;
+        existing.ArchivedBy = null;
+
+        await _db.SaveChangesAsync();
+        return Ok(existing);
+    }
+
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {

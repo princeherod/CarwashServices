@@ -129,12 +129,15 @@ public class MasterErpDbContext : IdentityDbContext
             entity.Property(x => x.Priority).HasMaxLength(20);
             entity.Property(x => x.Notes).HasMaxLength(1000);
 
-            // FK → Users (both are same-DB, keep these)
+            // Archive extension
+            entity.Property(x => x.ArchivedBy).HasMaxLength(200);
+            entity.HasIndex(x => x.IsArchived);
+
             entity.HasOne(x => x.AssignedStaff)
                 .WithMany(u => u.AssignedRequests)
                 .HasForeignKey(x => x.AssignedStaffId)
                 .OnDelete(DeleteBehavior.Restrict)
-                .IsRequired(false);   // ← optional relationship
+                .IsRequired(false);
 
             entity.HasOne(x => x.CreatedByUser)
                 .WithMany(u => u.CreatedRequests)
@@ -167,7 +170,10 @@ public class MasterErpDbContext : IdentityDbContext
             entity.Property(x => x.Notes).HasMaxLength(1000);
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
 
-            // No FK to Customer — tenant side reference only
+            // Archive extension
+            entity.Property(x => x.ArchivedBy).HasMaxLength(200);
+            entity.HasIndex(x => x.IsArchived);
+            
         });
 
         builder.Entity<SubscriptionPlan>(entity =>

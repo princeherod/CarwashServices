@@ -11,7 +11,7 @@ public class TenantCustomer
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    // ---- Vehicle info (Carwash extension) ----
+    // ---- Vehicle info ----
     public string? PlateNumber { get; set; }
     public string? VehicleMake { get; set; }
     public string? VehicleModel { get; set; }
@@ -19,4 +19,9 @@ public class TenantCustomer
     public string? VehicleColor { get; set; }
     public string? VehicleType { get; set; }
     public string? Source { get; set; }
+
+    // ---- Archive extension ----
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
+    public string? ArchivedBy { get; set; }
 }

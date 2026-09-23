@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-namespace CRM.Domain.Entities;
+﻿namespace CRM.Domain.Entities;
 
 public class Product
 {
@@ -11,7 +8,12 @@ public class Product
     public string? Description { get; set; }
     public decimal UnitPrice { get; set; }
     public int DurationMinutes { get; set; }
-    public string? Category { get; set; }   // Exterior, Interior, Full Service, Specialty
+    public string? Category { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // ---- Archive extension ----
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
+    public string? ArchivedBy { get; set; }
 }

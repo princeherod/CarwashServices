@@ -36,11 +36,17 @@ namespace CarwashServices.Dialogs
         private static readonly Color FieldErrorBg = Color.FromArgb(0xFF, 0xF5, 0xF5);
 
         // ---- Validation regexes ----
-        // Name must contain at least one letter, no digits-only strings.
+        // Service name: letters (any script), spaces, hyphens, apostrophes, periods, commas, ampersand, parens, slashes.
+        // NO DIGITS.
         private static readonly Regex NameRegex =
-            new(@"^(?=.*[\p{L}])[\p{L}\p{N}\s\.\,\-\'&/\(\)]{2,150}$", RegexOptions.Compiled);
+            new(@"^[\p{L}\s\.\,\-\'&/\(\)]{2,150}$", RegexOptions.Compiled);
 
-        // Category must contain at least one letter (no pure numbers).
+        // Description: letters, spaces, and common punctuation. NO DIGITS.
+        // Applied only when the description is non-empty.
+        private static readonly Regex DescriptionRegex =
+            new(@"^[\p{L}\s\.\,\-\'&/\(\)!?;:""]{0,1000}$", RegexOptions.Compiled);
+
+        // Category must contain at least one letter — the preset list already satisfies this.
         private static readonly Regex CategoryRegex =
             new(@"^(?=.*[\p{L}])[\p{L}\s\-&]{2,50}$", RegexOptions.Compiled);
 
@@ -78,15 +84,14 @@ namespace CarwashServices.Dialogs
                 Padding = new Padding(30, 0, 30, 0)
             };
 
-            var headerTitle = new Label
+            header.Controls.Add(new Label
             {
                 Text = isEdit ? $"Edit Service — #{_serviceId}" : "Add New Service",
                 ForeColor = TextDark,
                 Font = new Font("Segoe UI Semibold", 13f),
                 Location = new Point(30, 24),
                 AutoSize = true
-            };
-            header.Controls.Add(headerTitle);
+            });
 
             var closeBtn = new Button
             {
@@ -139,7 +144,8 @@ namespace CarwashServices.Dialogs
                 Font = new Font("Segoe UI", 10f),
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.White,
-                PlaceholderText = "Describe what this service includes..."
+                PlaceholderText = "Describe what this service includes...",
+                ScrollBars = ScrollBars.Vertical
             };
             _descriptionTxt.TextChanged += (s, e) => ClearFieldError(_descriptionTxt);
             body.Controls.Add(_descriptionTxt);
@@ -177,7 +183,7 @@ namespace CarwashServices.Dialogs
             _categoryCombo.SelectedIndexChanged += (s, e) => ClearFieldError(_categoryCombo);
             body.Controls.Add(_categoryCombo);
 
-            // IS_ACTIVE — only shown on edit. On create the value is forced to true.
+            // IS_ACTIVE — only shown on edit. Create forces Active.
             _activeRow = new Panel
             {
                 Location = new Point(415, y),
@@ -194,8 +200,8 @@ namespace CarwashServices.Dialogs
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 BackColor = Color.White
             };
-            _activeCombo.Items.AddRange(new object[] { "true", "false" });
-            _activeCombo.SelectedIndex = 0;
+            _activeCombo.Items.AddRange(new object[] { "Active", "Inactive" });
+            _activeCombo.SelectedIndex = 0;   // Active
             _activeRow.Controls.Add(_activeCombo);
             body.Controls.Add(_activeRow);
 
@@ -273,7 +279,7 @@ namespace CarwashServices.Dialogs
                 BackColor = Color.Transparent
             };
 
-            var line = new Label
+            p.Controls.Add(new Label
             {
                 Text = text,
                 ForeColor = AccentBlue,
@@ -281,8 +287,7 @@ namespace CarwashServices.Dialogs
                 Location = new Point(width / 2 - 70, 0),
                 AutoSize = true,
                 BackColor = Color.White
-            };
-            p.Controls.Add(line);
+            });
 
             p.Controls.Add(new Panel
             {
@@ -356,13 +361,12 @@ namespace CarwashServices.Dialogs
                 }
                 else if (!string.IsNullOrWhiteSpace(p.Category))
                 {
-                    // Unknown category — keep the value visible.
                     _categoryCombo.Items.Add(p.Category);
                     _categoryCombo.SelectedItem = p.Category;
                 }
 
-                // Only meaningful on edit.
-                _activeCombo.SelectedItem = p.IsActive ? "true" : "false";
+                // Map bool → "Active" / "Inactive" for the combo.
+                _activeCombo.SelectedItem = p.IsActive ? "Active" : "Inactive";
             }
             catch (Exception ex)
             {
@@ -377,17 +381,15 @@ namespace CarwashServices.Dialogs
         // =================================================================
         private bool ValidateForm()
         {
-            // Clear everything first.
             ClearFieldError(_nameTxt);
             ClearFieldError(_descriptionTxt);
             ClearFieldError(_priceTxt);
             ClearFieldError(_durationTxt);
             ClearFieldError(_categoryCombo);
-            ClearFieldError(_activeCombo);
 
             bool ok = true;
 
-            // ---- SERVICE_NAME ----
+            // ---- SERVICE_NAME: letters only ----
             var name = _nameTxt.Text.Trim();
             if (name.Length == 0)
             {
@@ -404,26 +406,36 @@ namespace CarwashServices.Dialogs
                 MarkFieldError(_nameTxt, "Service name must be 150 characters or fewer.");
                 ok = false;
             }
-            else if (Regex.IsMatch(name, @"^\d+$"))
+            else if (Regex.IsMatch(name, @"\d"))
             {
-                MarkFieldError(_nameTxt, "Service name can't be all numbers — include at least one letter.");
+                MarkFieldError(_nameTxt, "Service name can't contain numbers — letters only.");
                 ok = false;
             }
             else if (!NameRegex.IsMatch(name))
             {
-                MarkFieldError(_nameTxt, "Letters, numbers, spaces, and . , - ' & / ( ) only.");
+                MarkFieldError(_nameTxt, "Letters, spaces, and . , - ' & / ( ) only.");
                 ok = false;
             }
 
-            // ---- DESCRIPTION (optional, but bounded) ----
+            // ---- DESCRIPTION: optional, but letters-only when provided ----
             var desc = _descriptionTxt.Text.Trim();
             if (desc.Length > 1000)
             {
                 MarkFieldError(_descriptionTxt, "Description must be 1000 characters or fewer.");
                 ok = false;
             }
+            else if (desc.Length > 0 && Regex.IsMatch(desc, @"\d"))
+            {
+                MarkFieldError(_descriptionTxt, "Description can't contain numbers — letters only.");
+                ok = false;
+            }
+            else if (desc.Length > 0 && !DescriptionRegex.IsMatch(desc))
+            {
+                MarkFieldError(_descriptionTxt, "Description contains invalid characters.");
+                ok = false;
+            }
 
-            // ---- PRICE ----
+            // ---- PRICE: must be numeric ----
             var priceText = _priceTxt.Text.Trim();
             if (priceText.Length == 0)
             {
@@ -447,7 +459,7 @@ namespace CarwashServices.Dialogs
                 ok = false;
             }
 
-            // ---- DURATION ----
+            // ---- DURATION: whole number ----
             var durationText = _durationTxt.Text.Trim();
             if (durationText.Length == 0)
             {
@@ -493,8 +505,7 @@ namespace CarwashServices.Dialogs
         {
             if (!ValidateForm())
             {
-                // Focus the first invalid control in field order.
-                foreach (var c in new Control[] { _nameTxt, _priceTxt, _durationTxt, _categoryCombo })
+                foreach (var c in new Control[] { _nameTxt, _descriptionTxt, _priceTxt, _durationTxt, _categoryCombo })
                 {
                     if (!string.IsNullOrEmpty(_errors.GetError(c)))
                     {
@@ -509,9 +520,11 @@ namespace CarwashServices.Dialogs
             var duration = int.Parse(_durationTxt.Text.Trim());
             var category = (string?)_categoryCombo.SelectedItem ?? "";
 
-            // On create: always active. On edit: read the combo.
+            // Map the combo's "Active"/"Inactive" back to a bool.
+            // On create, force Active=true.
             bool isActive = _serviceId.HasValue
-                ? (_activeCombo.SelectedItem?.ToString() == "true")
+                ? string.Equals(_activeCombo.SelectedItem?.ToString(), "Active",
+                                StringComparison.OrdinalIgnoreCase)
                 : true;
 
             var dto = new
