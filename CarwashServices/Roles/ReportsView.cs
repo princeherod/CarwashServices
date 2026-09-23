@@ -66,7 +66,7 @@ namespace CarwashServices.Roles
         private Label _emptyLbl;
 
         // ---- Drill-down filter state ----
-        private string _activeGridFilter = "";          // "" = no filter
+        private string _activeGridFilter = "";
         private Panel _filterChipBar;
         private Panel _filterChip;
         private Label _filterChipLabel;
@@ -149,9 +149,6 @@ namespace CarwashServices.Roles
             (FindForm() as MainForm)?.NavigateToModule(moduleKey);
         }
 
-        /// <summary>
-        /// Recursively attaches a click handler so the entire surface is clickable.
-        /// </summary>
         private static void BindClick(Control root, Action onClick)
         {
             if (root == null || onClick == null) return;
@@ -302,7 +299,7 @@ namespace CarwashServices.Roles
         {
             _kpiRow = Section(new Panel { BackColor = PageBg }, KpiRowHeight);
 
-            _kpiTxn = AddKpiCard("Total Transactions", out _kpiTxnSub, "");
+            _kpiTxn = AddKpiCard("Total Transactions", out _kpiTxnSub, "NavigateToServiceRequests");
             _kpiRev = AddKpiCard("Total Revenue", out _kpiRevSub, "Paid");
             _kpiTicket = AddKpiCard("Avg. Ticket Size", out _kpiTicketSub, "Completed");
             _kpiPending = AddKpiCard("Pending / Cancelled", out _kpiPendingSub, "NotCompleted");
@@ -557,12 +554,8 @@ namespace CarwashServices.Roles
             _grid.CellPainting += Grid_CellPainting;
             _grid.SortCompare += Grid_SortCompare;
 
-            // Clicking a transaction row jumps to Service Requests.
-            _grid.CellMouseClick += (s, e) =>
-            {
-                if (e.RowIndex < 0) return;
-                Navigate("Manage Service Requests");
-            };
+            // Click a row → jump to the customer that transaction belongs to.
+            _grid.CellMouseClick += Grid_CellMouseClick;
 
             _tableCard.Controls.Add(_grid);
 
@@ -597,14 +590,6 @@ namespace CarwashServices.Roles
                     Math.Max(0, (_tableCard.Width - _emptyLbl.Width) / 2),
                     Math.Max(top + 40, (_tableCard.Height - _emptyLbl.Height) / 2 + 20));
             }
-        }
-
-        private void CenterEmptyLabel()
-        {
-            if (_emptyLbl == null || _tableCard == null) return;
-            _emptyLbl.Location = new Point(
-                Math.Max(0, (_tableCard.Width - _emptyLbl.Width) / 2),
-                Math.Max(90, (_tableCard.Height - _emptyLbl.Height) / 2 + 20));
         }
 
         // ---------------- Extra host ----------------
@@ -816,7 +801,28 @@ namespace CarwashServices.Roles
         {
             if (_filterChipBar == null) return;
 
-            // Clicking the same KPI twice clears the filter.
+            // -- Keys that navigate to another module instead of filtering the grid --
+            switch (filterKey)
+            {
+                case "NavigateToServiceRequests":
+                    // Preserve the current report's service and vehicle filters
+                    // so Service Requests opens with the same scope.
+                    string svc = _serviceCombo.SelectedIndex > 0
+                        ? _serviceCombo.SelectedItem?.ToString()
+                        : null;
+                    string veh = _vehicleCombo.SelectedIndex > 0
+                        ? _vehicleCombo.SelectedItem?.ToString()
+                        : null;
+
+                    (FindForm() as MainForm)?.NavigateToServiceRequests(
+                        status: "All",
+                        service: svc,
+                        vehicle: veh,
+                        source: "reports");
+                    return;
+            }
+
+            // -- Normal in-grid filter path --
             if (_activeGridFilter == filterKey)
             {
                 ClearGridFilter();
@@ -887,9 +893,13 @@ namespace CarwashServices.Roles
             _grid.Rows.Clear();
             foreach (var t in list)
             {
-                _grid.Rows.Add(
+                int idx = _grid.Rows.Add(
                     t.Txn, t.Date, t.Customer, t.Vehicle, t.Service,
                     t.Amount, t.Payment, t.Status);
+
+                // Store the tenant customer id on the row so the click handler
+                // can drill straight to the right customer.
+                _grid.Rows[idx].Tag = t.CustomerId;
             }
             _grid.ClearSelection();
             _grid.ResumeLayout();
@@ -915,7 +925,7 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  DATA LOAD (revenue only)
+        //  DATA LOAD
         // ================================================================
         private async Task LoadAsync()
         {
@@ -1023,12 +1033,11 @@ namespace CarwashServices.Roles
 
             _lastSubtitle = $"{rangeLabel}{filterText} · Generated at {_data.GeneratedAt}";
 
-            // Preserve the current drill-down filter across a reload.
             RebindGridRows();
         }
 
         // ================================================================
-        //  GRID paint + sort
+        //  GRID paint + sort + drill-down click
         // ================================================================
         private void Grid_SortCompare(object? sender, DataGridViewSortCompareEventArgs e)
         {
@@ -1039,6 +1048,26 @@ namespace CarwashServices.Roles
                 e.SortResult = d1.CompareTo(d2);
                 e.Handled = true;
             }
+        }
+
+        private void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+
+            var col = _grid.Columns[e.ColumnIndex].Name;
+
+            // Only the Customer column drills into the customer record —
+            // other columns don't have a meaningful single target.
+            if (col != "Customer") return;
+
+            var row = _grid.Rows[e.RowIndex];
+            if (row.Tag is not int customerId || customerId <= 0) return;
+
+            (FindForm() as MainForm)?.NavigateToCustomers(
+                segment: "All",
+                focusCustomerId: customerId,
+                source: "reports");
         }
 
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -1100,7 +1129,7 @@ namespace CarwashServices.Roles
         };
 
         // ================================================================
-        //  EXPORT (respects the active filter)
+        //  EXPORT
         // ================================================================
         private bool HasRows
         {
@@ -1226,7 +1255,6 @@ namespace CarwashServices.Roles
 
         private PrintDocument BuildPrintDocument()
         {
-            // Print only the filtered rows, snapshot at the moment Export is invoked.
             var rows = FilteredTransactions().ToList();
             string[] heads = { "Txn #", "Date", "Customer", "Vehicle", "Service", "Amount", "Payment", "Status" };
             float[] weights = { 0.9f, 1.1f, 2.0f, 1.0f, 2.2f, 1.1f, 1.0f, 1.0f };
@@ -1234,7 +1262,6 @@ namespace CarwashServices.Roles
             const float rowH = 22f;
             int next = 0, page = 0;
 
-            // Filtered totals, so the header reflects what's being printed.
             decimal filteredRevenue = rows.Where(t => t.Status == "Completed").Sum(t => t.Amount);
             int filteredCompleted = rows.Count(t => t.Status == "Completed");
             int filteredPending = rows.Count(t => t.Status == "Pending"
@@ -1337,7 +1364,7 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  Rounded-rect helper (chip drawing)
+        //  Rounded-rect helper
         // ================================================================
         private static GraphicsPath RoundedRect(Rectangle r, int radius)
         {

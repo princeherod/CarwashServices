@@ -37,6 +37,7 @@ namespace CarwashServices.Dtos
     {
         public string Txn { get; set; } = "";
         public string Date { get; set; } = "";
+        public int CustomerId { get; set; }              // NEW — TenantCustomerId
         public string Customer { get; set; } = "";
         public string Vehicle { get; set; } = "";
         public string Service { get; set; } = "";

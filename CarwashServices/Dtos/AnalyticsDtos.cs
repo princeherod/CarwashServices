@@ -35,4 +35,13 @@ namespace CarwashServices.Dtos
         public string BestMonth { get; set; } = "";
         public decimal BestValue { get; set; }
     }
+
+    // NEW — Wash Frequency by Segment
+    public class WashFrequencyPointDto
+    {
+        public string Label { get; set; } = "";        // "New" | "Occasional" | "Regular" | "Loyal"
+        public double Value { get; set; }              // avg completed washes / month
+        public int CustomerCount { get; set; }         // # customers in the tier
+        public string SegmentKey { get; set; } = "";   // key the drill-down uses
+    }
 }

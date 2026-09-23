@@ -322,9 +322,101 @@ public class AnalyticsController : ControllerBase
     }
 
     // ================================================================
+    //  WASH FREQUENCY BY CUSTOMER SEGMENT
+    //  ----------------------------------------------------------------
+    //  Returns the average completed washes per month for each loyalty
+    //  tier. Only completed, non-archived service requests inside the
+    //  requested range are counted — the same definition of "completed
+    //  transaction" used by the Reports module.
+    //
+    //  Tiers (based on completed visits inside the period):
+    //      New         1 visit
+    //      Occasional  2 – 4
+    //      Regular     5 – 9
+    //      Loyal       10+
+    // ================================================================
+    [HttpGet("wash-frequency")]
+    public async Task<IActionResult> GetWashFrequency(
+        [FromQuery] int companyId = 1,
+        [FromQuery] string range = "ThisYear")
+    {
+        var today = DateTime.Today;
+        var (from, to) = ResolveAnalyticsRange(range, today);
+
+        var tenant = await _tenantFactory.CreateAsync(companyId);
+
+        var customers = await tenant.TenantCustomers
+            .AsNoTracking()
+            .Where(c => !c.IsArchived)
+            .ToListAsync();
+
+        // Only completed, non-archived service requests inside the period.
+        var completed = await _db.ServiceRequests
+            .AsNoTracking()
+            .Where(r => !r.IsArchived
+                     && r.Status == "Completed"
+                     && r.CompletedDate != null
+                     && r.CompletedDate >= from
+                     && r.CompletedDate <= to)
+            .ToListAsync();
+
+        // Group completed visits by customer for the period.
+        var visitsByCustomer = completed
+            .Where(r => r.CustomerId > 0)
+            .GroupBy(r => r.CustomerId)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        // Months in the period, inclusive. Minimum 1 to avoid divide-by-zero.
+        int months = Math.Max(1,
+            ((to.Year - from.Year) * 12) + to.Month - from.Month + 1);
+
+        // Bucket customers by their total visit count for the period.
+        var tiers = new Dictionary<string, (int Customers, int Visits)>
+        {
+            ["New"] = (0, 0),
+            ["Occasional"] = (0, 0),
+            ["Regular"] = (0, 0),
+            ["Loyal"] = (0, 0)
+        };
+
+        foreach (var c in customers)
+        {
+            visitsByCustomer.TryGetValue(c.TenantCustomerId, out var visits);
+
+            // Customers with 0 visits in the period don't appear on the chart —
+            // they'd just skew every segment down to zero.
+            if (visits == 0) continue;
+
+            string tier = ClassifyTier(visits);
+            var cur = tiers[tier];
+            tiers[tier] = (cur.Customers + 1, cur.Visits + visits);
+        }
+
+        var order = new[] { "New", "Occasional", "Regular", "Loyal" };
+        var result = new List<object>(order.Length);
+
+        foreach (var label in order)
+        {
+            var t = tiers[label];
+            double avg = t.Customers == 0
+                ? 0.0
+                : Math.Round((double)t.Visits / t.Customers / months, 1);
+
+            result.Add(new
+            {
+                label,
+                value = avg,
+                customerCount = t.Customers,
+                segmentKey = label
+            });
+        }
+
+        return Ok(result);
+    }
+
+    // ================================================================
     //  HELPERS
     // ================================================================
-
     private class SegmentRow
     {
         public int CustomerId { get; set; }
@@ -381,5 +473,45 @@ public class AnalyticsController : ControllerBase
         }
 
         return rows;
+    }
+
+    // Tier thresholds — tune here if the business rules change.
+    // Visits counted are only the completed ones inside the selected period.
+    private static string ClassifyTier(int visits)
+    {
+        if (visits <= 1) return "New";
+        if (visits <= 4) return "Occasional";
+        if (visits <= 9) return "Regular";
+        return "Loyal";
+    }
+
+    // Analytics date range — mirrors ReportsController.ResolveRange so both
+    // modules agree on what "This Year" etc. means.
+    private static (DateTime from, DateTime to) ResolveAnalyticsRange(string range, DateTime today)
+    {
+        switch (range)
+        {
+            case "ThisWeek":
+                {
+                    int diff = (7 + (today.DayOfWeek - DayOfWeek.Monday)) % 7;
+                    var start = today.AddDays(-diff).Date;
+                    return (start, start.AddDays(6));
+                }
+            case "ThisMonth":
+                return (new DateTime(today.Year, today.Month, 1),
+                        new DateTime(today.Year, today.Month, 1).AddMonths(1).AddDays(-1));
+            case "LastMonth":
+                {
+                    var first = new DateTime(today.Year, today.Month, 1).AddMonths(-1);
+                    return (first, first.AddMonths(1).AddDays(-1));
+                }
+            case "LastYear":
+                return (new DateTime(today.Year - 1, 1, 1), new DateTime(today.Year - 1, 12, 31));
+            case "AllTime":
+                return (new DateTime(2000, 1, 1), today);
+            case "ThisYear":
+            default:
+                return (new DateTime(today.Year, 1, 1), new DateTime(today.Year, 12, 31));
+        }
     }
 }

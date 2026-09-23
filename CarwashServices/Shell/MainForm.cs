@@ -116,28 +116,13 @@ namespace CarwashServices.Shell
         // ================================================================
 
         /// <summary>
-        /// Navigate to Manage Service Requests and apply a status filter.
-        /// Pass "All" to show everything.
+        /// Navigate to Manage Customers, optionally filtered by segment and
+        /// optionally focused on a specific tenant customer id.
+        /// Pass "All" for segment to show everyone.
         /// </summary>
-        public void NavigateToServiceRequests(string status)
-        {
-            NavigateTo("Manage Service Requests");
-
-            foreach (Control c in _contentPanel.Controls)
-            {
-                if (c is ServiceRequestsView srv)
-                {
-                    srv.ApplyDrillDown(status);
-                    break;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Navigate to Manage Customers and apply a segment filter.
-        /// Valid segments: "All", "Active", "AtRisk", "Lost", "Returning".
-        /// </summary>
-        public void NavigateToCustomers(string segment)
+        public void NavigateToCustomers(string segment = "All",
+                                        int? focusCustomerId = null,
+                                        string source = null)
         {
             NavigateTo("Manage Customers");
 
@@ -145,17 +130,41 @@ namespace CarwashServices.Shell
             {
                 if (c is CustomersView cv)
                 {
-                    cv.ApplyDrillDown(segment);
+                    cv.ApplyDrillDown(segment, focusCustomerId, source);
                     break;
                 }
             }
         }
 
         /// <summary>
-        /// Navigate to Follow-Ups / Reminders and apply a status filter.
-        /// Pass "All" to show everything.
+        /// Navigate to Manage Service Requests, optionally filtered by status,
+        /// service, and vehicle type, and optionally focused on a request id.
         /// </summary>
-        public void NavigateToFollowUps(string status)
+        public void NavigateToServiceRequests(string status = "All",
+                                              string service = null,
+                                              string vehicle = null,
+                                              int? focusRequestId = null,
+                                              string source = null)
+        {
+            NavigateTo("Manage Service Requests");
+
+            foreach (Control c in _contentPanel.Controls)
+            {
+                if (c is ServiceRequestsView srv)
+                {
+                    srv.ApplyDrillDown(status, service, vehicle, focusRequestId, source);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Navigate to Follow-Ups / Reminders, optionally filtered by status
+        /// and optionally focused on a follow-up id.
+        /// </summary>
+        public void NavigateToFollowUps(string status = "All",
+                                        int? focusFollowUpId = null,
+                                        string source = null)
         {
             NavigateTo("Follow-Ups / Reminders");
 
@@ -163,13 +172,13 @@ namespace CarwashServices.Shell
             {
                 if (c is FollowUpsView fuv)
                 {
-                    fuv.ApplyDrillDown(status);
+                    fuv.ApplyDrillDown(status, focusFollowUpId, source);
                     break;
                 }
             }
         }
 
-        public void NavigateToFollowUpsWithCustomers(System.Collections.Generic.List<int> customerIds)
+        public void NavigateToFollowUpsWithCustomers(List<int> customerIds)
         {
             NavigateTo("Follow-Ups / Reminders");
 

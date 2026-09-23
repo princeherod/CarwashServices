@@ -89,17 +89,47 @@ namespace CarwashServices.Roles
         // ================================================================
         private void NavigateServiceRequests(string status)
         {
-            (FindForm() as MainForm)?.NavigateToServiceRequests(status);
+            (FindForm() as MainForm)?.NavigateToServiceRequests(
+                status: status,
+                source: "dashboard");
+        }
+
+        private void NavigateServiceRequestsFocused(string status, int requestId)
+        {
+            (FindForm() as MainForm)?.NavigateToServiceRequests(
+                status: status,
+                focusRequestId: requestId,
+                source: "dashboard");
         }
 
         private void NavigateCustomers(string segment)
         {
-            (FindForm() as MainForm)?.NavigateToCustomers(segment);
+            (FindForm() as MainForm)?.NavigateToCustomers(
+                segment: segment,
+                source: "dashboard");
+        }
+
+        private void NavigateCustomerFocused(int customerId)
+        {
+            (FindForm() as MainForm)?.NavigateToCustomers(
+                segment: "All",
+                focusCustomerId: customerId,
+                source: "dashboard");
         }
 
         private void NavigateFollowUps(string status)
         {
-            (FindForm() as MainForm)?.NavigateToFollowUps(status);
+            (FindForm() as MainForm)?.NavigateToFollowUps(
+                status: status,
+                source: "dashboard");
+        }
+
+        private void NavigateFollowUpFocused(string status, int followUpId)
+        {
+            (FindForm() as MainForm)?.NavigateToFollowUps(
+                status: status,
+                focusFollowUpId: followUpId,
+                source: "dashboard");
         }
 
         private void NavigateReports()
@@ -154,13 +184,7 @@ namespace CarwashServices.Roles
                 ("Staff", "STAFF", 140),
                 ("Status", "STATUS", 120));
             _recentGrid.CellPainting += RecentGrid_CellPainting;
-            _recentGrid.CellMouseClick += (s, e) =>
-            {
-                if (e.RowIndex < 0) return;
-                // Route by the row's status.
-                var status = _recentGrid.Rows[e.RowIndex].Cells["Status"].Value?.ToString() ?? "All";
-                NavigateServiceRequests(status);
-            };
+            _recentGrid.CellMouseClick += RecentGrid_CellMouseClick;
             recentCard.Controls.Add(_recentGrid);
             Inset(recentCard, _recentGrid, CardPad, CardTitleStrip, CardPad, CardPad);
 
@@ -190,13 +214,7 @@ namespace CarwashServices.Roles
                 ("UpdatedAt", "UPDATED_AT", 170),
                 ("Notes", "NOTES", -1));
             _logsGrid.CellPainting += LogsGrid_CellPainting;
-            _logsGrid.CellMouseClick += (s, e) =>
-            {
-                if (e.RowIndex < 0) return;
-                // Route by the log row's status.
-                var status = _logsGrid.Rows[e.RowIndex].Cells["Status"].Value?.ToString() ?? "All";
-                NavigateServiceRequests(status);
-            };
+            _logsGrid.CellMouseClick += LogsGrid_CellMouseClick;
             logsCard.Controls.Add(_logsGrid);
             Inset(logsCard, _logsGrid, CardPad, CardTitleStrip, CardPad, CardPad);
 
@@ -260,7 +278,6 @@ namespace CarwashServices.Roles
                 card.Cursor = Cursors.Hand;
                 card.Click += (s, e) => onClick();
 
-                // Also wire children so clicking a KPI's value or subtitle works.
                 foreach (Control child in card.Controls)
                 {
                     child.Cursor = Cursors.Hand;
@@ -463,13 +480,21 @@ namespace CarwashServices.Roles
                 if (!string.IsNullOrWhiteSpace(r.Plate))
                     custCell += $"\n{r.Plate}";
 
-                _recentGrid.Rows.Add(
+                int idx = _recentGrid.Rows.Add(
                     $"#{r.RequestId}",
                     custCell,
                     r.Service,
                     r.ScheduledDate,
                     string.IsNullOrWhiteSpace(r.AssignedStaff) ? "Unassigned" : r.AssignedStaff,
                     r.Status);
+
+                // Store ids on the row for click-through.
+                _recentGrid.Rows[idx].Tag = new RowContext
+                {
+                    RequestId = r.RequestId,
+                    CustomerId = r.CustomerId,
+                    Status = r.Status
+                };
             }
             _recentGrid.ClearSelection();
             _recentGrid.ResumeLayout();
@@ -558,12 +583,14 @@ namespace CarwashServices.Roles
                 };
                 row.Controls.Add(metaLbl);
 
-                // Clicking a queue row drills down by that row's status.
+                // Clicking the row → Follow-Ups filtered by that status,
+                // focused on the specific follow-up row.
                 string capturedStatus = f.Status;
-                row.Click += (s, e) => NavigateFollowUps(capturedStatus);
-                nameLbl.Click += (s, e) => NavigateFollowUps(capturedStatus);
-                metaLbl.Click += (s, e) => NavigateFollowUps(capturedStatus);
-                status.Click += (s, e) => NavigateFollowUps(capturedStatus);
+                int capturedFollowUpId = f.FollowUpId;
+                row.Click += (s, e) => NavigateFollowUpFocused(capturedStatus, capturedFollowUpId);
+                nameLbl.Click += (s, e) => NavigateFollowUpFocused(capturedStatus, capturedFollowUpId);
+                metaLbl.Click += (s, e) => NavigateFollowUpFocused(capturedStatus, capturedFollowUpId);
+                status.Click += (s, e) => NavigateFollowUpFocused(capturedStatus, capturedFollowUpId);
 
                 _followUpList.Controls.Add(row);
                 y += 52;
@@ -654,7 +681,7 @@ namespace CarwashServices.Roles
                 };
                 row.Controls.Add(dot);
 
-                // Staff rows route to Manage Users.
+                // Staff rows route to Manage Users (unchanged behavior).
                 row.Click += (s, e) =>
                     (FindForm() as MainForm)?.NavigateToModule("Manage Users");
 
@@ -672,13 +699,21 @@ namespace CarwashServices.Roles
 
             foreach (var l in items)
             {
-                _logsGrid.Rows.Add(
+                int idx = _logsGrid.Rows.Add(
                     l.LogId,
                     $"#{l.RequestId}",
                     l.Status,
                     l.UpdatedBy,
                     l.UpdatedAt,
                     l.Notes);
+
+                // Store ids on the row for click-through.
+                _logsGrid.Rows[idx].Tag = new RowContext
+                {
+                    RequestId = l.RequestId,
+                    CustomerId = l.CustomerId,
+                    Status = l.Status
+                };
             }
 
             _logsGrid.ClearSelection();
@@ -739,7 +774,7 @@ namespace CarwashServices.Roles
         };
 
         // ================================================================
-        //  CELL PAINTING
+        //  CELL PAINTING + CLICK
         // ================================================================
         private void RecentGrid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
@@ -753,12 +788,57 @@ namespace CarwashServices.Roles
                 PaintTwoLine(e, Navy, Muted);
         }
 
+        private void RecentGrid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+
+            var row = _recentGrid.Rows[e.RowIndex];
+            if (row.Tag is not RowContext ctx) return;
+
+            var col = _recentGrid.Columns[e.ColumnIndex].Name;
+
+            // Clicking the Customer cell → drill into that customer.
+            if (col == "Customer" && ctx.CustomerId > 0)
+            {
+                NavigateCustomerFocused(ctx.CustomerId);
+                return;
+            }
+
+            // Any other cell → Service Requests filtered by the row's status
+            // and focused on the specific request.
+            NavigateServiceRequestsFocused(
+                status: string.IsNullOrEmpty(ctx.Status) ? "All" : ctx.Status,
+                requestId: ctx.RequestId);
+        }
+
         private void LogsGrid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
 
             if (_logsGrid.Columns[e.ColumnIndex].Name == "Status")
                 PaintStatusText(e);
+        }
+
+        private void LogsGrid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+
+            var row = _logsGrid.Rows[e.RowIndex];
+            if (row.Tag is not RowContext ctx) return;
+
+            var col = _logsGrid.Columns[e.ColumnIndex].Name;
+
+            if (col == "UpdatedBy" && ctx.CustomerId > 0)
+            {
+                NavigateCustomerFocused(ctx.CustomerId);
+                return;
+            }
+
+            NavigateServiceRequestsFocused(
+                status: string.IsNullOrEmpty(ctx.Status) ? "All" : ctx.Status,
+                requestId: ctx.RequestId);
         }
 
         private static void PaintTwoLine(DataGridViewCellPaintingEventArgs e, Color topColor, Color bottomColor)
@@ -840,8 +920,15 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  Helper: white card with a soft border
+        //  Helper types
         // ================================================================
+        private sealed class RowContext
+        {
+            public int RequestId;
+            public int CustomerId;
+            public string Status = "";
+        }
+
         private sealed class BorderPanel : Panel
         {
             public BorderPanel()

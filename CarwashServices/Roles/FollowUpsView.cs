@@ -34,9 +34,12 @@ namespace CarwashServices.Roles
 
         // ---- Drill-down ----
         private string _drillDownFilter = "";
+        private int? _focusFollowUpId;
+        private string _source = "";
         private Panel _drillDownHost = null!;
         private Panel _drillDownChip = null!;
         private Label _drillDownChipLabel = null!;
+        private readonly System.Windows.Forms.Timer _highlightTimer = new() { Interval = 3000 };
 
         private Panel _contentPanel;
         private Panel _statsBar;
@@ -84,6 +87,8 @@ namespace CarwashServices.Roles
         private static readonly Color YellowDot = Color.FromArgb(0xF5, 0xB0, 0x2E);
         private static readonly Color BlueDot = Color.FromArgb(0x42, 0xA5, 0xF5);
         private static readonly Color RedDot = Color.FromArgb(0xE5, 0x39, 0x35);
+
+        private static readonly Color HighlightTint = Color.FromArgb(0xFF, 0xF5, 0xCC);
 
         private static readonly Font FontStrong = new Font("Segoe UI Semibold", 9.5f);
         private static readonly Font FontNormal = new Font("Segoe UI", 9.5f);
@@ -148,6 +153,14 @@ namespace CarwashServices.Roles
             {
                 BaseAddress = new Uri("http://localhost:5180/"),
                 Timeout = TimeSpan.FromSeconds(10)
+            };
+
+            // Step B — highlight timer
+            _highlightTimer.Tick += (s, e) =>
+            {
+                _highlightTimer.Stop();
+                _focusFollowUpId = null;
+                if (_grid != null) _grid.Invalidate();
             };
 
             InitializeUI();
@@ -294,7 +307,6 @@ namespace CarwashServices.Roles
             _addBtn.Click += (s, e) => OpenAddDialog();
             _header.Controls.Add(_addBtn);
 
-            // ---- Tab strip ----
             _tabBar = new Panel
             {
                 Height = 44,
@@ -339,7 +351,6 @@ namespace CarwashServices.Roles
                 await LoadAsync();
             };
 
-            // ---- Drill-down chip (visible only when a filter is active) ----
             _drillDownHost = new Panel
             {
                 Height = 36,
@@ -351,7 +362,7 @@ namespace CarwashServices.Roles
             _drillDownChip = new Panel
             {
                 Location = new Point(0, 0),
-                Size = new Size(260, 32),
+                Size = new Size(300, 32),
                 BackColor = BlueSoft,
                 Cursor = Cursors.Hand
             };
@@ -373,7 +384,7 @@ namespace CarwashServices.Roles
                 Font = new Font("Segoe UI Semibold", 9f),
                 AutoSize = false,
                 Location = new Point(14, 0),
-                Size = new Size(210, 32),
+                Size = new Size(250, 32),
                 TextAlign = ContentAlignment.MiddleLeft
             };
             _drillDownChip.Controls.Add(_drillDownChipLabel);
@@ -385,7 +396,7 @@ namespace CarwashServices.Roles
                 BackColor = Color.Transparent,
                 Font = new Font("Segoe UI Semibold", 12f),
                 AutoSize = false,
-                Location = new Point(230, 0),
+                Location = new Point(270, 0),
                 Size = new Size(24, 32),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Cursor = Cursors.Hand
@@ -395,7 +406,6 @@ namespace CarwashServices.Roles
 
             _drillDownHost.Controls.Add(_drillDownChip);
 
-            // ---- Stats bar ----
             _statsBar = new Panel
             {
                 Height = 100,
@@ -445,7 +455,6 @@ namespace CarwashServices.Roles
                 if (!_uiReady) return;
                 _statusFilter = _statusFilterCombo.SelectedItem?.ToString() ?? "All statuses";
 
-                // A manual selection clears any active drill-down.
                 if (!string.IsNullOrEmpty(_drillDownFilter))
                 {
                     _drillDownFilter = "";
@@ -720,18 +729,22 @@ namespace CarwashServices.Roles
         // ================================================================
         //  DRILL-DOWN
         // ================================================================
-        public void ApplyDrillDown(string status)
+        public void ApplyDrillDown(string status, int? focusFollowUpId = null, string source = null)
         {
             _drillDownFilter = string.IsNullOrWhiteSpace(status) || status == "All"
                 ? ""
                 : status;
+            _focusFollowUpId = focusFollowUpId;
+            _source = source ?? "";
 
             if (!string.IsNullOrEmpty(_drillDownFilter))
             {
-                _drillDownChipLabel.Text = "Status: " + _drillDownFilter;
+                var chipText = "Status: " + _drillDownFilter;
+                if (!string.IsNullOrEmpty(_source))
+                    chipText += "  ·  from " + DisplaySource(_source);
+                _drillDownChipLabel.Text = chipText;
                 _drillDownHost.Visible = _tab == ListTab.Active;
 
-                // Keep the combo in sync so the user sees the same selection.
                 var match = _statusFilterCombo.Items.Cast<object>()
                     .FirstOrDefault(x => string.Equals(x.ToString(), _drillDownFilter,
                                                        StringComparison.OrdinalIgnoreCase));
@@ -753,6 +766,14 @@ namespace CarwashServices.Roles
             RelayoutUI();
             ApplyFilter();
         }
+
+        private static string DisplaySource(string src) => src switch
+        {
+            "dashboard" => "Dashboard",
+            "analytics" => "Analytics",
+            "reports" => "Reports",
+            _ => src
+        };
 
         public void ClearDrillDown()
         {
@@ -806,7 +827,6 @@ namespace CarwashServices.Roles
                 _tabBar.SetBounds(L, y, w, 44);
                 y += 44 + 20;
 
-                // Drill-down chip row (36 px tall + 12 px gap) when visible.
                 bool showDrill = _drillDownHost != null && _drillDownHost.Visible;
                 if (_drillDownHost != null)
                 {
@@ -876,7 +896,6 @@ namespace CarwashServices.Roles
                     Cursor = Cursors.Hand
                 };
 
-                // Click the KPI card → drill down to Follow-Ups with that status.
                 string target = filterTargets[i];
                 card.Click += (s, e) => ApplyDrillDown(target);
                 foreach (Control child in card.Controls)
@@ -919,7 +938,6 @@ namespace CarwashServices.Roles
                 };
                 card.Controls.Add(valueLbl);
 
-                // Re-wire clicks for the labels created above.
                 titleLbl.Click += (s, e) => ApplyDrillDown(target);
                 valueLbl.Click += (s, e) => ApplyDrillDown(target);
 
@@ -1186,32 +1204,51 @@ namespace CarwashServices.Roles
         {
             if (e.Button != MouseButtons.Left) return;
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
-            if (_grid.Columns[e.ColumnIndex].Name != "Actions") return;
 
-            int hit = HitTestActions(e.RowIndex, e.Location);
-            if (hit < 0) return;
-
-            int buttonIndex = hit & 0b11;
-
-            var spec = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
-            if (string.IsNullOrEmpty(spec)) return;
-
-            var parts = spec.Split('|');
-            if (buttonIndex >= parts.Length) return;
-
-            string action = parts[buttonIndex];
-
-            var idText = _grid.Rows[e.RowIndex].Cells["FollowUpId"].Value?.ToString() ?? "";
-            if (!int.TryParse(idText, out var rowId)) return;
-
-            var dto = _all.FirstOrDefault(f => f.FollowUpId == rowId);
-            if (dto == null) return;
-
-            switch (action)
+            // Actions column → edit / archive / restore.
+            if (_grid.Columns[e.ColumnIndex].Name == "Actions")
             {
-                case "Edit": OpenEditDialog(dto); break;
-                case "Archive": ArchiveAsync(dto); break;
-                case "Restore": RestoreAsync(dto); break;
+                int hit = HitTestActions(e.RowIndex, e.Location);
+                if (hit < 0) return;
+
+                int buttonIndex = hit & 0b11;
+
+                var spec = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
+                if (string.IsNullOrEmpty(spec)) return;
+
+                var parts = spec.Split('|');
+                if (buttonIndex >= parts.Length) return;
+
+                string action = parts[buttonIndex];
+
+                var idText = _grid.Rows[e.RowIndex].Cells["FollowUpId"].Value?.ToString() ?? "";
+                if (!int.TryParse(idText, out var rowId)) return;
+
+                var dto = _all.FirstOrDefault(f => f.FollowUpId == rowId);
+                if (dto == null) return;
+
+                switch (action)
+                {
+                    case "Edit": OpenEditDialog(dto); break;
+                    case "Archive": ArchiveAsync(dto); break;
+                    case "Restore": RestoreAsync(dto); break;
+                }
+                return;
+            }
+
+            // Customer column → drill into the customer.
+            if (_grid.Columns[e.ColumnIndex].Name == "Customer")
+            {
+                var idText = _grid.Rows[e.RowIndex].Cells["FollowUpId"].Value?.ToString() ?? "";
+                if (!int.TryParse(idText, out var rowId)) return;
+
+                var dto = _all.FirstOrDefault(f => f.FollowUpId == rowId);
+                if (dto == null) return;
+
+                (FindForm() as MainForm)?.NavigateToCustomers(
+                    segment: "All",
+                    focusCustomerId: dto.CustomerId,
+                    source: "dashboard");
             }
         }
 
@@ -1360,7 +1397,6 @@ namespace CarwashServices.Roles
                 }).ToList();
             }
 
-            // Drill-down takes priority over the combo selection.
             var effectiveFilter = !string.IsNullOrEmpty(_drillDownFilter)
                 ? _drillDownFilter
                 : _statusFilter;
@@ -1376,6 +1412,15 @@ namespace CarwashServices.Roles
 
             var total = list.Count;
             var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)_pageSize));
+
+            // Jump to the page containing the focused follow-up.
+            if (_focusFollowUpId.HasValue && _tab == ListTab.Active)
+            {
+                int idx = list.FindIndex(f => f.FollowUpId == _focusFollowUpId.Value);
+                if (idx >= 0)
+                    _page = idx / Math.Max(1, _pageSize) + 1;
+            }
+
             if (_page > totalPages) _page = totalPages;
             if (_page < 1) _page = 1;
 
@@ -1410,12 +1455,13 @@ namespace CarwashServices.Roles
                     _ => f.ContactMethod
                 };
 
+                int rowIdx;
                 if (_tab == ListTab.Active)
                 {
                     bool isTerminal = f.Status == "Redeemed" || f.Status == "Expired";
                     string actions = isTerminal ? "Archive" : "Edit|Archive";
 
-                    _grid.Rows.Add(
+                    rowIdx = _grid.Rows.Add(
                         f.FollowUpId,
                         custCell,
                         scheduled,
@@ -1432,7 +1478,7 @@ namespace CarwashServices.Roles
                     if (!string.IsNullOrWhiteSpace(f.ArchivedBy))
                         archivedCell += "\nby " + f.ArchivedBy;
 
-                    _grid.Rows.Add(
+                    rowIdx = _grid.Rows.Add(
                         f.FollowUpId,
                         custCell,
                         scheduled,
@@ -1442,10 +1488,35 @@ namespace CarwashServices.Roles
                         string.IsNullOrWhiteSpace(archivedCell) ? "—" : archivedCell,
                         "Restore");
                 }
+
+                _grid.Rows[rowIdx].Tag = f.FollowUpId;
+
+                if (_focusFollowUpId.HasValue && f.FollowUpId == _focusFollowUpId.Value)
+                {
+                    var row = _grid.Rows[rowIdx];
+                    row.DefaultCellStyle.BackColor = HighlightTint;
+                    row.DefaultCellStyle.SelectionBackColor = HighlightTint;
+                }
             }
 
             _grid.ResumeLayout();
             _grid.PerformLayout();
+
+            // Scroll the focused row into view.
+            if (_focusFollowUpId.HasValue)
+            {
+                foreach (DataGridViewRow row in _grid.Rows)
+                {
+                    if (row.Tag is int id && id == _focusFollowUpId.Value)
+                    {
+                        try { _grid.FirstDisplayedScrollingRowIndex = row.Index; }
+                        catch { }
+                        _highlightTimer.Stop();
+                        _highlightTimer.Start();
+                        break;
+                    }
+                }
+            }
 
             var from = total == 0 ? 0 : start + 1;
             var to = Math.Min(start + _pageSize, total);

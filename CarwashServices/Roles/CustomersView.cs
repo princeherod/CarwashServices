@@ -34,6 +34,7 @@ namespace CarwashServices.Roles
         private static readonly Color Red = Color.FromArgb(0xC6, 0x28, 0x28);
         private static readonly Color RedSoft = Color.FromArgb(0xFD, 0xE7, 0xE6);
         private static readonly Color BlueSoft = Color.FromArgb(0xE3, 0xF1, 0xFD);
+        private static readonly Color HighlightTint = Color.FromArgb(0xFF, 0xF5, 0xCC);
 
         // -----------------------------------------------------------------
         //  State
@@ -56,16 +57,18 @@ namespace CarwashServices.Roles
         private const int RowHeight = 92;
         private const int RowGap = 12;
 
-        // ---- Tab strip geometry ----
         private const int TabWidth = 170;
         private const int TabGap = 40;
 
         // ---- Drill-down ----
         private string _drillDownSegment = "";
         private HashSet<int>? _drillDownCustomerIds;
+        private int? _focusCustomerId;
+        private string _source = "";
         private Panel _drillDownHost = null!;
         private Panel _drillDownChip = null!;
         private Label _drillDownChipLabel = null!;
+        private readonly System.Windows.Forms.Timer _highlightTimer = new() { Interval = 3000 };
 
         // -----------------------------------------------------------------
         //  UI
@@ -90,6 +93,12 @@ namespace CarwashServices.Roles
             DoubleBuffered = true;
 
             _searchDebounce.Tick += (s, e) => { _searchDebounce.Stop(); ApplyFilter(); };
+            _highlightTimer.Tick += (s, e) =>
+            {
+                _highlightTimer.Stop();
+                _focusCustomerId = null;
+                ClearRowHighlights();
+            };
 
             BuildRoot();
             ShowList();
@@ -211,7 +220,7 @@ namespace CarwashServices.Roles
                 await LoadCustomersAsync();
             };
 
-            // ---- Drill-down chip (visible only when a filter is active) ----
+            // ---- Drill-down chip ----
             _drillDownHost = new Panel
             {
                 Location = new Point(0, 172),
@@ -247,9 +256,7 @@ namespace CarwashServices.Roles
 
             _drillDownChipLabel = new Label
             {
-                Text = string.IsNullOrEmpty(_drillDownSegment)
-                    ? ""
-                    : $"Segment: {DisplaySegment(_drillDownSegment)}",
+                Text = "",
                 ForeColor = Accent,
                 BackColor = Color.Transparent,
                 Font = new Font("Segoe UI Semibold", 9f),
@@ -277,12 +284,12 @@ namespace CarwashServices.Roles
 
             _drillDownHost.Controls.Add(_drillDownChip);
 
-            // ---- Filter card ----
+            // ---- Filter card (96 px tall) ----
             var filterCard = new Panel
             {
                 BackColor = Color.White,
                 Location = new Point(0, 216),
-                Height = 76
+                Height = 96
             };
             filterCard.Paint += (s, e) =>
             {
@@ -302,7 +309,7 @@ namespace CarwashServices.Roles
 
             var searchWrap = new Panel
             {
-                Location = new Point(16, 28),
+                Location = new Point(16, 38),
                 Size = new Size(400, 36),
                 BackColor = Color.White,
                 Padding = new Padding(10, 7, 10, 0)
@@ -352,7 +359,8 @@ namespace CarwashServices.Roles
                 ForeColor = Color.White,
                 Size = new Size(100, 36),
                 Cursor = Cursors.Hand,
-                UseVisualStyleBackColor = false
+                UseVisualStyleBackColor = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             searchBtn.FlatAppearance.BorderSize = 0;
             searchBtn.Click += (s, e) => ApplyFilter();
@@ -365,7 +373,8 @@ namespace CarwashServices.Roles
                 Font = new Font("Segoe UI", 10f),
                 ForeColor = Navy,
                 Size = new Size(100, 36),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             refreshBtn.FlatAppearance.BorderColor = CardBorder;
             StyleOutlineButton(refreshBtn);
@@ -390,20 +399,21 @@ namespace CarwashServices.Roles
                 var w = _listScreen.ClientSize.Width;
                 var h = _listScreen.ClientSize.Height;
 
+                if (w < 100 || h < 100) return;
+
                 newCustomerBtn.Location = new Point(w - newCustomerBtn.Width, 30);
                 filterCard.Width = w;
                 tabBar.Width = w;
                 _drillDownHost.Width = w;
 
-                refreshBtn.Location = new Point(w - 16 - refreshBtn.Width, 28);
-                searchBtn.Location = new Point(refreshBtn.Left - 10 - searchBtn.Width, 28);
+                refreshBtn.Location = new Point(w - 16 - refreshBtn.Width, 38);
+                searchBtn.Location = new Point(refreshBtn.Left - 10 - searchBtn.Width, 38);
                 searchWrap.Width = Math.Max(120, searchBtn.Left - 12 - searchWrap.Left);
 
-                // Shift filter card and list down when the drill-down chip is visible
                 int extra = _drillDownHost.Visible ? 36 : 0;
                 filterCard.Location = new Point(0, 216 + extra);
 
-                const int baseListTop = 266;
+                const int baseListTop = 324;
                 int listTop = baseListTop + extra;
                 const int pagerH = 44;
 
@@ -414,6 +424,8 @@ namespace CarwashServices.Roles
                 ApplyFilter(false);
             }
             _listScreen.Resize += (s, e) => Relayout();
+            _listScreen.HandleCreated += (s, e) => Relayout();
+            _listScreen.SizeChanged += (s, e) => Relayout();
             Relayout();
 
             StyleTabs();
@@ -466,12 +478,18 @@ namespace CarwashServices.Roles
             "Returning" => "Returning",
             "Active" => "Active",
             "Lost" => "Lost",
+            "New" => "New",
+            "Occasional" => "Occasional",
+            "Regular" => "Regular",
+            "Loyal" => "Loyal",
             _ => seg
         };
 
-        public async void ApplyDrillDown(string segment)
+        public async void ApplyDrillDown(string segment, int? focusCustomerId = null, string source = null)
         {
             _drillDownSegment = segment ?? "";
+            _focusCustomerId = focusCustomerId;
+            _source = source ?? "";
 
             if (string.IsNullOrEmpty(_drillDownSegment) || _drillDownSegment == "All")
             {
@@ -482,21 +500,22 @@ namespace CarwashServices.Roles
             }
             else
             {
-                if (_drillDownChipLabel != null)
-                    _drillDownChipLabel.Text = "Segment: " + DisplaySegment(_drillDownSegment);
+                var labelText = "Segment: " + DisplaySegment(_drillDownSegment);
+                if (!string.IsNullOrEmpty(_source))
+                    labelText += "  ·  from " + DisplaySource(_source);
+                if (_drillDownChipLabel != null) _drillDownChipLabel.Text = labelText;
                 if (_drillDownHost != null) _drillDownHost.Visible = true;
 
                 await LoadDrillDownIdsAsync(_drillDownSegment);
             }
 
-            // Make sure the list screen is showing (in case we're currently on a detail screen)
+            // If we're currently showing the detail screen, switch back to list.
             if (_detailScreen != null)
             {
                 ShowList();
             }
             else if (_drillDownHost != null)
             {
-                // Re-layout so the filter card and list shift if visibility changed
                 _listScreen.PerformLayout();
             }
 
@@ -504,9 +523,17 @@ namespace CarwashServices.Roles
             await LoadCustomersAsync();
         }
 
+        private static string DisplaySource(string src) => src switch
+        {
+            "dashboard" => "Dashboard",
+            "analytics" => "Analytics",
+            "reports" => "Reports",
+            _ => src
+        };
+
         public void ClearDrillDown()
         {
-            ApplyDrillDown("");
+            ApplyDrillDown("", null, null);
         }
 
         private async Task LoadDrillDownIdsAsync(string segment)
@@ -521,16 +548,50 @@ namespace CarwashServices.Roles
 
                     _drillDownCustomerIds = rows.Select(r => r.CustomerId).ToHashSet();
                 }
+                else if (segment == "New" || segment == "Occasional"
+                      || segment == "Regular" || segment == "Loyal")
+                {
+                    // Same tier classifier the Wash Frequency chart uses.
+                    var customers = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
+                        "api/tenant/1/tenant-customers") ?? new List<TenantCustomerDto>();
+                    var requests = await _http.GetFromJsonAsync<List<ServiceRequestDto>>(
+                        "api/service-requests") ?? new List<ServiceRequestDto>();
+
+                    var ids = new HashSet<int>();
+                    foreach (var c in customers)
+                    {
+                        int visits = requests.Count(r =>
+                            r.CustomerId == c.TenantCustomerId &&
+                            r.Status == "Completed" &&
+                            !r.IsArchived);
+
+                        string tier = visits <= 1 ? "New"
+                                    : visits <= 4 ? "Occasional"
+                                    : visits <= 9 ? "Regular"
+                                    : "Loyal";
+
+                        if (tier == segment) ids.Add(c.TenantCustomerId);
+                    }
+                    _drillDownCustomerIds = ids;
+                }
                 else if (segment == "Returning")
                 {
-                    // "Returning" is defined as customers with 2+ service requests.
-                    // The segment endpoint doesn't return a visit count, so we
-                    // approximate by asking for all three segments and keeping
-                    // customers who appear in either AtRisk or Lost plus Active
-                    // (i.e. everyone who has visited at least once).
-                    // If you add a proper /api/analytics/returning-customers
-                    // endpoint later, swap this block to call it instead.
-                    _drillDownCustomerIds = null;
+                    // Returning = 2+ completed visits ever.
+                    var customers = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
+                        "api/tenant/1/tenant-customers") ?? new List<TenantCustomerDto>();
+                    var requests = await _http.GetFromJsonAsync<List<ServiceRequestDto>>(
+                        "api/service-requests") ?? new List<ServiceRequestDto>();
+
+                    var ids = new HashSet<int>();
+                    foreach (var c in customers)
+                    {
+                        int visits = requests.Count(r =>
+                            r.CustomerId == c.TenantCustomerId &&
+                            r.Status == "Completed" &&
+                            !r.IsArchived);
+                        if (visits >= 2) ids.Add(c.TenantCustomerId);
+                    }
+                    _drillDownCustomerIds = ids;
                 }
                 else
                 {
@@ -598,7 +659,6 @@ namespace CarwashServices.Roles
                 (c.CustomerCode?.ToLower().Contains(search) ?? false)
             ).ToList();
 
-            // Drill-down segment filter
             if (_drillDownCustomerIds != null)
             {
                 filtered = filtered.Where(c => _drillDownCustomerIds.Contains(c.TenantCustomerId)).ToList();
@@ -608,6 +668,13 @@ namespace CarwashServices.Roles
             int totalPages = Math.Max(1, (int)Math.Ceiling(filtered.Count / (double)_pageSize));
             if (resetPage) _page = 1;
             _page = Math.Min(Math.Max(1, _page), totalPages);
+
+            // If we're focusing a specific customer, jump to the page containing them.
+            if (_focusCustomerId.HasValue && _tab == ListTab.Active)
+            {
+                int idx = filtered.FindIndex(c => c.TenantCustomerId == _focusCustomerId.Value);
+                if (idx >= 0) _page = idx / _pageSize + 1;
+            }
 
             var pageItems = filtered.Skip((_page - 1) * _pageSize).Take(_pageSize).ToList();
 
@@ -621,6 +688,7 @@ namespace CarwashServices.Roles
                     ? BuildActiveCustomerRow(c)
                     : BuildArchivedCustomerRow(c);
 
+                row.Tag = c.TenantCustomerId;
                 row.Location = new Point(0, y);
                 row.Width = st.ListPanel.ClientSize.Width;
                 row.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -649,6 +717,10 @@ namespace CarwashServices.Roles
 
             st.ListPanel.ResumeLayout();
             RenderPager(st, filtered.Count, totalPages);
+
+            // Apply highlight + scroll AFTER layout so positions are real.
+            if (_focusCustomerId.HasValue && _tab == ListTab.Active)
+                BeginInvoke(new Action(() => HighlightAndScrollTo(_focusCustomerId.Value)));
         }
 
         private void RenderPager(ListScreenState st, int total, int totalPages)
@@ -716,6 +788,59 @@ namespace CarwashServices.Roles
             b.FlatAppearance.BorderColor = active ? Navy : CardBorder;
             b.FlatAppearance.MouseOverBackColor = active ? Navy : Color.FromArgb(0xF5, 0xF7, 0xFA);
             return b;
+        }
+
+        // =================================================================
+        //  HIGHLIGHT + SCROLL
+        // =================================================================
+        private void HighlightAndScrollTo(int customerId)
+        {
+            var st = ListState;
+            if (st == null) return;
+
+            Control? target = null;
+            foreach (Control c in st.ListPanel.Controls)
+            {
+                if (c.Tag is int id && id == customerId)
+                {
+                    target = c;
+                    break;
+                }
+            }
+
+            if (target == null) return;
+
+            st.ListPanel.ScrollControlIntoView(target);
+
+            var original = target.BackColor;
+            target.BackColor = HighlightTint;
+            target.Invalidate();
+
+            foreach (Control child in target.Controls)
+            {
+                if (child is Label lbl && child is not Button)
+                {
+                    // leave labels alone — they're transparent over the panel
+                }
+            }
+
+            _highlightTimer.Stop();
+            _highlightTimer.Start();
+        }
+
+        private void ClearRowHighlights()
+        {
+            var st = ListState;
+            if (st == null) return;
+
+            foreach (Control c in st.ListPanel.Controls)
+            {
+                if (c.BackColor == HighlightTint)
+                {
+                    c.BackColor = Color.White;
+                    c.Invalidate();
+                }
+            }
         }
 
         // =================================================================
@@ -983,7 +1108,7 @@ namespace CarwashServices.Roles
         }
 
         // =================================================================
-        //  SCREEN 2 — DETAIL
+        //  SCREEN 2 — DETAIL  (unchanged)
         // =================================================================
         private void ShowDetail(TenantCustomerDto customer)
         {
@@ -1215,9 +1340,6 @@ namespace CarwashServices.Roles
             b.FlatAppearance.MouseDownBackColor = Color.FromArgb(0xE9, 0xEE, 0xF6);
         }
 
-        // =================================================================
-        //  PROFILE TAB
-        // =================================================================
         private Control BuildProfileTab(TenantCustomerDto c)
         {
             var card = new Panel
@@ -1297,9 +1419,6 @@ namespace CarwashServices.Roles
             return y + 28;
         }
 
-        // =================================================================
-        //  INTERACTIONS TAB
-        // =================================================================
         private Button ActionButton(string text, Color back, int x)
         {
             var b = new Button

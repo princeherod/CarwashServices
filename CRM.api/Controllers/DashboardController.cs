@@ -26,7 +26,6 @@ public class DashboardController : ControllerBase
 
         var tenant = await _tenantFactory.CreateAsync(companyId);
 
-        // Only active customers and active services.
         var customers = await tenant.TenantCustomers
             .AsNoTracking()
             .Where(c => !c.IsArchived)
@@ -44,13 +43,11 @@ public class DashboardController : ControllerBase
         var users = await _db.Users.AsNoTracking().ToListAsync();
         var userById = users.ToDictionary(u => u.UserId);
 
-        // Only active service requests.
         var requests = await _db.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived)
             .ToListAsync();
 
-        // KPIs
         int totalCustomers = customers.Count;
 
         int todayJobs = requests.Count(r =>
@@ -68,7 +65,7 @@ public class DashboardController : ControllerBase
                 revenueThisMonth += p;
         }
 
-        // Recent Requests (top 5)
+        // ---- Recent Requests (top 5) with the raw ids ----
         var recentRequests = requests
             .OrderByDescending(r => r.RequestId)
             .Take(5)
@@ -82,6 +79,7 @@ public class DashboardController : ControllerBase
                 return new
                 {
                     requestId = r.RequestId,
+                    customerId = r.CustomerId,                // NEW
                     customer = c?.CustomerName ?? $"id:{r.CustomerId}",
                     plate = c?.PlateNumber ?? "",
                     service = s,
@@ -92,7 +90,7 @@ public class DashboardController : ControllerBase
             })
             .ToList();
 
-        // Follow-Up Queue — only non-archived follow-ups.
+        // ---- Follow-Up Queue with ids ----
         var followUps = await _db.FollowUps
             .AsNoTracking()
             .Where(f => !f.IsArchived)
@@ -108,6 +106,7 @@ public class DashboardController : ControllerBase
                 return new
                 {
                     followUpId = f.FollowUpId,
+                    customerId = f.CustomerId,                // NEW
                     customer = c?.CustomerName ?? $"id:{f.CustomerId}",
                     type = f.Type,
                     scheduledDate = f.ScheduledDate.ToString("yyyy-MM-dd"),
@@ -118,7 +117,6 @@ public class DashboardController : ControllerBase
 
         int followUpPending = followUps.Count(f => f.Status == "Pending" || f.Status == "Scheduled");
 
-        // Service Staff (only role 3)
         var staffList = users
             .Where(u => u.RoleId == 3)
             .Select(u => new
@@ -130,8 +128,9 @@ public class DashboardController : ControllerBase
             })
             .ToList();
 
-        // Recent Status Logs — only logs whose request is still active.
+        // ---- Recent Status Logs with the request's CustomerId ----
         var activeRequestIds = requests.Select(r => r.RequestId).ToHashSet();
+        var requestById = requests.ToDictionary(r => r.RequestId);
 
         var logs = await _db.ServiceStatusLogs
             .AsNoTracking()
@@ -143,10 +142,12 @@ public class DashboardController : ControllerBase
         var recentLogs = logs.Select(l =>
         {
             var u = userById.TryGetValue(l.UpdatedBy, out var uu) ? uu : null;
+            int custId = requestById.TryGetValue(l.RequestId, out var rr) ? rr.CustomerId : 0;
             return new
             {
                 logId = l.LogId,
                 requestId = l.RequestId,
+                customerId = custId,                          // NEW
                 status = l.Status,
                 updatedBy = u?.FullName ?? $"id:{l.UpdatedBy}",
                 updatedAt = l.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss"),

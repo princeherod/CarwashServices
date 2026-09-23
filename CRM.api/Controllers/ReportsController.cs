@@ -116,6 +116,7 @@ public class ReportsController : ControllerBase
         byService = byService.OrderByDescending(x => ((dynamic)x).value).Cast<object>().ToList();
 
         // Transactions (top 200)
+        // Transactions (top 200) — includes the raw tenant customer id
         var txns = requests
             .OrderByDescending(r => r.RequestedDate)
             .Take(200)
@@ -138,6 +139,7 @@ public class ReportsController : ControllerBase
                 {
                     txn = $"#{r.RequestId}",
                     date = r.RequestedDate.ToString("yyyy-MM-dd"),
+                    customerId = r.CustomerId,               // NEW
                     customer = c?.CustomerName ?? $"id:{r.CustomerId}",
                     vehicle = string.IsNullOrWhiteSpace(c?.VehicleType) ? "—" : c.VehicleType,
                     service = sname,

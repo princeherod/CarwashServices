@@ -35,6 +35,7 @@ namespace CarwashServices.Roles
         private static readonly Color RedSoft = Color.FromArgb(0xFD, 0xE7, 0xE6);
         private static readonly Color Faint = Color.FromArgb(0x9A, 0xA7, 0xBF);
         private static readonly Color NeutralSoft = Color.FromArgb(0xEE, 0xF1, 0xF6);
+        private static readonly Color HighlightTint = Color.FromArgb(0xFF, 0xF5, 0xCC);
 
         private static readonly Font FontLine1 = new Font("Segoe UI Semibold", 9.5f);
         private static readonly Font FontLine2 = new Font("Segoe UI", 8.5f);
@@ -53,7 +54,7 @@ namespace CarwashServices.Roles
         private const int ChipGap = 8;
         private const int DrillDownChipH = 36;
         private const int FilterTop = 214;
-        private const int FilterH = 76;
+        private const int FilterH = 96;
         private const int PagerH = 48;
         private const int PageBottom = 24;
 
@@ -84,8 +85,13 @@ namespace CarwashServices.Roles
         private ListTab _tab = ListTab.Active;
 
         private string _activeStatus = "All";
+        private string _serviceFilter = "";
+        private string _vehicleFilter = "";
+        private int? _focusRequestId;
+        private string _source = "";
         private int _hoverAction = -1;
         private readonly System.Windows.Forms.Timer _debounce = new() { Interval = 300 };
+        private readonly System.Windows.Forms.Timer _highlightTimer = new() { Interval = 3000 };
 
         private int _page = 1;
         private int _pageSize = 8;
@@ -95,7 +101,7 @@ namespace CarwashServices.Roles
         private Panel _drillDownChipBar = null!;
         private Panel _drillDownChip = null!;
         private Label _drillDownChipLabel = null!;
-        private string _drillDownFilter = "";   // "" means no drill-down active
+        private string _drillDownFilter = "";
 
         // ---- UI ----
         private Panel _contentPanel = null!;
@@ -122,6 +128,12 @@ namespace CarwashServices.Roles
             DoubleBuffered = true;
 
             _debounce.Tick += (s, e) => { _debounce.Stop(); ApplyFilter(resetPage: true); };
+            _highlightTimer.Tick += (s, e) =>
+            {
+                _highlightTimer.Stop();
+                _focusRequestId = null;
+                if (_grid != null) _grid.Invalidate();
+            };
 
             InitializeUI();
 
@@ -186,7 +198,6 @@ namespace CarwashServices.Roles
             _newRequestBtn.Click += (s, e) => OpenNewRequestDialog();
             _contentPanel.Controls.Add(_newRequestBtn);
 
-            // ---- Tab strip ----
             _tabBar = new Panel
             {
                 Location = new Point(PadX, TabTop),
@@ -233,7 +244,6 @@ namespace CarwashServices.Roles
                 await LoadRequestsAsync();
             };
 
-            // ---- Status chips ----
             _chipBar = new Panel
             {
                 Location = new Point(PadX, ChipTop),
@@ -244,7 +254,6 @@ namespace CarwashServices.Roles
             _contentPanel.Controls.Add(_chipBar);
             BuildChips();
 
-            // ---- Drill-down chip (visible only when a filter is active) ----
             _drillDownChipBar = new Panel
             {
                 Location = new Point(PadX, ChipTop + ChipH + ChipGap),
@@ -258,15 +267,21 @@ namespace CarwashServices.Roles
             _drillDownChip = new Panel
             {
                 Location = new Point(0, 0),
-                Size = new Size(240, 32),
+                Size = new Size(280, 32),
                 BackColor = BlueSoft,
                 Cursor = Cursors.Hand
             };
             _drillDownChip.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using var path = RoundedRect(
-                    new Rectangle(0, 0, _drillDownChip.Width - 1, _drillDownChip.Height - 1), 16);
+                var r = new Rectangle(0, 0, _drillDownChip.Width - 1, _drillDownChip.Height - 1);
+                int radius = 16, d = radius * 2;
+                using var path = new GraphicsPath();
+                path.AddArc(r.X, r.Y, d, d, 180, 90);
+                path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+                path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+                path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+                path.CloseFigure();
                 using var fill = new SolidBrush(_drillDownChip.BackColor);
                 e.Graphics.FillPath(fill, path);
             };
@@ -280,7 +295,7 @@ namespace CarwashServices.Roles
                 Font = new Font("Segoe UI Semibold", 9f),
                 AutoSize = false,
                 Location = new Point(14, 0),
-                Size = new Size(190, 32),
+                Size = new Size(230, 32),
                 TextAlign = ContentAlignment.MiddleLeft
             };
             _drillDownChip.Controls.Add(_drillDownChipLabel);
@@ -292,7 +307,7 @@ namespace CarwashServices.Roles
                 BackColor = Color.Transparent,
                 Font = new Font("Segoe UI Semibold", 12f),
                 AutoSize = false,
-                Location = new Point(210, 0),
+                Location = new Point(250, 0),
                 Size = new Size(24, 32),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Cursor = Cursors.Hand
@@ -302,7 +317,6 @@ namespace CarwashServices.Roles
 
             _drillDownChipBar.Controls.Add(_drillDownChip);
 
-            // ---- Filter card ----
             _filterCard = new Panel
             {
                 BackColor = Color.White,
@@ -327,7 +341,7 @@ namespace CarwashServices.Roles
 
             var searchWrap = new Panel
             {
-                Location = new Point(16, 28),
+                Location = new Point(16, 38),
                 Size = new Size(400, 36),
                 BackColor = Color.White,
                 Padding = new Padding(10, 7, 10, 0)
@@ -377,7 +391,8 @@ namespace CarwashServices.Roles
                 ForeColor = Color.White,
                 Size = new Size(100, 36),
                 Cursor = Cursors.Hand,
-                UseVisualStyleBackColor = false
+                UseVisualStyleBackColor = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             searchBtn.FlatAppearance.BorderSize = 0;
             searchBtn.Click += (s, e) => ApplyFilter(resetPage: true);
@@ -390,7 +405,8 @@ namespace CarwashServices.Roles
                 Font = new Font("Segoe UI", 10f),
                 ForeColor = Navy,
                 Size = new Size(100, 36),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             refreshBtn.FlatAppearance.BorderColor = CardBorder;
             StyleOutlineButton(refreshBtn);
@@ -401,7 +417,6 @@ namespace CarwashServices.Roles
             };
             _filterCard.Controls.Add(refreshBtn);
 
-            // ---- Grid host ----
             _gridHost = new Panel
             {
                 BackColor = Color.White,
@@ -494,7 +509,6 @@ namespace CarwashServices.Roles
             _grid.CellMouseClick += Grid_CellMouseClick;
             _gridHost.Controls.Add(_grid);
 
-            // ---- Pager ----
             _pager = new Panel
             {
                 BackColor = Color.White,
@@ -591,10 +605,11 @@ namespace CarwashServices.Roles
                 var captured = st;
                 chip.Click += (s, e) =>
                 {
-                    // A manual chip click clears any active drill-down.
                     _activeStatus = captured;
                     _drillDownFilter = "";
                     if (_drillDownChipBar != null) _drillDownChipBar.Visible = false;
+                    _serviceFilter = "";
+                    _vehicleFilter = "";
 
                     BuildChips();
                     RelayoutUI();
@@ -609,17 +624,25 @@ namespace CarwashServices.Roles
         // ================================================================
         //  DRILL-DOWN
         // ================================================================
-        public void ApplyDrillDown(string status)
+        public void ApplyDrillDown(string status,
+                                   string service = null,
+                                   string vehicle = null,
+                                   int? focusRequestId = null,
+                                   string source = null)
         {
             _drillDownFilter = string.IsNullOrWhiteSpace(status) || status == "All"
                 ? ""
                 : status;
+            _serviceFilter = service ?? "";
+            _vehicleFilter = vehicle ?? "";
+            _focusRequestId = focusRequestId;
+            _source = source ?? "";
 
             if (!string.IsNullOrEmpty(_drillDownFilter))
             {
                 _activeStatus = _drillDownFilter;
                 if (_drillDownChipLabel != null)
-                    _drillDownChipLabel.Text = $"Status: {_drillDownFilter}";
+                    _drillDownChipLabel.Text = "Status: " + _drillDownFilter;
                 if (_drillDownChipBar != null)
                     _drillDownChipBar.Visible = _tab == ListTab.Active;
             }
@@ -630,11 +653,30 @@ namespace CarwashServices.Roles
                 if (_drillDownChipBar != null) _drillDownChipBar.Visible = false;
             }
 
+            // Add service / vehicle filters to the chip text if provided.
+            if (!string.IsNullOrEmpty(_drillDownChipLabel?.Text))
+            {
+                var extra = new List<string>();
+                if (!string.IsNullOrEmpty(_serviceFilter)) extra.Add("Service: " + _serviceFilter);
+                if (!string.IsNullOrEmpty(_vehicleFilter)) extra.Add("Vehicle: " + _vehicleFilter);
+                if (!string.IsNullOrEmpty(_source)) extra.Add("from " + DisplaySource(_source));
+                if (extra.Count > 0)
+                    _drillDownChipLabel.Text += "  ·  " + string.Join("  ·  ", extra);
+            }
+
             _page = 1;
             BuildChips();
             RelayoutUI();
             ApplyFilter(resetPage: true);
         }
+
+        private static string DisplaySource(string src) => src switch
+        {
+            "dashboard" => "Dashboard",
+            "analytics" => "Analytics",
+            "reports" => "Reports",
+            _ => src
+        };
 
         public void ClearDrillDown()
         {
@@ -677,16 +719,11 @@ namespace CarwashServices.Roles
             _contentPanel.SuspendLayout();
             try
             {
-                // New Request button
                 _newRequestBtn.Location = new Point(w - _newRequestBtn.Width - PadX, 30);
 
-                // Tab strip
                 _tabBar.SetBounds(PadX, TabTop, contentW, TabH);
-
-                // Status chips
                 _chipBar.SetBounds(PadX, ChipTop, contentW, ChipH);
 
-                // Drill-down chip row — only occupies space when it's visible.
                 bool showDrill = _drillDownChipBar != null && _drillDownChipBar.Visible;
                 int drillAreaH = showDrill ? DrillDownChipH + ChipGap : 0;
 
@@ -697,7 +734,6 @@ namespace CarwashServices.Roles
                     _drillDownChipBar.Visible = showDrill;
                 }
 
-                // Filter card shifts down when the drill-down chip is visible.
                 int filterY = FilterTop + drillAreaH;
                 _filterCard.SetBounds(PadX, filterY, contentW, FilterH);
 
@@ -709,15 +745,14 @@ namespace CarwashServices.Roles
                     .FirstOrDefault(p => p.Controls.OfType<TextBox>().Any());
 
                 if (refreshBtn != null)
-                    refreshBtn.Location = new Point(contentW - 16 - refreshBtn.Width, 28);
+                    refreshBtn.Location = new Point(contentW - 16 - refreshBtn.Width, 38);
 
                 if (searchBtn != null && refreshBtn != null)
-                    searchBtn.Location = new Point(refreshBtn.Left - 10 - searchBtn.Width, 28);
+                    searchBtn.Location = new Point(refreshBtn.Left - 10 - searchBtn.Width, 38);
 
                 if (searchWrap != null && searchBtn != null)
                     searchWrap.Width = Math.Max(120, searchBtn.Left - 12 - searchWrap.Left);
 
-                // Grid host shifts down by the same amount.
                 int gridTop = filterY + FilterH + 12;
 
                 _pager.SetBounds(PadX, h - PageBottom - PagerH, contentW, PagerH);
@@ -821,7 +856,6 @@ namespace CarwashServices.Roles
 
             var search = _searchBox.Text?.Trim().ToLower() ?? "";
 
-            // Determine the effective status filter — drill-down takes priority.
             var effectiveStatus = !string.IsNullOrWhiteSpace(_drillDownFilter)
                 ? _drillDownFilter
                 : _activeStatus;
@@ -834,21 +868,44 @@ namespace CarwashServices.Roles
                     !string.Equals(r.Status, effectiveStatus, StringComparison.OrdinalIgnoreCase))
                     return false;
 
+                // Service filter (name match against the resolved service).
+                if (!string.IsNullOrEmpty(_serviceFilter))
+                {
+                    var svc = _serviceLookup.FirstOrDefault(s => s.ServiceId == r.ServiceId);
+                    if (svc == null || !string.Equals(svc.ServiceName, _serviceFilter, StringComparison.OrdinalIgnoreCase))
+                        return false;
+                }
+
+                // Vehicle filter (customer's vehicle type).
+                if (!string.IsNullOrEmpty(_vehicleFilter))
+                {
+                    var tenantCust = _tenantCustomers.FirstOrDefault(c => c.TenantCustomerId == r.CustomerId);
+                    if (tenantCust == null || !string.Equals(tenantCust.VehicleType, _vehicleFilter, StringComparison.OrdinalIgnoreCase))
+                        return false;
+                }
+
                 if (string.IsNullOrEmpty(search)) return true;
 
-                var tenantCust = _tenantCustomers.FirstOrDefault(c => c.TenantCustomerId == r.CustomerId);
-                var svc = _serviceLookup.FirstOrDefault(s => s.ServiceId == r.ServiceId);
+                var cust = _tenantCustomers.FirstOrDefault(c => c.TenantCustomerId == r.CustomerId);
+                var sv = _serviceLookup.FirstOrDefault(s => s.ServiceId == r.ServiceId);
                 var staff = r.AssignedStaffId.HasValue
                     ? _users.FirstOrDefault(u => u.UserId == r.AssignedStaffId.Value)
                     : null;
 
-                var blob = $"{tenantCust?.CustomerName} {tenantCust?.PlateNumber} " +
-                           $"{svc?.ServiceName} {staff?.FullName} " +
+                var blob = $"{cust?.CustomerName} {cust?.PlateNumber} " +
+                           $"{sv?.ServiceName} {staff?.FullName} " +
                            $"{r.Status} {r.Priority}".ToLower();
                 return blob.Contains(search);
             }).ToList();
 
             if (resetPage) _page = 1;
+
+            // Jump to the page containing the focused request.
+            if (_focusRequestId.HasValue && _tab == ListTab.Active)
+            {
+                int idx = _filtered.FindIndex(r => r.RequestId == _focusRequestId.Value);
+                if (idx >= 0) _page = idx / Math.Max(1, _pageSize) + 1;
+            }
 
             int totalPages = CurrentTotalPages();
             if (_page > totalPages) _page = totalPages;
@@ -915,7 +972,7 @@ namespace CarwashServices.Roles
                     ? $"{staff.FullName}\nid:{staff.UserId}"
                     : (r.AssignedStaffId.HasValue ? $"id:{r.AssignedStaffId}" : "Unassigned");
 
-                _grid.Rows.Add(
+                int rowIdx = _grid.Rows.Add(
                     $"#{r.RequestId}",
                     custCell,
                     svcCell,
@@ -924,10 +981,34 @@ namespace CarwashServices.Roles
                     string.IsNullOrWhiteSpace(r.Priority) ? "Normal" : r.Priority,
                     r.Status,
                     "");
+
+                _grid.Rows[rowIdx].Tag = r.RequestId;
+
+                if (_focusRequestId.HasValue && r.RequestId == _focusRequestId.Value)
+                {
+                    var row = _grid.Rows[rowIdx];
+                    row.DefaultCellStyle.BackColor = HighlightTint;
+                    row.DefaultCellStyle.SelectionBackColor = HighlightTint;
+                    _highlightTimer.Stop();
+                    _highlightTimer.Start();
+                }
             }
 
             _grid.ClearSelection();
             _grid.ResumeLayout();
+
+            // Scroll the highlighted row into view.
+            if (_focusRequestId.HasValue)
+            {
+                foreach (DataGridViewRow row in _grid.Rows)
+                {
+                    if (row.Tag is int id && id == _focusRequestId.Value)
+                    {
+                        _grid.FirstDisplayedScrollingRowIndex = row.Index;
+                        break;
+                    }
+                }
+            }
         }
 
         private void RenderPager(int totalPages)
@@ -1267,30 +1348,49 @@ namespace CarwashServices.Roles
         {
             if (e.Button != MouseButtons.Left) return;
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
-            if (_grid.Columns[e.ColumnIndex].Name != "Actions") return;
 
-            int hit = HitTestActions(e.RowIndex, e.Location);
-            if (hit < 0) return;
-
-            int buttonIndex = hit & 0b11;
-
-            var idText = _grid.Rows[e.RowIndex].Cells["RequestId"].Value?.ToString() ?? "";
-            if (!int.TryParse(idText.TrimStart('#'), out var id)) return;
-
-            var req = _all.FirstOrDefault(r => r.RequestId == id);
-            if (req == null) return;
-
-            if (_tab == ListTab.Active)
+            // Actions column → edit / archive / restore.
+            if (_grid.Columns[e.ColumnIndex].Name == "Actions")
             {
-                switch (buttonIndex)
+                int hit = HitTestActions(e.RowIndex, e.Location);
+                if (hit < 0) return;
+
+                int buttonIndex = hit & 0b11;
+
+                var idText = _grid.Rows[e.RowIndex].Cells["RequestId"].Value?.ToString() ?? "";
+                if (!int.TryParse(idText.TrimStart('#'), out var id)) return;
+
+                var req = _all.FirstOrDefault(r => r.RequestId == id);
+                if (req == null) return;
+
+                if (_tab == ListTab.Active)
                 {
-                    case 0: OpenEditRequestDialog(id); break;
-                    case 1: ArchiveRequestAsync(req); break;
+                    switch (buttonIndex)
+                    {
+                        case 0: OpenEditRequestDialog(id); break;
+                        case 1: ArchiveRequestAsync(req); break;
+                    }
                 }
+                else
+                {
+                    if (buttonIndex == 1) RestoreRequestAsync(req);
+                }
+                return;
             }
-            else
+
+            // Any other column → drill into the customer.
+            if (_grid.Columns[e.ColumnIndex].Name == "Customer")
             {
-                if (buttonIndex == 1) RestoreRequestAsync(req);
+                var idText = _grid.Rows[e.RowIndex].Cells["RequestId"].Value?.ToString() ?? "";
+                if (!int.TryParse(idText.TrimStart('#'), out var reqId)) return;
+
+                var req = _all.FirstOrDefault(r => r.RequestId == reqId);
+                if (req == null) return;
+
+                (FindForm() as MainForm)?.NavigateToCustomers(
+                    segment: "All",
+                    focusCustomerId: req.CustomerId,
+                    source: "dashboard");
             }
         }
 

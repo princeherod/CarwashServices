@@ -23,6 +23,7 @@ namespace CarwashServices.Dtos
     public class DashboardRequestDto
     {
         public int RequestId { get; set; }
+        public int CustomerId { get; set; }              // NEW — TenantCustomerId
         public string Customer { get; set; } = "";
         public string Plate { get; set; } = "";
         public string Service { get; set; } = "";
@@ -34,6 +35,7 @@ namespace CarwashServices.Dtos
     public class DashboardFollowUpDto
     {
         public int FollowUpId { get; set; }
+        public int CustomerId { get; set; }              // NEW — TenantCustomerId
         public string Customer { get; set; } = "";
         public string Type { get; set; } = "";
         public string ScheduledDate { get; set; } = "";
@@ -52,6 +54,7 @@ namespace CarwashServices.Dtos
     {
         public int LogId { get; set; }
         public int RequestId { get; set; }
+        public int CustomerId { get; set; }              // NEW — TenantCustomerId
         public string Status { get; set; } = "";
         public string UpdatedBy { get; set; } = "";
         public string UpdatedAt { get; set; } = "";

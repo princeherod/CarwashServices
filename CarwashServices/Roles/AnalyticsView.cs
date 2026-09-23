@@ -28,10 +28,8 @@ namespace CarwashServices.Roles
         private List<ServiceRequestDto> _recent = new();
         private List<TenantCustomerDto> _customers = new();
 
-        private List<(string Label, double Value)> _washFrequency = new List<(string Label, double Value)>
-        {
-            ("New", 1), ("Occasional", 2.8), ("Regular", 5), ("Loyal", 12.1)
-        };
+        // NEW — data-driven wash frequency by segment
+        private List<WashFrequencyPointDto> _washFrequency = new();
 
         // ---- UI ----
         private Panel _root;
@@ -214,8 +212,20 @@ namespace CarwashServices.Roles
                 EmptyMax = 4
             };
             _washCard.Controls.Add(_washChart);
-            _washCard.EnableCardClick(() => MainShell?.NavigateToCustomers("All"));
             AddCell(row1, _washCard, 1, false);
+
+            // NEW — drill-down: each bar opens Manage Customers filtered to that tier
+            _washChart.Cursor = Cursors.Hand;
+            _washChart.BarClicked += (s, label) =>
+            {
+                switch (label)
+                {
+                    case "New": MainShell?.NavigateToCustomers("New"); break;
+                    case "Occasional": MainShell?.NavigateToCustomers("Occasional"); break;
+                    case "Regular": MainShell?.NavigateToCustomers("Regular"); break;
+                    case "Loyal": MainShell?.NavigateToCustomers("Loyal"); break;
+                }
+            };
 
             _recentCard = new ChartCard
             {
@@ -428,7 +438,18 @@ namespace CarwashServices.Roles
             }
 
             _retentionChart.Points = _retention.Select(p => (p.Month, Convert.ToDouble(p.Value))).ToList();
-            _washChart.Bars = _washFrequency;
+
+            // NEW — data-driven wash frequency, rounded to 1 decimal by the API.
+            _washChart.Bars = _washFrequency
+                .Select(p => (p.Label, Math.Round(p.Value, 1)))
+                .ToList();
+
+            // Show the tier counts in the subtitle so the empty bars aren't confusing.
+            int tierTotal = _washFrequency.Sum(p => p.CustomerCount);
+            _washCard.Subtitle = tierTotal > 0
+                ? $"Average washes per month by loyalty tier · {tierTotal:N0} active customers"
+                : "Average washes per month by loyalty tier";
+
             _revenueChart.Bars = _revenue.Months.Select(m => (m.Label, Convert.ToDouble(m.Value))).ToList();
             _revenueChart.HighlightIndex = _revenueChart.Bars.Count - 1;
 
@@ -570,7 +591,11 @@ namespace CarwashServices.Roles
                 var recentT = _http.GetFromJsonAsync<List<ServiceRequestDto>>("api/analytics/recent");
                 var customersT = _http.GetFromJsonAsync<List<TenantCustomerDto>>("api/tenant/1/tenant-customers");
 
-                await Task.WhenAll(summaryT, retentionT, segmentsT, revenueT, recentT, customersT);
+                // NEW — wash frequency endpoint
+                var washT = _http.GetFromJsonAsync<List<WashFrequencyPointDto>>(
+                    "api/analytics/wash-frequency?companyId=1&range=ThisYear");
+
+                await Task.WhenAll(summaryT, retentionT, segmentsT, revenueT, recentT, customersT, washT);
 
                 _summary = summaryT.Result ?? new AnalyticsSummaryDto();
                 _retention = retentionT.Result ?? new List<RetentionPointDto>();
@@ -578,6 +603,7 @@ namespace CarwashServices.Roles
                 _revenue = revenueT.Result ?? new RevenueResponseDto();
                 _recent = recentT.Result ?? new List<ServiceRequestDto>();
                 _customers = customersT.Result ?? new List<TenantCustomerDto>();
+                _washFrequency = washT.Result ?? new List<WashFrequencyPointDto>();
                 return true;
             }
             catch (Exception ex)
@@ -876,8 +902,6 @@ namespace CarwashServices.Roles
 
         // -----------------------------------------------------------------
         //  RoundedCard — clickable via EnableCardClick(Action).
-        //  The delegate is a private field so the WinForms designer never
-        //  tries to serialise it.
         // -----------------------------------------------------------------
         private class RoundedCard : Panel
         {
@@ -1293,6 +1317,9 @@ namespace CarwashServices.Roles
             public double EmptyMax = 4;
             public string EmptyText = "No data yet";
 
+            // NEW — fires when a column is clicked; arg = the bar's label.
+            public event EventHandler<string> BarClicked;
+
             private int _hover = -1;
             private Rectangle _plot;
 
@@ -1318,6 +1345,16 @@ namespace CarwashServices.Roles
             {
                 base.OnMouseLeave(e);
                 if (_hover != -1) { _hover = -1; Invalidate(); }
+            }
+
+            // NEW
+            protected override void OnMouseClick(MouseEventArgs e)
+            {
+                base.OnMouseClick(e);
+                if (e.Button != MouseButtons.Left) return;
+                int idx = HitIndex(e.X);
+                if (idx < 0 || idx >= Bars.Count) return;
+                BarClicked?.Invoke(this, Bars[idx].Label);
             }
 
             protected override void OnPaint(PaintEventArgs e)
