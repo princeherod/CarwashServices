@@ -1399,7 +1399,8 @@ namespace CarwashServices.Roles
         // ================================================================
         private async void OpenNewRequestDialog()
         {
-            using var dlg = new ServiceRequestEditDialog(null, _customerLookup, _serviceLookup);
+            var staffList = _users.Where(u => u.RoleId == 4).ToList();
+            using var dlg = new ServiceRequestEditDialog(null, _customerLookup, _serviceLookup, staffList);
             if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
             {
                 await LoadLookupsAsync();
@@ -1409,7 +1410,8 @@ namespace CarwashServices.Roles
 
         private async void OpenEditRequestDialog(int id)
         {
-            using var dlg = new ServiceRequestEditDialog(id, _customerLookup, _serviceLookup);
+            var staffList = _users.Where(u => u.RoleId == 4).ToList();
+            using var dlg = new ServiceRequestEditDialog(id, _customerLookup, _serviceLookup, staffList);
             if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
             {
                 await LoadLookupsAsync();

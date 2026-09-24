@@ -112,18 +112,22 @@ namespace CarwashServices.Shell
         }
 
         // ================================================================
+        //  ROLE GUARD
+        // ================================================================
+        private bool CanAccess(string moduleKey)
+        {
+            var allowed = RoleRouter.ModulesFor(SessionUser.Role);
+            return Array.IndexOf(allowed, moduleKey) >= 0;
+        }
+
+        // ================================================================
         //  DRILL-DOWN NAVIGATION
         // ================================================================
-
-        /// <summary>
-        /// Navigate to Manage Customers, optionally filtered by segment and
-        /// optionally focused on a specific tenant customer id.
-        /// Pass "All" for segment to show everyone.
-        /// </summary>
         public void NavigateToCustomers(string segment = "All",
                                         int? focusCustomerId = null,
                                         string source = null)
         {
+            if (!CanAccess("Manage Customers")) return;
             NavigateTo("Manage Customers");
 
             foreach (Control c in _contentPanel.Controls)
@@ -136,16 +140,13 @@ namespace CarwashServices.Shell
             }
         }
 
-        /// <summary>
-        /// Navigate to Manage Service Requests, optionally filtered by status,
-        /// service, and vehicle type, and optionally focused on a request id.
-        /// </summary>
         public void NavigateToServiceRequests(string status = "All",
                                               string service = null,
                                               string vehicle = null,
                                               int? focusRequestId = null,
                                               string source = null)
         {
+            if (!CanAccess("Manage Service Requests")) return;
             NavigateTo("Manage Service Requests");
 
             foreach (Control c in _contentPanel.Controls)
@@ -158,14 +159,11 @@ namespace CarwashServices.Shell
             }
         }
 
-        /// <summary>
-        /// Navigate to Follow-Ups / Reminders, optionally filtered by status
-        /// and optionally focused on a follow-up id.
-        /// </summary>
         public void NavigateToFollowUps(string status = "All",
                                         int? focusFollowUpId = null,
                                         string source = null)
         {
+            if (!CanAccess("Follow-Ups / Reminders")) return;
             NavigateTo("Follow-Ups / Reminders");
 
             foreach (Control c in _contentPanel.Controls)
@@ -180,6 +178,7 @@ namespace CarwashServices.Shell
 
         public void NavigateToFollowUpsWithCustomers(List<int> customerIds)
         {
+            if (!CanAccess("Follow-Ups / Reminders")) return;
             NavigateTo("Follow-Ups / Reminders");
 
             foreach (Control c in _contentPanel.Controls)
@@ -192,8 +191,33 @@ namespace CarwashServices.Shell
             }
         }
 
+        // ================================================================
+        //  NAVIGATION
+        // ================================================================
         private void NavigateTo(string key)
         {
+            if (!CanAccess(key))
+            {
+                MessageBox.Show(
+                    $"Access denied.\n\nYour role ({SessionUser.Role}) is not authorized to open '{key}'.",
+                    "Access Denied",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                _sidebar.SetActiveModule(_sidebar.ActiveModuleKey);
+                return;
+            }
+
+            if (ComingSoonModules.Contains(key))
+            {
+                MessageBox.Show(
+                    $"Coming Soon\n\n'{key}' is currently under development.",
+                    "Coming Soon",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                _sidebar.SetActiveModule(_sidebar.ActiveModuleKey);
+                return;
+            }
+
             _contentPanel.SuspendLayout();
             try
             {
@@ -239,6 +263,16 @@ namespace CarwashServices.Shell
                     case "Manage Service Requests":
                         view = new ServiceRequestsView();
                         headerText = "MANAGE SERVICE REQUESTS";
+                        break;
+
+                    case "Assign Service Staff":
+                        view = new AssignServiceStaffView();
+                        headerText = "ASSIGN SERVICE STAFF";
+                        break;
+
+                    case "Monitor Service Status":
+                        view = new MonitorServiceStatusView();
+                        headerText = "MONITOR SERVICE STATUS";
                         break;
 
                     case "Follow-Ups / Reminders":

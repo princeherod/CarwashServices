@@ -30,10 +30,11 @@ namespace CarwashServices.Dialogs
         private const int X2b = PadX + W2 + Gap;
 
         // Only these two roles may be assigned from the Manage Users screen.
+        // Aligned with Auth/UserRole.cs: 3 = Manager, 4 = Service Staff.
         private static readonly (int Id, string Name)[] AllowedRoles =
         {
-            (4, "Manager"),
-            (3, "Service Staff"),
+            (3, "Manager"),
+            (4, "Service Staff"),
         };
 
         // ---- State ----
@@ -377,7 +378,6 @@ namespace CarwashServices.Dialogs
             var pwd = _passwordTxt.Text;
             var confirm = _confirmTxt.Text;
 
-            // On create, password is required. On edit, it may be left blank.
             if (!_isEdit && string.IsNullOrWhiteSpace(pwd))
             { error = "Password is required."; _passwordTxt.Focus(); return false; }
 
@@ -412,8 +412,6 @@ namespace CarwashServices.Dialogs
 
                 if (_isEdit)
                 {
-                    // If the password field is blank, omit it from the JSON entirely
-                    // so the server keeps the existing hash.
                     object body = string.IsNullOrEmpty(password)
                         ? new
                         {

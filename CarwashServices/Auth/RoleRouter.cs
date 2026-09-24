@@ -4,7 +4,8 @@ namespace CarwashServices.Auth
 {
     /// <summary>
     /// Central place that decides which sidebar modules a role can see.
-    /// Add module keys here as you build out each role's screens.
+    /// Role ids MUST match Auth/UserRole.cs:
+    ///   1 = SuperAdmin, 2 = Admin, 3 = Manager, 4 = ServiceStaff
     /// </summary>
     public static class RoleRouter
     {
@@ -22,6 +23,7 @@ namespace CarwashServices.Auth
                 "Follow-Ups / Reminders",
                 "Manage Admin Accounts"
             },
+
             UserRole.Admin => new[]
             {
                 "View Dashboard",
@@ -33,21 +35,25 @@ namespace CarwashServices.Auth
                 "Manage Service Requests",
                 "Follow-Ups / Reminders"
             },
+
             UserRole.Manager => new[]
             {
                 "View Dashboard",
                 "Analytics",
                 "View Reports",
-                "Manage Customers",
-                "Manage Services",
                 "Manage Service Requests",
-                "Follow-Ups / Reminders"
+                "Assign Service Staff",
+                "Follow-Ups / Reminders",
+                "Monitor Service Status"
             },
+
             UserRole.ServiceStaff => new[]
             {
                 "View Dashboard",
-                "Manage Service Requests"
+                "View Assigned Requests",
+                "Update Service Status"
             },
+
             _ => Array.Empty<string>()
         };
     }

@@ -43,7 +43,6 @@ namespace CarwashServices.Shell
             _moduleButtons.Clear();
             Build();
 
-            // FIX: turn on double-buffering for every child control recursively.
             EnableDoubleBuffering(this);
         }
 
@@ -194,7 +193,13 @@ namespace CarwashServices.Shell
 
             y += 22;
 
-            y = AddGroupLabel("MODULES", y);
+            string modulesLabel = SessionUser.Role switch
+            {
+                UserRole.Manager => "MANAGER MODULES",
+                UserRole.ServiceStaff => "SERVICE STAFF MODULES",
+                _ => "MODULES"
+            };
+            y = AddGroupLabel(modulesLabel, y);
             foreach (var key in modules)
                 if (Array.IndexOf(overviewKeys, key) < 0)
                     y = AddItem(key, IconKeyFor(key), y, key);
@@ -316,6 +321,10 @@ namespace CarwashServices.Shell
             "Manage Service Requests" => "requests",
             "Follow-Ups / Reminders" => "reminders",
             "Manage Admin Accounts" => "admin",
+            "Assign Service Staff" => "users",
+            "Monitor Service Status" => "analytics",
+            "View Assigned Requests" => "requests",
+            "Update Service Status" => "requests",
             _ => "dashboard"
         };
 
@@ -342,7 +351,9 @@ namespace CarwashServices.Shell
         // ================================================================
         private int AddItem(string label, string iconKey, int y, string? key = null)
         {
-            var btn = new SidebarButton(iconKey, label)
+            bool isComingSoon = key != null && ComingSoonModules.Contains(key);
+
+            var btn = new SidebarButton(iconKey, label, isComingSoon)
             {
                 Width = 240,
                 Height = 42,
@@ -363,6 +374,27 @@ namespace CarwashServices.Shell
             }
 
             Controls.Add(btn);
+
+            if (isComingSoon)
+            {
+                // Small "COMING SOON" pill on the right edge of the row.
+                var tag = new Label
+                {
+                    Text = "COMING SOON",
+                    ForeColor = Color.FromArgb(0xB4, 0xBE, 0xD2),
+                    BackColor = Color.FromArgb(0x16, 0x22, 0x38),
+                    Font = new Font("Segoe UI Semibold", 7f),
+                    AutoSize = false,
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Size = new Size(84, 18),
+                    Location = new Point(20 + 240 - 92, y + 12)
+                };
+                using (var path = RoundedRect(new Rectangle(0, 0, tag.Width, tag.Height), 9))
+                    tag.Region = new Region(path);
+                Controls.Add(tag);
+                tag.BringToFront();
+            }
+
             return y + 46;
         }
 
@@ -388,17 +420,21 @@ namespace CarwashServices.Shell
             private static readonly Color BgHover = Color.FromArgb(0x12, 0x22, 0x40);
             private static readonly Color Accent = Color.FromArgb(0x42, 0xA5, 0xF5);
             private static readonly Color IconIdle = Color.FromArgb(0x9A, 0xA8, 0xC0);
+            private static readonly Color IconMuted = Color.FromArgb(0x5A, 0x66, 0x80);
             private static readonly Color TextMain = Color.White;
+            private static readonly Color TextMuted = Color.FromArgb(0x9A, 0xA8, 0xC0);
 
             private readonly string _iconKey;
             private readonly string _label;
+            private readonly bool _comingSoon;
             private bool _active;
             private bool _hover;
 
-            public SidebarButton(string iconKey, string label)
+            public SidebarButton(string iconKey, string label, bool comingSoon = false)
             {
                 _iconKey = iconKey ?? "dashboard";
                 _label = label ?? "";
+                _comingSoon = comingSoon;
 
                 SetStyle(
                     ControlStyles.UserPaint |
@@ -450,13 +486,19 @@ namespace CarwashServices.Shell
                     g.FillRectangle(accent, 0, 0, 4, Height);
                 }
 
-                Color iconColor = _active ? Accent : IconIdle;
+                Color iconColor = _comingSoon
+                    ? IconMuted
+                    : (_active ? Accent : IconIdle);
                 var iconRect = new RectangleF(20, (Height - 20) / 2f, 20, 20);
                 DrawIcon(g, _iconKey, iconRect, iconColor);
 
-                var textRect = new Rectangle(52, 0, Width - 56, Height);
+                // Leave room for the COMING SOON tag when present.
+                int textWidth = _comingSoon ? Width - 56 - 92 : Width - 56;
+                var textRect = new Rectangle(52, 0, Math.Max(40, textWidth), Height);
+
+                Color textColor = _comingSoon ? TextMuted : TextMain;
                 TextRenderer.DrawText(
-                    g, _label, Font, textRect, TextMain,
+                    g, _label, Font, textRect, textColor,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
                     TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis |
                     TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);

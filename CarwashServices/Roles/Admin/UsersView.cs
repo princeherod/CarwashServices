@@ -55,10 +55,11 @@ namespace CarwashServices.Roles.Admin
         private const int GridTop = 280;
         private const int PageBottom = 24;
 
+        // Aligned with Auth/UserRole.cs: 3 = Manager, 4 = Service Staff.
         private static readonly Dictionary<int, string> RoleNames = new()
         {
-            { 3, "Service Staff" },
-            { 4, "Manager" }
+            { 3, "Manager" },
+            { 4, "Service Staff" }
         };
 
         public UsersView()
@@ -149,12 +150,13 @@ namespace CarwashServices.Roles.Admin
                 AutoSize = true
             });
 
+            // Aligned with Auth/UserRole.cs.
             string[] chips =
             {
-                "id:1  Admin",
-                "id:2  Manager",
-                "id:3  Service Staff",
-                "id:4  Super Admin"
+                "id:1  Super Admin",
+                "id:2  Admin",
+                "id:3  Manager",
+                "id:4  Service Staff"
             };
             int cx = 20;
             foreach (var text in chips)
@@ -349,8 +351,6 @@ namespace CarwashServices.Roles.Admin
 
             var b = e.CellBounds;
 
-            // Guard against degenerate cell rects — happens on the first paint
-            // pass, right after rows are added, before the row template is applied.
             if (b.Width <= 4 || b.Height <= 4)
             {
                 e.Handled = true;
@@ -361,12 +361,10 @@ namespace CarwashServices.Roles.Admin
             int ax = b.X + 16;
             int ay = b.Y + (b.Height - avatarSize) / 2;
 
-            // ---- Avatar circle ----
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var bg = new SolidBrush(Navy))
                 e.Graphics.FillEllipse(bg, ax, ay, avatarSize, avatarSize);
 
-            // ---- Initials (TextRenderer — same as the name/email lines below) ----
             string initials = Initials(name);
             var avatarRect = new Rectangle(ax, ay, avatarSize, avatarSize);
 
@@ -382,7 +380,6 @@ namespace CarwashServices.Roles.Admin
                 TextFormatFlags.NoPadding |
                 TextFormatFlags.SingleLine);
 
-            // ---- Name + email ----
             int tx = ax + avatarSize + 14;
             int tw = Math.Max(10, b.Right - tx - 12);
 

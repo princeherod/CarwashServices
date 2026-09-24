@@ -128,9 +128,31 @@ public class ServiceRequestsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { requestId = req.RequestId }, req);
     }
 
-    // PUT: api/service-requests/5
+    // ================================================================
+    //  UPDATE — accepts the full editable surface of a request,
+    //  including assignment (AssignedStaffId or ClearAssignment).
+    // ================================================================
+    public class UpdateRequest
+    {
+        public int CustomerId { get; set; }
+        public int ServiceId { get; set; }
+        public string? Status { get; set; }
+        public string? Priority { get; set; }
+        public DateTime RequestedDate { get; set; }
+        public DateTime? ScheduledDate { get; set; }
+        public DateTime? CompletedDate { get; set; }
+        public string? Notes { get; set; }
+
+        // Assignment fields.
+        //  - AssignedStaffId != null  → assign to that Service Staff user.
+        //  - ClearAssignment == true  → unassign.
+        //  - Both null/false          → leave existing value untouched.
+        public int? AssignedStaffId { get; set; }
+        public bool ClearAssignment { get; set; }
+    }
+
     [HttpPut("{requestId:int}")]
-    public async Task<IActionResult> Update(int requestId, [FromBody] ServiceRequest req)
+    public async Task<IActionResult> Update(int requestId, [FromBody] UpdateRequest req)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
@@ -155,10 +177,29 @@ public class ServiceRequestsController : ControllerBase
             && req.CompletedDate.Value < req.ScheduledDate.Value)
             return BadRequest(new { message = "Completed date cannot be earlier than the scheduled date." });
 
-        // Only Completed requests may carry a CompletedDate.
         if (req.CompletedDate.HasValue
             && !string.Equals(req.Status, "Completed", StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { message = "A completed date can only be set when the status is Completed." });
+
+        // ---- Assignment validation ----
+        if (req.ClearAssignment)
+        {
+            existing.AssignedStaffId = null;
+        }
+        else if (req.AssignedStaffId.HasValue)
+        {
+            var staffUser = await _db.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.UserId == req.AssignedStaffId.Value);
+
+            if (staffUser == null)
+                return BadRequest(new { message = $"User {req.AssignedStaffId} not found." });
+
+            if (staffUser.RoleId != 4)
+                return BadRequest(new { message = "Assigned staff must be an existing Service Staff user." });
+
+            existing.AssignedStaffId = req.AssignedStaffId.Value;
+        }
 
         // Editable fields
         existing.CustomerId = req.CustomerId;
@@ -178,14 +219,65 @@ public class ServiceRequestsController : ControllerBase
 
             existing.Status = req.Status;
 
-            // If status becomes Completed and no date was sent, stamp it now.
             if (req.Status == "Completed" && existing.CompletedDate is null)
                 existing.CompletedDate = DateTime.Now;
 
-            // If status is anything else, drop the completed date.
             if (req.Status != "Completed")
                 existing.CompletedDate = null;
         }
+
+        await _db.SaveChangesAsync();
+        return Ok(existing);
+    }
+
+    // ================================================================
+    //  ASSIGN ENDPOINT — used by the Manager's Assign Service Staff view.
+    //
+    //  Single-purpose: sets or clears AssignedStaffId without touching
+    //  any other field on the request. The staff member must exist and
+    //  have RoleId = 4 (Service Staff).
+    // ================================================================
+    public class AssignRequest
+    {
+        // null = unassign. Anything else must reference an existing
+        // Service Staff user (RoleId = 4).
+        public int? AssignedStaffId { get; set; }
+    }
+
+    [HttpPut("{requestId:int}/assign")]
+    public async Task<IActionResult> Assign(int requestId, [FromBody] AssignRequest req)
+    {
+        var existing = await _db.ServiceRequests
+            .FirstOrDefaultAsync(r => r.RequestId == requestId);
+
+        if (existing is null)
+            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+
+        if (existing.IsArchived)
+            return Conflict(new { message = "Cannot assign staff to an archived request." });
+
+        if (!req.AssignedStaffId.HasValue)
+        {
+            existing.AssignedStaffId = null;
+            await _db.SaveChangesAsync();
+            return Ok(existing);
+        }
+
+        var staffUser = await _db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.UserId == req.AssignedStaffId.Value);
+
+        if (staffUser == null)
+            return BadRequest(new { message = $"User {req.AssignedStaffId} not found." });
+
+        if (staffUser.RoleId != 4)
+            return BadRequest(new { message = "Assigned staff must be an existing Service Staff user." });
+
+        existing.AssignedStaffId = req.AssignedStaffId.Value;
+
+        // Any request that gains a staff member is considered assigned.
+        if (string.Equals(existing.Status, "Pending", StringComparison.OrdinalIgnoreCase))
+            existing.Status = "Assigned";
 
         await _db.SaveChangesAsync();
         return Ok(existing);
