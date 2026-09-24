@@ -1,8 +1,9 @@
-using Microsoft.EntityFrameworkCore;
-using CRM.Infrastructure.Data;
-using CRM.Infrastructure.Services;
+using CRM.api.Services;
 using CRM.domain.Entities;
 using CRM.Domain.Entities;
+using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Services;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,6 +22,8 @@ builder.Services.AddDbContext<MasterErpDbContext>(options =>
 // -----------------------------------------------------------------
 builder.Services.AddScoped<ITenantDatabaseResolver, TenantDatabaseResolver>();
 builder.Services.AddScoped<ITenantDbContextFactory, TenantDbContextFactory>();
+builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
+builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 
 // -----------------------------------------------------------------
 // MVC / OpenAPI

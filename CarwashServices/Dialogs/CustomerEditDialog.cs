@@ -88,7 +88,7 @@ namespace CarwashServices.Dialogs
             new(@"^09\d{9}$", RegexOptions.Compiled);
 
         private static readonly Regex EmailRegex =
-            new(@"^[A-Za-z0-9._%+\-]+@gmail\.com$", RegexOptions.Compiled);
+            new(@"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$", RegexOptions.Compiled);
 
         private static readonly Regex PlateRegex =
             new(@"^[A-Za-z0-9\- ]{2,15}$", RegexOptions.Compiled);
@@ -582,10 +582,9 @@ namespace CarwashServices.Dialogs
                 return;
             }
 
-            if (!email.EndsWith("@gmail.com", StringComparison.OrdinalIgnoreCase)
-                || !EmailRegex.IsMatch(email))
+            if (!EmailRegex.IsMatch(email))
             {
-                MarkFieldError(_emailTxt, "Please enter a valid Gmail address ending with @gmail.com.");
+                MarkFieldError(_emailTxt, "Please enter a valid email address.");
             }
             else
             {
@@ -745,10 +744,8 @@ namespace CarwashServices.Dialogs
                 MarkFieldError(_emailTxt, "Email is required.");
             else if (email.Length > 200)
                 MarkFieldError(_emailTxt, "Must be 200 characters or fewer.");
-            else if (!email.EndsWith("@gmail.com", StringComparison.OrdinalIgnoreCase))
-                MarkFieldError(_emailTxt, "Please enter a valid Gmail address ending with @gmail.com.");
             else if (!EmailRegex.IsMatch(email))
-                MarkFieldError(_emailTxt, "Please enter a valid Gmail address ending with @gmail.com.");
+                MarkFieldError(_emailTxt, "Please enter a valid email address.");
 
             // ---- Street ----
             var street = _streetTxt.Text.Trim();

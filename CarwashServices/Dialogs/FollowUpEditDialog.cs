@@ -18,20 +18,22 @@ namespace CarwashServices.Dialogs
     ///
     /// On CREATE:
     ///   - Customer search + checkbox list with a dynamic "Select all filtered / Unselect all" toggle.
-    ///   - Send Via: SMS / Email.
+    ///   - Send Via: Email only (SMS was removed per the updated requirements).
     ///   - When: Send now / Schedule.
-    ///   - Send On picker is disabled when "Send now" is selected,
-    ///     enabled when "Schedule" is selected.
+    ///   - Send On picker is disabled when "Send now" is selected.
+    ///   - Reason is required.
+    ///   - Discount Offer, Valid Until, Type, Message Preview.
     ///
     /// On EDIT:
     ///   - Same fields preloaded from an existing FollowUpDto.
     ///   - Status is shown read-only.
+    ///   - Reason is editable.
     /// </summary>
     public class FollowUpEditDialog : Form
     {
         // ---- Input ----
         private readonly List<TenantCustomerDto> _customers;
-        private readonly FollowUpDto? _existing;
+        private readonly FollowUpDto? _existing;      // null = create
         private readonly List<int>? _preselectedIds;
         private readonly Dictionary<int, TenantCustomerDto> _custById;
 
@@ -42,11 +44,13 @@ namespace CarwashServices.Dialogs
         private CheckedListBox _customerList = null!;
         private Label _badge = null!;
 
-        private Button _smsBtn = null!, _emailBtn = null!;
+        private Button _emailBtn = null!;
         private Button _sendNowBtn = null!, _scheduleBtn = null!;
         private DateTimePicker _scheduledPicker = null!;
         private Label _sendOnLbl = null!;
         private Label _scheduledErrorLbl = null!;
+        private TextBox _reasonTxt = null!;
+        private Label _reasonErrorLbl = null!;
         private ComboBox _discountCombo = null!;
         private DateTimePicker _validUntilPicker = null!;
         private ComboBox _typeCombo = null!;
@@ -55,7 +59,7 @@ namespace CarwashServices.Dialogs
 
         // ---- State ----
         private bool _sendNow = true;
-        private string _contactMethod = "SMS";
+        private string _contactMethod = "Email";
         private bool _previewUserEdited = false;
         private List<TenantCustomerDto> _filtered = new();
         private bool _filterRefreshInProgress = false;
@@ -151,7 +155,7 @@ namespace CarwashServices.Dialogs
                 : "Follow up with at-risk customers";
 
             var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1366, 768);
-            ClientSize = new Size(720, Math.Min(820, wa.Height - 80));
+            ClientSize = new Size(720, Math.Min(880, wa.Height - 60));
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9.5f);
@@ -257,7 +261,6 @@ namespace CarwashServices.Dialogs
             // ---- Customers ----
             root.Controls.Add(Caption("CUSTOMERS *", 0, y));
 
-            // Dynamic "Select all filtered / Unselect all" link.
             _selectAllFilteredLbl = new LinkLabel
             {
                 Text = "Select all filtered",
@@ -322,7 +325,6 @@ namespace CarwashServices.Dialogs
             root.Controls.Add(searchWrap);
             y += 42;
 
-            // Showing X of Y
             _showingLbl = new Label
             {
                 Text = "Showing 0 of 0 customers",
@@ -334,11 +336,10 @@ namespace CarwashServices.Dialogs
             root.Controls.Add(_showingLbl);
             y += 22;
 
-            // Checked list
             _customerList = new CheckedListBox
             {
                 Location = new Point(0, y),
-                Size = new Size(ContentW, 170),
+                Size = new Size(ContentW, 150),
                 Font = new Font("Segoe UI", 9.5f),
                 BorderStyle = BorderStyle.FixedSingle,
                 CheckOnClick = true,
@@ -360,26 +361,13 @@ namespace CarwashServices.Dialogs
             root.Controls.Add(_customerList);
             y += _customerList.Height + 12;
 
-            root.Controls.Add(new Label
-            {
-                Text = "Search narrows the list instantly — no more scrolling through a thousand rows.",
-                ForeColor = Faint,
-                Font = new Font("Segoe UI", 8.5f),
-                Location = new Point(0, y),
-                AutoSize = true
-            });
-            y += 30;
-
             // ---- Send Via / When ----
             root.Controls.Add(Caption("SEND VIA", 0, y));
             root.Controls.Add(Caption("WHEN", RightColX, y));
             y += 22;
 
-            _smsBtn = MakeSegmented("SMS", 0, y);
-            _smsBtn.Click += (s, e) => SetMethod("SMS");
-            root.Controls.Add(_smsBtn);
-
-            _emailBtn = MakeSegmented("Email", 160, y);
+            // Email only — SMS was removed.
+            _emailBtn = MakeSegmented("Email", 0, y);
             _emailBtn.Click += (s, e) => SetMethod("Email");
             root.Controls.Add(_emailBtn);
 
@@ -423,6 +411,40 @@ namespace CarwashServices.Dialogs
             root.Controls.Add(_scheduledErrorLbl);
 
             y += 52;
+
+            // ---- Reason (required) ----
+            root.Controls.Add(Caption("REASON *", 0, y));
+            y += 22;
+
+            _reasonTxt = new TextBox
+            {
+                Location = new Point(0, y),
+                Width = ContentW,
+                Height = 60,
+                Multiline = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f),
+                BackColor = Color.White,
+                ForeColor = Navy,
+                PlaceholderText = "Why is this follow-up being created? e.g. Customer has not visited recently.",
+                ScrollBars = ScrollBars.Vertical
+            };
+            _reasonTxt.TextChanged += (s, e) => ClearReasonError();
+            root.Controls.Add(_reasonTxt);
+
+            _reasonErrorLbl = new Label
+            {
+                Text = "",
+                ForeColor = Danger,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 8.5f),
+                Location = new Point(0, y + 64),
+                AutoSize = true,
+                Visible = false
+            };
+            root.Controls.Add(_reasonErrorLbl);
+
+            y += 92;
 
             // ---- Discount Offer / Valid Until ----
             root.Controls.Add(Caption("DISCOUNT OFFER", 0, y));
@@ -568,7 +590,7 @@ namespace CarwashServices.Dialogs
             footer.Controls.Add(sendBtn);
 
             // ---- Initial visual state ----
-            SetMethod("SMS");
+            SetMethod("Email");
             SetWhen(true);
             ApplyCustomerFilter();
         }
@@ -597,9 +619,8 @@ namespace CarwashServices.Dialogs
         // ============================================================
         private void SetMethod(string m)
         {
-            _contactMethod = m;
-            Highlight(_smsBtn, m == "SMS");
-            Highlight(_emailBtn, m == "Email");
+            _contactMethod = "Email";  // only Email is supported now
+            Highlight(_emailBtn, true);
             UpdatePreview();
         }
 
@@ -649,7 +670,7 @@ namespace CarwashServices.Dialogs
         }
 
         // ============================================================
-        //  SEND-ON ERROR HELPERS
+        //  ERROR HELPERS
         // ============================================================
         private void ClearScheduledError()
         {
@@ -666,6 +687,23 @@ namespace CarwashServices.Dialogs
             _scheduledErrorLbl.Visible = true;
             _scheduledErrorLbl.BringToFront();
             _scheduledPicker.CalendarMonthBackground = FieldErrorBg;
+        }
+
+        private void ClearReasonError()
+        {
+            if (_reasonErrorLbl == null) return;
+            _reasonErrorLbl.Text = "";
+            _reasonErrorLbl.Visible = false;
+            _reasonTxt.BackColor = Color.White;
+        }
+
+        private void MarkReasonError(string message)
+        {
+            if (_reasonErrorLbl == null) return;
+            _reasonErrorLbl.Text = message;
+            _reasonErrorLbl.Visible = true;
+            _reasonErrorLbl.BringToFront();
+            _reasonTxt.BackColor = FieldErrorBg;
         }
 
         // ============================================================
@@ -685,7 +723,6 @@ namespace CarwashServices.Dialogs
                         (c.ContactNumber?.ToLowerInvariant().Contains(term) ?? false))
                     .ToList();
 
-                // Snapshot checked IDs so we can restore them after rebuilding the list.
                 var checkedIds = new HashSet<int>();
                 for (int i = 0; i < _customerList.Items.Count; i++)
                 {
@@ -706,7 +743,6 @@ namespace CarwashServices.Dialogs
                 }
                 _customerList.EndUpdate();
 
-                // Restore checked state — selections outside the filter survive here.
                 for (int i = 0; i < _customerList.Items.Count; i++)
                 {
                     if (_customerList.Items[i] is CustomerItem ci && checkedIds.Contains(ci.CustomerId))
@@ -722,25 +758,18 @@ namespace CarwashServices.Dialogs
             }
         }
 
-        // ------------------------------------------------------------
-        //  Toggle: Select all filtered / Unselect all
-        // ------------------------------------------------------------
         private void ToggleSelectAllFiltered()
         {
             if (_filtered.Count == 0) return;
-            if (_existing != null) return;             // customers can't be edited on edit
+            if (_existing != null) return;
 
-            // Decide direction based on whether every filtered item is checked.
             bool allChecked = AreAllFilteredChecked();
 
             _customerList.BeginUpdate();
             try
             {
                 for (int i = 0; i < _customerList.Items.Count; i++)
-                {
-                    // The list only contains the filtered set, so every index here is in scope.
                     _customerList.SetItemChecked(i, !allChecked);
-                }
             }
             finally
             {
@@ -773,7 +802,6 @@ namespace CarwashServices.Dialogs
                 return;
             }
 
-            // Empty filter → hide and disable the link entirely.
             if (_filtered == null || _filtered.Count == 0)
             {
                 _selectAllFilteredLbl.Visible = false;
@@ -785,12 +813,6 @@ namespace CarwashServices.Dialogs
             _selectAllFilteredLbl.Text = AreAllFilteredChecked()
                 ? "Unselect all"
                 : "Select all filtered";
-        }
-
-        private void SelectAllFiltered()
-        {
-            // Kept for API compatibility; delegates to the toggle.
-            ToggleSelectAllFiltered();
         }
 
         private void PreselectCustomers()
@@ -860,7 +882,8 @@ namespace CarwashServices.Dialogs
         {
             if (_existing == null) return;
 
-            SetMethod(_existing.ContactMethod == "Email" ? "Email" : "SMS");
+            // Contact method — force Email since SMS is no longer supported.
+            SetMethod("Email");
 
             bool isScheduled = _existing.ScheduledDate > DateTime.Now
                 && string.Equals(_existing.Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
@@ -868,6 +891,12 @@ namespace CarwashServices.Dialogs
             _scheduledPicker.Value = _existing.ScheduledDate;
             SetWhen(!isScheduled);
 
+            // Reason
+            if (!string.IsNullOrWhiteSpace(_existing.Reason))
+                _reasonTxt.Text = _existing.Reason!;
+            ClearReasonError();
+
+            // Discount offer
             if (!string.IsNullOrWhiteSpace(_existing.DiscountOffer) &&
                 _discountCombo.Items.Contains(_existing.DiscountOffer))
             {
@@ -920,12 +949,24 @@ namespace CarwashServices.Dialogs
         {
             var checkedIndices = _customerList.CheckedIndices.Cast<int>().ToList();
 
+            // ---- Validation ----
             if (_existing == null && checkedIndices.Count == 0)
             {
                 MessageBox.Show("Please select at least one customer.",
                     "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+
+            var reason = _reasonTxt.Text.Trim();
+            if (reason.Length == 0)
+            {
+                MarkReasonError("Reason is required.");
+                MessageBox.Show("Please enter a reason for this follow-up.",
+                    "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _reasonTxt.Focus();
+                return;
+            }
+            ClearReasonError();
 
             if (string.IsNullOrWhiteSpace(_previewBox.Text))
             {
@@ -965,8 +1006,8 @@ namespace CarwashServices.Dialogs
                 {
                     customerId = _existing.CustomerId,
                     type = _typeCombo.SelectedItem?.ToString() ?? "Service Reminder",
-                    contactMethod = _contactMethod,
-                    reason = _existing.Reason,
+                    contactMethod = "Email",
+                    reason = reason,
                     discountOffer = offer,
                     notes = _previewBox.Text,
                     scheduledDate,
@@ -1010,8 +1051,8 @@ namespace CarwashServices.Dialogs
             {
                 customerIds,
                 type = _typeCombo.SelectedItem?.ToString() ?? "Service Reminder",
-                contactMethod = _contactMethod,
-                reason = "Repeat customer reward",
+                contactMethod = "Email",
+                reason = reason,
                 discountOffer = offer,
                 notes = _previewBox.Text,
                 scheduledDate,
@@ -1025,29 +1066,58 @@ namespace CarwashServices.Dialogs
 
                 if (resp.IsSuccessStatusCode)
                 {
-                    int created = 0, skipped = 0;
+                    BulkFollowUpResponse? parsed = null;
                     try
                     {
-                        var parsed = await resp.Content.ReadFromJsonAsync<BulkFollowUpResponse>();
-                        if (parsed != null)
-                        {
-                            created = parsed.Count;
-                            skipped = parsed.Skipped;
-                        }
+                        parsed = await resp.Content.ReadFromJsonAsync<BulkFollowUpResponse>();
                     }
                     catch { }
 
-                    string msg = skipped > 0
-                        ? $"{created} created, {skipped} skipped " +
-                          $"(those customers already had an open follow-up)."
-                        : draft
+                    int created = parsed?.Count ?? 0;
+                    int sent = parsed?.Sent ?? 0;
+                    int skipped = parsed?.Skipped ?? 0;
+                    var failures = parsed?.Failures ?? new List<BulkFollowUpFailure>();
+
+                    // ---- Build a multi-line result message ----
+                    var lines = new List<string>
+                    {
+                        draft
                             ? "Saved as draft."
                             : _sendNow
                                 ? "Follow-ups sent."
-                                : "Follow-ups scheduled.";
+                                : "Follow-ups scheduled."
+                    };
 
-                    MessageBox.Show(msg, "Success",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    lines.Add("");
+                    lines.Add($"Created: {created}");
+
+                    if (sent > 0)
+                        lines.Add($"Emailed: {sent}");
+
+                    if (skipped > 0)
+                        lines.Add($"Skipped (already contacted): {skipped}");
+
+                    if (failures.Count > 0)
+                    {
+                        lines.Add("");
+                        lines.Add($"Failed to email: {failures.Count}");
+                        foreach (var f in failures.Take(10))
+                        {
+                            string who = _custById.TryGetValue(f.CustomerId, out var c)
+                                ? c.CustomerName ?? $"Customer {f.CustomerId}"
+                                : $"Customer {f.CustomerId}";
+
+                            lines.Add($"  • {who}: {f.Error}");
+                        }
+                        if (failures.Count > 10)
+                            lines.Add($"  … and {failures.Count - 10} more.");
+                    }
+
+                    MessageBox.Show(
+                        string.Join(Environment.NewLine, lines),
+                        failures.Count > 0 ? "Result — Partial Failures" : "Success",
+                        MessageBoxButtons.OK,
+                        failures.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
 
                     DialogResult = DialogResult.OK;
                     Close();
@@ -1088,11 +1158,22 @@ namespace CarwashServices.Dialogs
         }
     }
 
+    // ================================================================
+    //  DTOs shared with the API's bulk-create response
+    // ================================================================
     public class BulkFollowUpResponse
     {
         public int Count { get; set; }
+        public int Sent { get; set; }
         public int Skipped { get; set; }
         public List<int> SkippedIds { get; set; } = new();
+        public List<BulkFollowUpFailure> Failures { get; set; } = new();
         public string? Message { get; set; }
+    }
+
+    public class BulkFollowUpFailure
+    {
+        public int CustomerId { get; set; }
+        public string? Error { get; set; }
     }
 }

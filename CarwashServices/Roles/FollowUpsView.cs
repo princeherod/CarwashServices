@@ -102,6 +102,7 @@ namespace CarwashServices.Roles
 
         private const int MinCustomer = 180;
         private const int MinScheduled = 120;
+        private const int MinReason = 180;
         private const int MinDiscount = 130;
         private const int MinSendVia = 80;
         private const int MinStatus = 110;
@@ -110,6 +111,7 @@ namespace CarwashServices.Roles
 
         private const float WCustomer = 24f;
         private const float WScheduled = 16f;
+        private const float WReason = 20f;
         private const float WDiscount = 18f;
         private const float WSendVia = 9f;
         private const float WStatus = 11f;
@@ -131,6 +133,7 @@ namespace CarwashServices.Roles
         private const float LogWStatus = 12f;
         private const float LogWNotes = 22f;
 
+        private const int SendBtnW = 72;
         private const int EditBtnW = 72;
         private const int ArcBtnW = 78;
         private const int ResBtnW = 82;
@@ -155,7 +158,6 @@ namespace CarwashServices.Roles
                 Timeout = TimeSpan.FromSeconds(10)
             };
 
-            // Step B — highlight timer
             _highlightTimer.Tick += (s, e) =>
             {
                 _highlightTimer.Stop();
@@ -637,6 +639,15 @@ namespace CarwashServices.Roles
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
+                Name = "Reason",
+                HeaderText = "Reason",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = MinReason,
+                FillWeight = WReason
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
                 Name = "Discount",
                 HeaderText = "Discount offer",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
@@ -1067,6 +1078,7 @@ namespace CarwashServices.Roles
             {
                 totalW += parts[i] switch
                 {
+                    "Send" => SendBtnW,
                     "Edit" => EditBtnW,
                     "Archive" => ArcBtnW,
                     "Restore" => ResBtnW,
@@ -1082,6 +1094,7 @@ namespace CarwashServices.Roles
             {
                 int w = parts[i] switch
                 {
+                    "Send" => SendBtnW,
                     "Edit" => EditBtnW,
                     "Archive" => ArcBtnW,
                     "Restore" => ResBtnW,
@@ -1093,6 +1106,9 @@ namespace CarwashServices.Roles
 
                 switch (parts[i])
                 {
+                    case "Send":
+                        PaintButton(e.Graphics, rect, "Send", hover, Blue);
+                        break;
                     case "Edit":
                         PaintButton(e.Graphics, rect, "Edit", hover, Navy);
                         break;
@@ -1157,6 +1173,10 @@ namespace CarwashServices.Roles
                         break;
                     }
 
+                case "Reason":
+                    PaintTwoLine(e, FontNormal, Navy, FontSub, Muted);
+                    break;
+
                 case "Status":
                     PaintStatusPill(e);
                     break;
@@ -1205,7 +1225,7 @@ namespace CarwashServices.Roles
             if (e.Button != MouseButtons.Left) return;
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
 
-            // Actions column → edit / archive / restore.
+            // Actions column → Send / Edit / Archive / Restore.
             if (_grid.Columns[e.ColumnIndex].Name == "Actions")
             {
                 int hit = HitTestActions(e.RowIndex, e.Location);
@@ -1229,6 +1249,7 @@ namespace CarwashServices.Roles
 
                 switch (action)
                 {
+                    case "Send": SendFollowUpAsync(dto); break;
                     case "Edit": OpenEditDialog(dto); break;
                     case "Archive": ArchiveAsync(dto); break;
                     case "Restore": RestoreAsync(dto); break;
@@ -1269,6 +1290,7 @@ namespace CarwashServices.Roles
             {
                 totalW += parts[i] switch
                 {
+                    "Send" => SendBtnW,
                     "Edit" => EditBtnW,
                     "Archive" => ArcBtnW,
                     "Restore" => ResBtnW,
@@ -1284,6 +1306,7 @@ namespace CarwashServices.Roles
             {
                 int w = parts[i] switch
                 {
+                    "Send" => SendBtnW,
                     "Edit" => EditBtnW,
                     "Archive" => ArcBtnW,
                     "Restore" => ResBtnW,
@@ -1393,6 +1416,7 @@ namespace CarwashServices.Roles
                     var name = cust?.CustomerName?.ToLower() ?? "";
                     return name.Contains(_search)
                         || (f.DiscountOffer ?? "").ToLower().Contains(_search)
+                        || (f.Reason ?? "").ToLower().Contains(_search)
                         || (f.Notes ?? "").ToLower().Contains(_search);
                 }).ToList();
             }
@@ -1449,6 +1473,10 @@ namespace CarwashServices.Roles
                                 && f.Status != "Expired";
                 if (isOverdue) scheduled += "\noverdue";
 
+                var reasonCell = string.IsNullOrWhiteSpace(f.Reason)
+                    ? "—"
+                    : f.Reason!;
+
                 var method = f.ContactMethod switch
                 {
                     "Facebook Messenger" => "FB Messenger",
@@ -1459,12 +1487,17 @@ namespace CarwashServices.Roles
                 if (_tab == ListTab.Active)
                 {
                     bool isTerminal = f.Status == "Redeemed" || f.Status == "Expired";
-                    string actions = isTerminal ? "Archive" : "Edit|Archive";
+                    bool canSend = f.Status == "Scheduled" || f.Status == "Due today";
+
+                    string actions = isTerminal
+                        ? "Archive"
+                        : (canSend ? "Send|Edit|Archive" : "Edit|Archive");
 
                     rowIdx = _grid.Rows.Add(
                         f.FollowUpId,
                         custCell,
                         scheduled,
+                        reasonCell,
                         string.IsNullOrWhiteSpace(f.DiscountOffer) ? "—" : f.DiscountOffer,
                         method,
                         f.Status,
@@ -1482,6 +1515,7 @@ namespace CarwashServices.Roles
                         f.FollowUpId,
                         custCell,
                         scheduled,
+                        reasonCell,
                         string.IsNullOrWhiteSpace(f.DiscountOffer) ? "—" : f.DiscountOffer,
                         method,
                         f.Status,
@@ -1528,7 +1562,7 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  ARCHIVE / RESTORE
+        //  ARCHIVE / RESTORE / SEND
         // ================================================================
         private async void ArchiveAsync(FollowUpDto f)
         {
@@ -1585,6 +1619,66 @@ namespace CarwashServices.Roles
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally { Cursor = Cursors.Default; }
+        }
+
+        private async void SendFollowUpAsync(FollowUpDto f)
+        {
+            var confirm = MessageBox.Show(
+                "Send this follow-up email now?\n\n" +
+                "It will be delivered to the customer's email address on file.",
+                "Send Follow-Up",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+
+            if (confirm != DialogResult.OK) return;
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+
+                var resp = await _http.PostAsJsonAsync(
+                    $"api/follow-ups/{f.FollowUpId}/send",
+                    new { companyId = 1 });
+
+                if (resp.IsSuccessStatusCode)
+                {
+                    MessageBox.Show(
+                        "Follow-up email sent successfully.",
+                        "Sent",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+
+                    await LoadAsync();
+                }
+                else
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show(
+                        "Unable to send the follow-up email. " +
+                        "Please check the email configuration and try again.\n\n" +
+                        body,
+                        "Send Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+
+                    // Reload in case the status changed on the server (it shouldn't
+                    // on failure, but this keeps the grid in sync either way).
+                    await LoadAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Unable to send the follow-up email.\n\n{ex.Message}",
+                    "Send Failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+            }
         }
 
         // ================================================================
