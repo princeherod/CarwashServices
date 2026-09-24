@@ -27,9 +27,10 @@ namespace CarwashServices.Dialogs
             "Maroon", "Purple", "Pink", "Other"
         };
 
+        // NOTE: "Referral" has been intentionally removed per spec.
         public static readonly string[] Sources =
         {
-            "", "Facebook", "Google", "Referral", "Walk-in",
+            "", "Facebook", "Google", "Walk-in",
             "Instagram", "TikTok", "Other"
         };
 

@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
@@ -22,7 +24,8 @@ namespace CarwashServices.Dialogs
         private static readonly Color Line = Color.FromArgb(0xE5, 0xE8, 0xEE);
         private static readonly Color Accent = Color.FromArgb(0x1E, 0x88, 0xE5);
         private static readonly Color Danger = Color.FromArgb(0xC6, 0x28, 0x28);
-        private static readonly Color FieldErrorBg = Color.FromArgb(0xFF, 0xF5, 0xF5);
+        private static readonly Color FieldErrorBg = Color.FromArgb(0xFF, 0xF1, 0xF1);
+        private static readonly Color FieldErrorBorder = Color.FromArgb(0xE5, 0x39, 0x35);
 
         private const int PadX = 30;
         private const int ContentW = 760;
@@ -66,8 +69,8 @@ namespace CarwashServices.Dialogs
         private Label _errorLbl = null!;
         private Button _deleteBtn = null!;
 
-        // Error provider — shows a red icon + tooltip next to invalid fields.
-        private readonly ErrorProvider _errors = new ErrorProvider();
+        // field control → error label under it
+        private readonly Dictionary<Control, Label> _fieldErrors = new();
 
         private readonly HttpClient _http = new HttpClient
         {
@@ -75,14 +78,21 @@ namespace CarwashServices.Dialogs
             Timeout = TimeSpan.FromSeconds(10)
         };
 
+        // -----------------------------------------------------------------
+        //  Validation regexes
+        // -----------------------------------------------------------------
         private static readonly Regex NameRegex =
             new(@"^[\p{L}][\p{L}\s\.\-']{1,49}$", RegexOptions.Compiled);
+
         private static readonly Regex PhoneRegex =
-            new(@"^[0-9+\-\s()]{7,20}$", RegexOptions.Compiled);
+            new(@"^09\d{9}$", RegexOptions.Compiled);
+
         private static readonly Regex EmailRegex =
-            new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
+            new(@"^[A-Za-z0-9._%+\-]+@gmail\.com$", RegexOptions.Compiled);
+
         private static readonly Regex PlateRegex =
             new(@"^[A-Za-z0-9\- ]{2,15}$", RegexOptions.Compiled);
+
         private static readonly Regex ModelRegex =
             new(@"^[A-Za-z0-9\s\.\-'/]{1,50}$", RegexOptions.Compiled);
 
@@ -109,7 +119,7 @@ namespace CarwashServices.Dialogs
         private void InitializeForm()
         {
             Text = _isEdit ? "Edit Customer" : "Register New Customer";
-            ClientSize = new Size(820, 720);
+            ClientSize = new Size(820, 760);
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9.5f);
@@ -117,10 +127,6 @@ namespace CarwashServices.Dialogs
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
-
-            // ErrorProvider defaults
-            _errors.BlinkStyle = ErrorBlinkStyle.NeverBlink;
-            _errors.ContainerControl = this;
 
             // ---- Header ----
             var header = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = Color.White };
@@ -229,20 +235,21 @@ namespace CarwashServices.Dialogs
 
             _firstNameTxt = AddText(body, "First name *", PadX, y, W2, "e.g. Juan");
             _lastNameTxt = AddText(body, "Last name *", X2b, y, W2, "e.g. Dela Cruz");
-            y += 60;
+            y += 82;
 
-            _phoneTxt = AddText(body, "Mobile number *", PadX, y, W2, "e.g. 0917 123 4567");
-            AddHint(body, "Accepts 09xx or +63 9xx formats.", PadX, y + 44);
+            _phoneTxt = AddPhone(body, "Mobile number *", PadX, y, W2, "e.g. 09772726061");
+            AddHint(body, "11 digits, must start with 09.", PadX, y + 44);
 
-            _emailTxt = AddText(body, "Email *", X2b, y, W2, "e.g. juan@example.com");
-            y += 78;
+            _emailTxt = AddText(body, "Email *", X2b, y, W2, "e.g. juandelacruz@gmail.com");
+            _emailTxt.Leave += (s, e) => ValidateEmailFieldLive();
+            y += 100;
 
             _streetTxt = AddText(body, "Street / Barangay *", PadX, y, W2, "e.g. 12 Rizal St., Brgy. Poblacion");
-            y += 60;
+            y += 82;
 
             _cityTxt = AddText(body, "City / Municipality *", PadX, y, W2, "e.g. Davao City");
             _provinceTxt = AddText(body, "Province", X2b, y, W2, "e.g. Davao del Sur");
-            y += 74;
+            y += 96;
 
             // =================== VEHICLE INFORMATION ===================
             body.Controls.Add(SectionDivider("VEHICLE INFORMATION", y));
@@ -252,18 +259,8 @@ namespace CarwashServices.Dialogs
             AddHint(body, "Letters and numbers only.", PadX, y + 44);
 
             _makeCombo = AddCombo(body, "Make (brand) *", X3b, y, W3, BrandCatalog.Makes);
-            _makeOtherTxt = new TextBox
-            {
-                Location = new Point(X3b, y + 44),
-                Width = W3,
-                Font = new Font("Segoe UI", 9.5f),
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.White,
-                PlaceholderText = "Type brand",
-                Visible = false
-            };
-            _makeOtherTxt.TextChanged += (s, e) => ClearFieldError(_makeOtherTxt);
-            body.Controls.Add(_makeOtherTxt);
+            _makeOtherTxt = MakeErroredText(body, X3b, y + 44, W3, "Type brand");
+            _makeOtherTxt.Visible = false;
             _makeCombo.SelectedIndexChanged += (s, e) =>
             {
                 _makeOtherTxt.Visible = (string?)_makeCombo.SelectedItem == "Other";
@@ -271,30 +268,20 @@ namespace CarwashServices.Dialogs
             };
 
             _modelTxt = AddText(body, "Model *", X3c, y, W3c, "e.g. Fortuner");
-            y += 78;
+            y += 100;
 
             _yearCombo = AddCombo(body, "Year model *", PadX, y, W3, BuildYearItems());
             _bodyCombo = AddCombo(body, "Body type *", X3b, y, W3, BrandCatalog.BodyTypes);
 
             _colorCombo = AddCombo(body, "Color *", X3c, y, W3c, BrandCatalog.Colors);
-            _colorOtherTxt = new TextBox
-            {
-                Location = new Point(X3c + 130, y + 44),
-                Width = Math.Max(60, W3c - 130),
-                Font = new Font("Segoe UI", 9.5f),
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.White,
-                PlaceholderText = "Type color",
-                Visible = false
-            };
-            _colorOtherTxt.TextChanged += (s, e) => ClearFieldError(_colorOtherTxt);
-            body.Controls.Add(_colorOtherTxt);
+            _colorOtherTxt = MakeErroredText(body, X3c + 130, y + 44, Math.Max(60, W3c - 130), "Type color");
+            _colorOtherTxt.Visible = false;
             _colorCombo.SelectedIndexChanged += (s, e) =>
             {
                 _colorOtherTxt.Visible = (string?)_colorCombo.SelectedItem == "Other";
                 ClearFieldError(_colorCombo);
             };
-            y += 78;
+            y += 100;
 
             // =================== OTHER ===================
             body.Controls.Add(SectionDivider("OTHER", y));
@@ -325,7 +312,7 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(_statusRow);
             _statusRow.Visible = _isEdit;
 
-            y += 78;
+            y += 100;
 
             Controls.Add(header);
             Controls.Add(footer);
@@ -333,7 +320,9 @@ namespace CarwashServices.Dialogs
             body.BringToFront();
         }
 
-        // ---- small builders ----
+        // ---------------------------------------------------------------
+        //  Builders — every one registers a matching error label
+        // ---------------------------------------------------------------
         private Label MakeLabel(string text, int x, int y) => new Label
         {
             Text = text,
@@ -355,27 +344,94 @@ namespace CarwashServices.Dialogs
             });
         }
 
+        /// <summary>Error label placed 22px below the top of the field box.</summary>
+        private Label MakeErrorLabel(int x, int y)
+        {
+            return new Label
+            {
+                Text = "",
+                ForeColor = Danger,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 8.5f),
+                Location = new Point(x, y),
+                AutoSize = true,
+                Visible = false
+            };
+        }
+
         private TextBox AddText(Control parent, string label, int x, int y, int width, string placeholder)
         {
             parent.Controls.Add(MakeLabel(label, x, y));
-            var tb = new TextBox
+
+            var tb = new ValidatedTextBox
             {
                 Location = new Point(x, y + 18),
                 Width = width,
                 Font = new Font("Segoe UI", 10f),
-                BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.White,
                 PlaceholderText = placeholder
             };
             tb.TextChanged += (s, e) => ClearFieldError(tb);
             parent.Controls.Add(tb);
+
+            var err = MakeErrorLabel(x, y + 44);
+            parent.Controls.Add(err);
+            _fieldErrors[tb] = err;
+
+            return tb;
+        }
+
+        private TextBox AddPhone(Control parent, string label, int x, int y, int width, string placeholder)
+        {
+            parent.Controls.Add(MakeLabel(label, x, y));
+
+            var tb = new ValidatedTextBox
+            {
+                Location = new Point(x, y + 18),
+                Width = width,
+                Font = new Font("Segoe UI", 10f),
+                BackColor = Color.White,
+                PlaceholderText = placeholder,
+                MaxLength = 11
+            };
+
+            bool filtering = false;
+            tb.TextChanged += (s, e) =>
+            {
+                if (filtering) return;
+                filtering = true;
+                try
+                {
+                    var digits = new string(tb.Text.Where(char.IsDigit).ToArray());
+                    if (digits.Length > 11) digits = digits.Substring(0, 11);
+                    if (digits != tb.Text)
+                    {
+                        var caret = tb.SelectionStart;
+                        tb.Text = digits;
+                        tb.SelectionStart = Math.Min(caret, tb.Text.Length);
+                    }
+                }
+                finally { filtering = false; }
+                ClearFieldError(tb);
+            };
+            tb.KeyPress += (s, e) =>
+            {
+                if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
+                    e.Handled = true;
+            };
+            parent.Controls.Add(tb);
+
+            var err = MakeErrorLabel(x, y + 44);
+            parent.Controls.Add(err);
+            _fieldErrors[tb] = err;
+
             return tb;
         }
 
         private ComboBox AddCombo(Control parent, string label, int x, int y, int width, object[] items)
         {
             parent.Controls.Add(MakeLabel(label, x, y));
-            var cb = new ComboBox
+            var cb = new ValidatedComboBox
             {
                 Location = new Point(x, y + 18),
                 Width = width,
@@ -387,12 +443,38 @@ namespace CarwashServices.Dialogs
             cb.SelectedIndex = 0;
             cb.SelectedIndexChanged += (s, e) => ClearFieldError(cb);
             parent.Controls.Add(cb);
+
+            var err = MakeErrorLabel(x, y + 44);
+            parent.Controls.Add(err);
+            _fieldErrors[cb] = err;
+
             return cb;
+        }
+
+        /// <summary>Standalone textbox (for "Other" inputs) — no label, but has an error label.</summary>
+        private TextBox MakeErroredText(Control parent, int x, int y, int width, string placeholder)
+        {
+            var tb = new ValidatedTextBox
+            {
+                Location = new Point(x, y),
+                Width = width,
+                Font = new Font("Segoe UI", 9.5f),
+                BackColor = Color.White,
+                PlaceholderText = placeholder
+            };
+            tb.TextChanged += (s, e) => ClearFieldError(tb);
+            parent.Controls.Add(tb);
+
+            var err = MakeErrorLabel(x, y + 26);
+            parent.Controls.Add(err);
+            _fieldErrors[tb] = err;
+
+            return tb;
         }
 
         private static object[] BuildYearItems()
         {
-            var list = new System.Collections.Generic.List<object> { "" };
+            var list = new List<object> { "" };
             foreach (var y in BrandCatalog.Years()) list.Add(y.ToString());
             return list.ToArray();
         }
@@ -443,29 +525,71 @@ namespace CarwashServices.Dialogs
 
         private void ClearFieldError(Control c)
         {
-            if (c is TextBox tb)
+            if (c is ValidatedTextBox tb)
             {
+                tb.HasError = false;
                 tb.BackColor = Color.White;
-                _errors.SetError(tb, "");
             }
-            else if (c is ComboBox cb)
+            else if (c is ValidatedComboBox cb)
             {
+                cb.HasError = false;
                 cb.BackColor = Color.White;
-                _errors.SetError(cb, "");
+            }
+
+            if (_fieldErrors.TryGetValue(c, out var lbl))
+            {
+                lbl.Text = "";
+                lbl.Visible = false;
             }
         }
 
         private void MarkFieldError(Control c, string message)
         {
-            if (c is TextBox tb)
+            if (c is ValidatedTextBox tb)
             {
                 tb.BackColor = FieldErrorBg;
-                _errors.SetError(tb, message);
+                tb.HasError = true;
             }
-            else if (c is ComboBox cb)
+            else if (c is ValidatedComboBox cb)
             {
                 cb.BackColor = FieldErrorBg;
-                _errors.SetError(cb, message);
+                cb.HasError = true;
+            }
+
+            if (_fieldErrors.TryGetValue(c, out var lbl))
+            {
+                lbl.Text = message;
+                lbl.Visible = true;
+                lbl.BringToFront();
+            }
+        }
+
+        private bool HasFieldError(Control c)
+        {
+            return _fieldErrors.TryGetValue(c, out var lbl)
+                && !string.IsNullOrEmpty(lbl.Text);
+        }
+
+        // =================================================================
+        //  Live validation helpers
+        // =================================================================
+        private void ValidateEmailFieldLive()
+        {
+            var email = _emailTxt.Text.Trim();
+            if (email.Length == 0)
+            {
+                ClearFieldError(_emailTxt);
+                return;
+            }
+
+            if (!email.EndsWith("@gmail.com", StringComparison.OrdinalIgnoreCase)
+                || !EmailRegex.IsMatch(email))
+            {
+                MarkFieldError(_emailTxt, "Please enter a valid Gmail address ending with @gmail.com.");
+            }
+            else
+            {
+                ClearFieldError(_emailTxt);
             }
         }
 
@@ -476,7 +600,7 @@ namespace CarwashServices.Dialogs
         {
             try
             {
-                var list = await _http.GetFromJsonAsync<System.Collections.Generic.List<TenantCustomerDto>>(
+                var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
                     "api/tenant/1/tenant-customers");
 
                 if (list == null) return;
@@ -574,11 +698,10 @@ namespace CarwashServices.Dialogs
         }
 
         // =================================================================
-        //  VALIDATION — collects every error, returns false if any failed
+        //  VALIDATION
         // =================================================================
         private bool ValidateForm()
         {
-            // Clear all previous errors.
             ClearAllErrors();
 
             // ---- First name ----
@@ -607,8 +730,14 @@ namespace CarwashServices.Dialogs
             var phone = _phoneTxt.Text.Trim();
             if (phone.Length == 0)
                 MarkFieldError(_phoneTxt, "Mobile number is required.");
+            else if (phone.Any(c => !char.IsDigit(c)))
+                MarkFieldError(_phoneTxt, "Mobile number must contain numbers only.");
+            else if (phone.Length != 11)
+                MarkFieldError(_phoneTxt, "Mobile number must contain exactly 11 digits.");
+            else if (!phone.StartsWith("09"))
+                MarkFieldError(_phoneTxt, "Mobile number must start with 09.");
             else if (!PhoneRegex.IsMatch(phone))
-                MarkFieldError(_phoneTxt, "7–20 chars; digits, spaces, +, -, ( ) only.");
+                MarkFieldError(_phoneTxt, "Mobile number must be a valid Philippine number (09XXXXXXXXX).");
 
             // ---- Email ----
             var email = _emailTxt.Text.Trim();
@@ -616,8 +745,10 @@ namespace CarwashServices.Dialogs
                 MarkFieldError(_emailTxt, "Email is required.");
             else if (email.Length > 200)
                 MarkFieldError(_emailTxt, "Must be 200 characters or fewer.");
+            else if (!email.EndsWith("@gmail.com", StringComparison.OrdinalIgnoreCase))
+                MarkFieldError(_emailTxt, "Please enter a valid Gmail address ending with @gmail.com.");
             else if (!EmailRegex.IsMatch(email))
-                MarkFieldError(_emailTxt, "Not a valid email format. Example: name@example.com");
+                MarkFieldError(_emailTxt, "Please enter a valid Gmail address ending with @gmail.com.");
 
             // ---- Street ----
             var street = _streetTxt.Text.Trim();
@@ -640,7 +771,7 @@ namespace CarwashServices.Dialogs
             if (plate.Length == 0)
                 MarkFieldError(_plateTxt, "Plate number is required.");
             else if (!PlateRegex.IsMatch(plate))
-                MarkFieldError(_plateTxt, "2–15 chars; letters, numbers, spaces, hyphens only.");
+                MarkFieldError(_plateTxt, "Letters and numbers only.");
 
             // ---- Make ----
             var makeChoice = (string?)_makeCombo.SelectedItem ?? "";
@@ -660,11 +791,11 @@ namespace CarwashServices.Dialogs
             var yearText = (string?)_yearCombo.SelectedItem ?? "";
             if (string.IsNullOrWhiteSpace(yearText))
             {
-                MarkFieldError(_yearCombo, "Please select the vehicle year model.");
+                MarkFieldError(_yearCombo, "Please select a valid vehicle year.");
             }
             else if (!int.TryParse(yearText, out var year) || year < 1970 || year > DateTime.Today.Year)
             {
-                MarkFieldError(_yearCombo, $"Year must be between 1970 and {DateTime.Today.Year}.");
+                MarkFieldError(_yearCombo, "Please select a valid vehicle year.");
             }
 
             // ---- Body type ----
@@ -679,45 +810,21 @@ namespace CarwashServices.Dialogs
             else if (colorChoice == "Other" && string.IsNullOrWhiteSpace(_colorOtherTxt.Text))
                 MarkFieldError(_colorOtherTxt, "Please type the colour.");
 
-            // If any ErrorProvider.SetError marked something, validation failed.
-            bool ok = !HasAnyError();
-            return ok;
+            return !HasAnyError();
         }
 
         private bool HasAnyError()
         {
-            return !string.IsNullOrEmpty(_errors.GetError(_firstNameTxt))
-                || !string.IsNullOrEmpty(_errors.GetError(_lastNameTxt))
-                || !string.IsNullOrEmpty(_errors.GetError(_phoneTxt))
-                || !string.IsNullOrEmpty(_errors.GetError(_emailTxt))
-                || !string.IsNullOrEmpty(_errors.GetError(_streetTxt))
-                || !string.IsNullOrEmpty(_errors.GetError(_cityTxt))
-                || !string.IsNullOrEmpty(_errors.GetError(_plateTxt))
-                || !string.IsNullOrEmpty(_errors.GetError(_makeCombo))
-                || !string.IsNullOrEmpty(_errors.GetError(_makeOtherTxt))
-                || !string.IsNullOrEmpty(_errors.GetError(_modelTxt))
-                || !string.IsNullOrEmpty(_errors.GetError(_yearCombo))
-                || !string.IsNullOrEmpty(_errors.GetError(_bodyCombo))
-                || !string.IsNullOrEmpty(_errors.GetError(_colorCombo))
-                || !string.IsNullOrEmpty(_errors.GetError(_colorOtherTxt));
+            foreach (var kv in _fieldErrors)
+                if (!string.IsNullOrEmpty(kv.Value.Text))
+                    return true;
+            return false;
         }
 
         private void ClearAllErrors()
         {
-            ClearFieldError(_firstNameTxt);
-            ClearFieldError(_lastNameTxt);
-            ClearFieldError(_phoneTxt);
-            ClearFieldError(_emailTxt);
-            ClearFieldError(_streetTxt);
-            ClearFieldError(_cityTxt);
-            ClearFieldError(_plateTxt);
-            ClearFieldError(_makeCombo);
-            ClearFieldError(_makeOtherTxt);
-            ClearFieldError(_modelTxt);
-            ClearFieldError(_yearCombo);
-            ClearFieldError(_bodyCombo);
-            ClearFieldError(_colorCombo);
-            ClearFieldError(_colorOtherTxt);
+            foreach (var c in _fieldErrors.Keys.ToList())
+                ClearFieldError(c);
         }
 
         // =================================================================
@@ -781,7 +888,6 @@ namespace CarwashServices.Dialogs
             {
                 _errorLbl.Text = "Please correct the highlighted fields.";
 
-                // Focus the first invalid control so the user lands on it.
                 foreach (Control c in new Control[]
                 {
                     _firstNameTxt, _lastNameTxt, _phoneTxt, _emailTxt,
@@ -789,7 +895,7 @@ namespace CarwashServices.Dialogs
                     _modelTxt, _yearCombo, _bodyCombo, _colorCombo, _colorOtherTxt
                 })
                 {
-                    if (!string.IsNullOrEmpty(_errors.GetError(c)))
+                    if (HasFieldError(c))
                     {
                         c.Focus();
                         break;
@@ -904,6 +1010,90 @@ namespace CarwashServices.Dialogs
                 MessageBox.Show(
                     $"Delete failed.\n\n{ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // =================================================================
+        //  Custom controls with a red 1px border when in error state
+        // =================================================================
+        private sealed class ValidatedTextBox : TextBox
+        {
+            private bool _hasError;
+
+            [System.ComponentModel.DesignerSerializationVisibility(
+                System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+            public bool HasError
+            {
+                get => _hasError;
+                set
+                {
+                    if (_hasError == value) return;
+                    _hasError = value;
+                    Invalidate();
+                }
+            }
+
+            public ValidatedTextBox()
+            {
+                BorderStyle = BorderStyle.FixedSingle;
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                base.WndProc(ref m);
+                if (m.Msg == 0x000F && _hasError) // WM_PAINT
+                {
+                    using var g = CreateGraphics();
+                    using var pen = new Pen(FieldErrorBorder, 1.5f);
+                    g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+                }
+            }
+        }
+
+        private sealed class ValidatedComboBox : ComboBox
+        {
+            private bool _hasError;
+
+            [System.ComponentModel.DesignerSerializationVisibility(
+                System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+            public bool HasError
+            {
+                get => _hasError;
+                set
+                {
+                    if (_hasError == value) return;
+                    _hasError = value;
+                    Invalidate();
+                }
+            }
+
+            public ValidatedComboBox()
+            {
+                DrawMode = DrawMode.OwnerDrawFixed;
+                ItemHeight = 22;
+            }
+
+            protected override void OnDrawItem(DrawItemEventArgs e)
+            {
+                e.DrawBackground();
+                if (e.Index >= 0 && e.Index < Items.Count)
+                {
+                    var text = Items[e.Index]?.ToString() ?? "";
+                    using var brush = new SolidBrush(ForeColor);
+                    e.Graphics.DrawString(text, Font, brush, e.Bounds);
+                }
+                e.DrawFocusRectangle();
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                base.WndProc(ref m);
+                if (m.Msg == 0x000F && _hasError)
+                {
+                    using var g = CreateGraphics();
+                    using var pen = new Pen(FieldErrorBorder, 1.5f);
+                    g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+                }
             }
         }
     }

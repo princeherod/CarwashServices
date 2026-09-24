@@ -97,6 +97,14 @@ public class ServiceRequestsController : ControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
+        // ---- Backend date validation ----
+        if (req.RequestedDate.Date < DateTime.Today)
+            return BadRequest(new { message = "Requested date cannot be in the past." });
+
+        if (req.ScheduledDate.HasValue && req.ScheduledDate.Value < req.RequestedDate)
+            return BadRequest(new { message = "Scheduled date must be on or after the requested date." });
+
+        // Create is always Pending, and CompletedDate is always null on create.
         req.Status = "Pending";
         req.CompletedDate = null;
         if (req.RequestedDate == default) req.RequestedDate = DateTime.Now;
@@ -132,6 +140,26 @@ public class ServiceRequestsController : ControllerBase
         if (existing is null)
             return NotFound(new { message = $"ServiceRequest {requestId} not found." });
 
+        // ---- Backend date validation ----
+        if (req.RequestedDate.Date < DateTime.Today)
+            return BadRequest(new { message = "Requested date cannot be in the past." });
+
+        if (req.ScheduledDate.HasValue && req.ScheduledDate.Value < req.RequestedDate)
+            return BadRequest(new { message = "Scheduled date must be on or after the requested date." });
+
+        if (req.CompletedDate.HasValue && req.CompletedDate.Value < req.RequestedDate)
+            return BadRequest(new { message = "Completed date cannot be earlier than the requested date." });
+
+        if (req.CompletedDate.HasValue
+            && req.ScheduledDate.HasValue
+            && req.CompletedDate.Value < req.ScheduledDate.Value)
+            return BadRequest(new { message = "Completed date cannot be earlier than the scheduled date." });
+
+        // Only Completed requests may carry a CompletedDate.
+        if (req.CompletedDate.HasValue
+            && !string.Equals(req.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "A completed date can only be set when the status is Completed." });
+
         // Editable fields
         existing.CustomerId = req.CustomerId;
         existing.ServiceId = req.ServiceId;
@@ -141,8 +169,24 @@ public class ServiceRequestsController : ControllerBase
         existing.CompletedDate = req.CompletedDate;
         existing.Notes = req.Notes;
 
-        // Status / AssignedStaffId / CreatedBy / archive fields are managed by
-        // their own dedicated endpoints, NOT by the generic update.
+        // Status is accepted from the Edit form only.
+        if (!string.IsNullOrWhiteSpace(req.Status))
+        {
+            var allowed = new[] { "Pending", "Assigned", "InProgress", "Completed", "Cancelled" };
+            if (!allowed.Contains(req.Status))
+                return BadRequest(new { message = $"Status must be one of: {string.Join(", ", allowed)}." });
+
+            existing.Status = req.Status;
+
+            // If status becomes Completed and no date was sent, stamp it now.
+            if (req.Status == "Completed" && existing.CompletedDate is null)
+                existing.CompletedDate = DateTime.Now;
+
+            // If status is anything else, drop the completed date.
+            if (req.Status != "Completed")
+                existing.CompletedDate = null;
+        }
+
         await _db.SaveChangesAsync();
         return Ok(existing);
     }

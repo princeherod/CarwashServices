@@ -14,11 +14,14 @@ namespace CarwashServices.Dialogs
     /// Create / edit a service request.
     ///
     /// On CREATE:
-    ///   - Status is fixed to "Pending" and shown as a read-only label.
-    ///   - Status cannot be changed here — it's managed later by Service Staff.
-    ///   On EDIT:
-    ///   - Status becomes an editable combo (Pending / Assigned / InProgress /
-    ///     Completed / Cancelled).
+    ///   - No Status field. System forces "Pending".
+    ///   - No Completed Date field.
+    ///   - Requested Date defaults to today (now).
+    ///   - Scheduled Date defaults to today (now).
+    ///
+    /// On EDIT:
+    ///   - Status becomes an editable combo.
+    ///   - Completed Date becomes available and is gated by status.
     /// </summary>
     public class ServiceRequestEditDialog : Form
     {
@@ -28,14 +31,16 @@ namespace CarwashServices.Dialogs
 
         private ComboBox _customerCombo = null!;
         private ComboBox _serviceCombo = null!;
-        private Label _statusReadOnly = null!;   // shown on create
-        private ComboBox _statusCombo = null!;   // shown on edit
+        private ComboBox _statusCombo = null!;      // edit only
         private ComboBox _priorityCombo = null!;
         private DateTimePicker _requestedPicker = null!;
         private DateTimePicker _scheduledPicker = null!;
-        private DateTimePicker _completedPicker = null!;
-        private CheckBox _completedEnabled = null!;
+        private DateTimePicker _completedPicker = null!;   // edit only
+        private CheckBox _completedEnabled = null!;         // edit only
         private TextBox _notesTxt = null!;
+
+        // Error labels keyed by their control
+        private readonly Dictionary<Control, Label> _fieldErrors = new();
 
         // ---- Palette ----
         private static readonly Color Navy = Color.FromArgb(10, 22, 51);
@@ -44,6 +49,9 @@ namespace CarwashServices.Dialogs
         private static readonly Color BorderSoft = Color.FromArgb(225, 231, 240);
         private static readonly Color AccentBlue = Color.FromArgb(30, 136, 229);
         private static readonly Color ReadOnlyBg = Color.FromArgb(0xF5, 0xF7, 0xFA);
+        private static readonly Color Danger = Color.FromArgb(0xC6, 0x28, 0x28);
+        private static readonly Color FieldErrorBg = Color.FromArgb(0xFF, 0xF1, 0xF1);
+        private static readonly Color FieldErrorBorder = Color.FromArgb(0xE5, 0x39, 0x35);
 
         private readonly HttpClient _http = new HttpClient
         {
@@ -72,7 +80,7 @@ namespace CarwashServices.Dialogs
             Text = isEdit
                 ? $"Edit SERVICE_REQUEST — #{_requestId}"
                 : "New Service Request";
-            Size = new Size(860, 780);
+            Size = new Size(860, isEdit ? 780 : 700);
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9.5f);
@@ -136,7 +144,8 @@ namespace CarwashServices.Dialogs
             foreach (var c in _customers)
                 _customerCombo.Items.Add(new ComboItem(c.CustomerId, c.FullName));
             body.Controls.Add(_customerCombo);
-            y += 75;
+            AddErrorLabel(body, _customerCombo, 30, y + 50);
+            y += 88;
 
             // ---- Service (full width) ----
             body.Controls.Add(MakeLabel("Service *", 30, y));
@@ -144,81 +153,90 @@ namespace CarwashServices.Dialogs
             foreach (var s in _services)
                 _serviceCombo.Items.Add(new ComboItem(s.ServiceId, $"{s.ServiceName} (₱{s.Price:N0})"));
             body.Controls.Add(_serviceCombo);
-            y += 75;
+            AddErrorLabel(body, _serviceCombo, 30, y + 50);
+            y += 88;
 
             // ============ SCHEDULING ============
             body.Controls.Add(SectionDivider("Scheduling", y, body.Width - 60));
             y += 40;
 
-            // ---- Status (read-only on create, combo on edit) ----
-            body.Controls.Add(MakeLabel("Status", 30, y));
-
-            // Read-only version (create mode)
-            _statusReadOnly = new Label
+            // ---- Status (edit only) + Priority ----
+            if (isEdit)
             {
-                Location = new Point(30, y + 26),
-                Size = new Size(360, 26),
-                Text = "Pending",
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-                ForeColor = Navy,
-                BackColor = ReadOnlyBg,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(10, 0, 0, 0),
-                BorderStyle = BorderStyle.FixedSingle
-            };
-            body.Controls.Add(_statusReadOnly);
+                body.Controls.Add(MakeLabel("Status", 30, y));
+                _statusCombo = MakeCombo(30, y + 22, 360);
+                _statusCombo.Items.AddRange(new object[]
+                {
+                    "Pending", "Assigned", "InProgress", "Completed", "Cancelled"
+                });
+                _statusCombo.SelectedIndex = 0;
+                _statusCombo.SelectedIndexChanged += (s, e) =>
+                {
+                    ClearFieldError(_statusCombo);
+                    UpdateCompletedAvailability();
+                };
+                body.Controls.Add(_statusCombo);
+                AddErrorLabel(body, _statusCombo, 30, y + 50);
+            }
 
-            // Editable version (edit mode)
-            _statusCombo = MakeCombo(30, y + 22, 360);
-            _statusCombo.Items.AddRange(new object[]
-            {
-                "Pending", "Assigned", "InProgress", "Completed", "Cancelled"
-            });
-            _statusCombo.SelectedIndex = 0;
-            body.Controls.Add(_statusCombo);
-
-            _statusReadOnly.Visible = !isEdit;
-            _statusCombo.Visible = isEdit;
-
-            // ---- Priority ----
-            body.Controls.Add(MakeLabel("Priority", 415, y));
-            _priorityCombo = MakeCombo(415, y + 22, 360);
+            body.Controls.Add(MakeLabel("Priority", isEdit ? 415 : 30, y));
+            _priorityCombo = MakeCombo(isEdit ? 415 : 30, y + 22, 360);
             _priorityCombo.Items.AddRange(new object[] { "Normal", "High", "VIP" });
             _priorityCombo.SelectedIndex = 0;
             body.Controls.Add(_priorityCombo);
-            y += 75;
+            AddErrorLabel(body, _priorityCombo, isEdit ? 415 : 30, y + 50);
 
-            // ---- Requested date ----
-            body.Controls.Add(MakeLabel("Requested date *", 30, y));
+            y += 88;
+
+            // ---- Requested Date ----
+            body.Controls.Add(MakeLabel("Requested Date *", 30, y));
             _requestedPicker = MakeDatePicker(30, y + 22, 360);
+            _requestedPicker.MinDate = DateTime.Today;   // disallow past dates
             _requestedPicker.Value = DateTime.Now;
-            body.Controls.Add(_requestedPicker);
-
-            // ---- Scheduled date ----
-            body.Controls.Add(MakeLabel("Scheduled date *", 415, y));
-            _scheduledPicker = MakeDatePicker(415, y + 22, 360);
-            _scheduledPicker.Value = DateTime.Now;
-            body.Controls.Add(_scheduledPicker);
-            y += 75;
-
-            // ---- Completed date (nullable) ----
-            body.Controls.Add(MakeLabel("Completed date (optional)", 30, y));
-            _completedPicker = MakeDatePicker(30, y + 22, 320);
-            _completedPicker.Enabled = false;
-
-            _completedEnabled = new CheckBox
+            _requestedPicker.ValueChanged += (s, e) =>
             {
-                Text = "Set",
-                Location = new Point(360, y + 26),
-                AutoSize = true,
-                Cursor = Cursors.Hand
+                ClearFieldError(_requestedPicker);
+                // Revalidate Scheduled against the new Requested value.
+                if (_scheduledPicker != null) ValidateScheduledField();
             };
-            _completedEnabled.CheckedChanged += (s, e) =>
-                _completedPicker.Enabled = _completedEnabled.Checked;
+            body.Controls.Add(_requestedPicker);
+            AddErrorLabel(body, _requestedPicker, 30, y + 50);
 
-            body.Controls.Add(_completedPicker);
-            body.Controls.Add(_completedEnabled);
-            y += 75;
+            // ---- Scheduled Date ----
+            body.Controls.Add(MakeLabel("Scheduled Date *", 415, y));
+            _scheduledPicker = MakeDatePicker(415, y + 22, 360);
+            _scheduledPicker.MinDate = DateTime.Today;
+            _scheduledPicker.Value = DateTime.Now;
+            _scheduledPicker.ValueChanged += (s, e) => ClearFieldError(_scheduledPicker);
+            body.Controls.Add(_scheduledPicker);
+            AddErrorLabel(body, _scheduledPicker, 415, y + 50);
+            y += 88;
+
+            // ---- Completed Date (edit only) ----
+            if (isEdit)
+            {
+                body.Controls.Add(MakeLabel("Completed Date", 30, y));
+                _completedPicker = MakeDatePicker(30, y + 22, 320);
+                _completedPicker.Enabled = false;
+
+                _completedEnabled = new CheckBox
+                {
+                    Text = "Set",
+                    Location = new Point(360, y + 26),
+                    AutoSize = true,
+                    Cursor = Cursors.Hand
+                };
+                _completedEnabled.CheckedChanged += (s, e) =>
+                {
+                    _completedPicker.Enabled = _completedEnabled.Checked;
+                    ClearFieldError(_completedPicker);
+                };
+
+                body.Controls.Add(_completedPicker);
+                body.Controls.Add(_completedEnabled);
+                AddErrorLabel(body, _completedPicker, 30, y + 50);
+                y += 88;
+            }
 
             // ---- Notes ----
             body.Controls.Add(MakeLabel("Notes", 30, y));
@@ -240,8 +258,8 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(new Label
             {
                 Text = isEdit
-                    ? "Note: Status is normally managed by Service Staff."
-                    : "Note: New requests are created with status Pending. Use the Edit button later to change status.",
+                    ? "Note: Status and Completed Date are normally managed by Service Staff."
+                    : "Note: New requests are created with status Pending. Completed Date becomes available in Edit.",
                 ForeColor = AccentBlue,
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Italic),
                 Location = new Point(30, y),
@@ -322,6 +340,22 @@ namespace CarwashServices.Dialogs
             ShowUpDown = false
         };
 
+        private void AddErrorLabel(Control parent, Control field, int x, int y)
+        {
+            var lbl = new Label
+            {
+                Text = "",
+                ForeColor = Danger,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 8.5f),
+                Location = new Point(x, y),
+                AutoSize = true,
+                Visible = false
+            };
+            parent.Controls.Add(lbl);
+            _fieldErrors[field] = lbl;
+        }
+
         private Panel SectionDivider(string text, int y, int width)
         {
             var p = new Panel
@@ -359,6 +393,79 @@ namespace CarwashServices.Dialogs
         }
 
         // ================================================================
+        //  Error helpers
+        // ================================================================
+        private void ClearFieldError(Control c)
+        {
+            if (_fieldErrors.TryGetValue(c, out var lbl))
+            {
+                lbl.Text = "";
+                lbl.Visible = false;
+            }
+
+            if (c is TextBox tb) { tb.BackColor = Color.White; }
+            else if (c is ComboBox cb) { cb.BackColor = Color.White; }
+            else if (c is DateTimePicker dp) { dp.CalendarMonthBackground = Color.White; }
+        }
+
+        private void MarkFieldError(Control c, string message)
+        {
+            if (_fieldErrors.TryGetValue(c, out var lbl))
+            {
+                lbl.Text = message;
+                lbl.Visible = true;
+                lbl.BringToFront();
+            }
+
+            if (c is TextBox tb) { tb.BackColor = FieldErrorBg; }
+            else if (c is ComboBox cb) { cb.BackColor = FieldErrorBg; }
+            else if (c is DateTimePicker dp) { dp.CalendarMonthBackground = FieldErrorBg; }
+        }
+
+        private bool HasFieldError(Control c)
+        {
+            return _fieldErrors.TryGetValue(c, out var lbl) && !string.IsNullOrEmpty(lbl.Text);
+        }
+
+        // ================================================================
+        //  Completed-date gating (edit mode only)
+        // ================================================================
+        private void UpdateCompletedAvailability()
+        {
+            if (_completedPicker == null || _statusCombo == null) return;
+
+            var status = _statusCombo.SelectedItem?.ToString() ?? "Pending";
+            bool allowSet = status == "Completed";
+
+            // Only Completed status can carry a Completed Date.
+            if (!allowSet)
+            {
+                _completedEnabled.Checked = false;
+                _completedPicker.Enabled = false;
+                _completedPicker.Value = DateTime.Now;
+                ClearFieldError(_completedPicker);
+            }
+        }
+
+        // ================================================================
+        //  Live validation for Scheduled Date
+        // ================================================================
+        private void ValidateScheduledField()
+        {
+            if (_requestedPicker == null || _scheduledPicker == null) return;
+
+            if (_scheduledPicker.Value < _requestedPicker.Value)
+            {
+                MarkFieldError(_scheduledPicker,
+                    "Scheduled date must be on or after the requested date.");
+            }
+            else
+            {
+                ClearFieldError(_scheduledPicker);
+            }
+        }
+
+        // ================================================================
         //  DATA LOAD (edit mode)
         // ================================================================
         private async Task LoadAsync(int id)
@@ -373,7 +480,6 @@ namespace CarwashServices.Dialogs
                 SelectComboById(_customerCombo, req.CustomerId);
                 SelectComboById(_serviceCombo, req.ServiceId);
 
-                // Populate the combo with the current value and select it.
                 if (!string.IsNullOrWhiteSpace(req.Status) &&
                     !_statusCombo.Items.Contains(req.Status))
                 {
@@ -384,18 +490,28 @@ namespace CarwashServices.Dialogs
                 _priorityCombo.SelectedItem = req.Priority ?? "Normal";
 
                 if (req.RequestedDate != default)
+                {
+                    if (req.RequestedDate < DateTime.Today) _requestedPicker.MinDate = req.RequestedDate;
                     _requestedPicker.Value = req.RequestedDate;
+                }
 
                 if (req.ScheduledDate.HasValue)
+                {
+                    if (req.ScheduledDate.Value < DateTime.Today) _scheduledPicker.MinDate = req.ScheduledDate.Value;
                     _scheduledPicker.Value = req.ScheduledDate.Value;
+                }
 
                 if (req.CompletedDate.HasValue)
                 {
                     _completedEnabled.Checked = true;
+                    _completedPicker.Enabled = true;
                     _completedPicker.Value = req.CompletedDate.Value;
                 }
 
                 _notesTxt.Text = req.Notes ?? "";
+
+                // Reflect status → completed availability.
+                UpdateCompletedAvailability();
             }
             catch (Exception ex)
             {
@@ -418,44 +534,112 @@ namespace CarwashServices.Dialogs
         }
 
         // ================================================================
+        //  VALIDATION
+        // ================================================================
+        private bool ValidateForm()
+        {
+            bool isEdit = _requestId.HasValue;
+
+            // clear all first
+            foreach (var c in _fieldErrors.Keys)
+                ClearFieldError(c);
+
+            bool ok = true;
+
+            // Customer
+            if (_customerCombo.SelectedItem is not ComboItem custItem || custItem.Id == null)
+            {
+                MarkFieldError(_customerCombo, "Please select a customer.");
+                ok = false;
+            }
+
+            // Service
+            if (_serviceCombo.SelectedItem is not ComboItem svcItem || svcItem.Id == null)
+            {
+                MarkFieldError(_serviceCombo, "Please select a service.");
+                ok = false;
+            }
+
+            // Requested date — cannot be in the past
+            if (_requestedPicker.Value.Date < DateTime.Today)
+            {
+                MarkFieldError(_requestedPicker, "Requested date cannot be in the past.");
+                ok = false;
+            }
+
+            // Scheduled date — on or after Requested date
+            if (_scheduledPicker.Value < _requestedPicker.Value)
+            {
+                MarkFieldError(_scheduledPicker,
+                    "Scheduled date must be on or after the requested date.");
+                ok = false;
+            }
+
+            // Completed date — edit only, optional, but must be >= Requested (and Scheduled when set)
+            if (isEdit && _completedEnabled.Checked)
+            {
+                var completed = _completedPicker.Value;
+                if (completed < _requestedPicker.Value)
+                {
+                    MarkFieldError(_completedPicker,
+                        "Completed date cannot be earlier than the requested date.");
+                    ok = false;
+                }
+                else if (_scheduledPicker.Value != default
+                         && completed < _scheduledPicker.Value)
+                {
+                    MarkFieldError(_completedPicker,
+                        "Completed date cannot be earlier than the scheduled date.");
+                    ok = false;
+                }
+            }
+
+            return ok;
+        }
+
+        // ================================================================
         //  SAVE
         // ================================================================
         private async Task SaveAsync()
         {
             bool isEdit = _requestId.HasValue;
 
-            if (_customerCombo.SelectedItem is not ComboItem custItem || custItem.Id == null)
+            if (!ValidateForm())
             {
-                MessageBox.Show("Please select a customer.",
-                    "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                foreach (var c in _fieldErrors.Keys)
+                {
+                    if (HasFieldError(c))
+                    {
+                        c.Focus();
+                        break;
+                    }
+                }
                 return;
             }
 
-            if (_serviceCombo.SelectedItem is not ComboItem svcItem || svcItem.Id == null)
-            {
-                MessageBox.Show("Please select a service.",
-                    "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            var custItem = (ComboItem)_customerCombo.SelectedItem!;
+            var svcItem = (ComboItem)_serviceCombo.SelectedItem!;
 
-            // On create, status is always "Pending" (read-only label).
-            // On edit, read from the combo.
+            // CREATE: force Pending, no CompletedDate.
+            // EDIT:   use whatever the user picked.
             string status = isEdit
                 ? (_statusCombo.SelectedItem?.ToString() ?? "Pending")
                 : "Pending";
 
+            DateTime? completed = null;
+            if (isEdit && _completedEnabled != null && _completedEnabled.Checked)
+                completed = _completedPicker.Value;
+
             var dto = new
             {
                 requestId = _requestId ?? 0,
-                customerId = custItem.Id.Value,
-                serviceId = svcItem.Id.Value,
+                customerId = custItem.Id!.Value,
+                serviceId = svcItem.Id!.Value,
                 status,
                 priority = _priorityCombo.SelectedItem?.ToString() ?? "Normal",
                 requestedDate = _requestedPicker.Value,
                 scheduledDate = (DateTime?)_scheduledPicker.Value,
-                completedDate = _completedEnabled.Checked
-                                    ? (DateTime?)_completedPicker.Value
-                                    : null,
+                completedDate = completed,
                 notes = _notesTxt.Text?.Trim(),
                 createdAt = DateTime.UtcNow
             };

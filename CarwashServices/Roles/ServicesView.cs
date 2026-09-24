@@ -138,7 +138,7 @@ namespace CarwashServices.Roles
 
             _contentPanel.Controls.Add(new Label
             {
-                Text = "SERVICES — service_id · service_name · description · price · duration_minutes",
+                Text = "Manage your carwash services · pricing · duration · category",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
                 Location = new Point(0, 82),
@@ -374,14 +374,14 @@ namespace CarwashServices.Roles
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "ServiceId",
-                HeaderText = "SERVICE_ID",
+                HeaderText = "Service ID",
                 Width = 100
             });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Name",
-                HeaderText = "SERVICE_NAME",
+                HeaderText = "Service Name",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 200,
                 FillWeight = 60
@@ -390,21 +390,21 @@ namespace CarwashServices.Roles
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Price",
-                HeaderText = "PRICE",
+                HeaderText = "Price",
                 Width = 110
             });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Duration",
-                HeaderText = "DURATION",
+                HeaderText = "Duration",
                 Width = 110
             });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Category",
-                HeaderText = "CATEGORY",
+                HeaderText = "Category",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 120,
                 FillWeight = 40
@@ -413,14 +413,14 @@ namespace CarwashServices.Roles
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "IsActive",
-                HeaderText = "STATUS",
+                HeaderText = "Status",
                 Width = 110
             });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Actions",
-                HeaderText = "ACTIONS",
+                HeaderText = "Actions",
                 Width = ActionsColW,
                 DefaultCellStyle = new DataGridViewCellStyle
                 {

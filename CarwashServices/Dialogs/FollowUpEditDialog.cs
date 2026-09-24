@@ -17,22 +17,21 @@ namespace CarwashServices.Dialogs
     /// Follow-Up create / edit dialog.
     ///
     /// On CREATE:
-    ///   - Customer search + checkbox list with "Select all filtered".
+    ///   - Customer search + checkbox list with a dynamic "Select all filtered / Unselect all" toggle.
     ///   - Send Via: SMS / Email.
     ///   - When: Send now / Schedule.
-    ///   - Send On picker enabled only when Schedule is selected.
-    ///   - Discount Offer, Valid Until, Type, Message Preview.
+    ///   - Send On picker is disabled when "Send now" is selected,
+    ///     enabled when "Schedule" is selected.
     ///
     /// On EDIT:
     ///   - Same fields preloaded from an existing FollowUpDto.
     ///   - Status is shown read-only.
-    ///   - Saving sends a PUT that updates the original record.
     /// </summary>
     public class FollowUpEditDialog : Form
     {
         // ---- Input ----
         private readonly List<TenantCustomerDto> _customers;
-        private readonly FollowUpDto? _existing;      // null = create
+        private readonly FollowUpDto? _existing;
         private readonly List<int>? _preselectedIds;
         private readonly Dictionary<int, TenantCustomerDto> _custById;
 
@@ -47,6 +46,7 @@ namespace CarwashServices.Dialogs
         private Button _sendNowBtn = null!, _scheduleBtn = null!;
         private DateTimePicker _scheduledPicker = null!;
         private Label _sendOnLbl = null!;
+        private Label _scheduledErrorLbl = null!;
         private ComboBox _discountCombo = null!;
         private DateTimePicker _validUntilPicker = null!;
         private ComboBox _typeCombo = null!;
@@ -58,6 +58,7 @@ namespace CarwashServices.Dialogs
         private string _contactMethod = "SMS";
         private bool _previewUserEdited = false;
         private List<TenantCustomerDto> _filtered = new();
+        private bool _filterRefreshInProgress = false;
 
         // ---- Layout ----
         private const int ContentW = 640;
@@ -74,6 +75,8 @@ namespace CarwashServices.Dialogs
         private static readonly Color BorderSoft = Color.FromArgb(0xE1, 0xE7, 0xF0);
         private static readonly Color BgCard = Color.FromArgb(0xF7, 0xFA, 0xFD);
         private static readonly Color Faint = Color.FromArgb(0xB4, 0xBE, 0xD2);
+        private static readonly Color Danger = Color.FromArgb(0xC6, 0x28, 0x28);
+        private static readonly Color FieldErrorBg = Color.FromArgb(0xFF, 0xF1, 0xF1);
 
         private readonly HttpClient _http = new HttpClient
         {
@@ -108,6 +111,7 @@ namespace CarwashServices.Dialogs
             else if (_preselectedIds != null && _preselectedIds.Count > 0) PreselectCustomers();
 
             UpdateBadge();
+            UpdateSelectAllLabel();
             UpdatePreview();
         }
 
@@ -128,9 +132,9 @@ namespace CarwashServices.Dialogs
             int d = radius * 2;
             var path = new GraphicsPath();
             path.AddArc(r.X, r.Y, d, d, 180, 90);
-            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            path.AddArc(r.X + r.Width - d, r.Y, d, d, 270, 90);
+            path.AddArc(r.X + r.Width - d, r.Y + r.Height - d, d, d, 0, 90);
+            path.AddArc(r.X, r.Y + r.Height - d, d, d, 90, 90);
             path.CloseFigure();
             return path;
         }
@@ -253,6 +257,7 @@ namespace CarwashServices.Dialogs
             // ---- Customers ----
             root.Controls.Add(Caption("CUSTOMERS *", 0, y));
 
+            // Dynamic "Select all filtered / Unselect all" link.
             _selectAllFilteredLbl = new LinkLabel
             {
                 Text = "Select all filtered",
@@ -263,9 +268,9 @@ namespace CarwashServices.Dialogs
                 Location = new Point(ContentW - 120, y - 1),
                 Cursor = Cursors.Hand,
                 BackColor = Color.White,
-                Visible = !isEdit   // customer can't be changed once created
+                Visible = !isEdit
             };
-            _selectAllFilteredLbl.LinkClicked += (s, e) => SelectAllFiltered();
+            _selectAllFilteredLbl.LinkClicked += (s, e) => ToggleSelectAllFiltered();
             root.Controls.Add(_selectAllFilteredLbl);
             y += 24;
 
@@ -297,7 +302,12 @@ namespace CarwashServices.Dialogs
                 PlaceholderText = "Search by name or phone number",
                 Dock = DockStyle.Top
             };
-            _searchBox.TextChanged += (s, e) => { ApplyCustomerFilter(); UpdateBadge(); };
+            _searchBox.TextChanged += (s, e) =>
+            {
+                ApplyCustomerFilter();
+                UpdateBadge();
+                UpdateSelectAllLabel();
+            };
             searchWrap.Controls.Add(_searchBox);
 
             bool searchFocused = false;
@@ -342,6 +352,7 @@ namespace CarwashServices.Dialogs
                     _customerList.BeginInvoke(new Action(() =>
                     {
                         UpdateBadge();
+                        UpdateSelectAllLabel();
                         UpdatePreview();
                     }));
                 }
@@ -396,7 +407,21 @@ namespace CarwashServices.Dialogs
                 CustomFormat = "MM/dd/yyyy  hh:mm tt",
                 Value = DateTime.Today.AddDays(1).AddHours(9)
             };
+            _scheduledPicker.ValueChanged += (s, e) => ClearScheduledError();
             root.Controls.Add(_scheduledPicker);
+
+            _scheduledErrorLbl = new Label
+            {
+                Text = "",
+                ForeColor = Danger,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 8.5f),
+                Location = new Point(0, y + 28),
+                AutoSize = true,
+                Visible = false
+            };
+            root.Controls.Add(_scheduledErrorLbl);
+
             y += 52;
 
             // ---- Discount Offer / Valid Until ----
@@ -584,18 +609,19 @@ namespace CarwashServices.Dialogs
             Highlight(_sendNowBtn, now);
             Highlight(_scheduleBtn, !now);
 
-            // The picker stays enabled on both modes; it's still shown so the
-            // user can see the send time. On "Send now", it just reflects
-            // DateTime.Now and isn't used by the server.
-            _scheduledPicker.Enabled = true;
+            _scheduledPicker.Enabled = !now;
 
             if (now)
             {
                 _scheduledPicker.Value = DateTime.Now;
                 _sendOnLbl.ForeColor = MutedLight;
+                ClearScheduledError();
             }
             else
             {
+                if (_scheduledPicker.Value <= DateTime.Now)
+                    _scheduledPicker.Value = DateTime.Today.AddDays(1).AddHours(9);
+
                 _sendOnLbl.ForeColor = Muted;
             }
 
@@ -623,59 +649,148 @@ namespace CarwashServices.Dialogs
         }
 
         // ============================================================
+        //  SEND-ON ERROR HELPERS
+        // ============================================================
+        private void ClearScheduledError()
+        {
+            if (_scheduledErrorLbl == null) return;
+            _scheduledErrorLbl.Text = "";
+            _scheduledErrorLbl.Visible = false;
+            _scheduledPicker.CalendarMonthBackground = Color.White;
+        }
+
+        private void MarkScheduledError(string message)
+        {
+            if (_scheduledErrorLbl == null) return;
+            _scheduledErrorLbl.Text = message;
+            _scheduledErrorLbl.Visible = true;
+            _scheduledErrorLbl.BringToFront();
+            _scheduledPicker.CalendarMonthBackground = FieldErrorBg;
+        }
+
+        // ============================================================
         //  CUSTOMER LIST
         // ============================================================
         private void ApplyCustomerFilter()
         {
-            var term = (_searchBox?.Text ?? "").Trim().ToLowerInvariant();
-
-            _filtered = string.IsNullOrEmpty(term)
-                ? new List<TenantCustomerDto>(_customers)
-                : _customers.Where(c =>
-                    (c.CustomerName?.ToLowerInvariant().Contains(term) ?? false) ||
-                    (c.ContactNumber?.ToLowerInvariant().Contains(term) ?? false))
-                .ToList();
-
-            // Preserve current checked IDs across the refresh.
-            var checkedIds = new HashSet<int>();
-            for (int i = 0; i < _customerList.Items.Count; i++)
+            _filterRefreshInProgress = true;
+            try
             {
-                if (_customerList.GetItemChecked(i) &&
-                    _customerList.Items[i] is CustomerItem ci)
+                var term = (_searchBox?.Text ?? "").Trim().ToLowerInvariant();
+
+                _filtered = string.IsNullOrEmpty(term)
+                    ? new List<TenantCustomerDto>(_customers)
+                    : _customers.Where(c =>
+                        (c.CustomerName?.ToLowerInvariant().Contains(term) ?? false) ||
+                        (c.ContactNumber?.ToLowerInvariant().Contains(term) ?? false))
+                    .ToList();
+
+                // Snapshot checked IDs so we can restore them after rebuilding the list.
+                var checkedIds = new HashSet<int>();
+                for (int i = 0; i < _customerList.Items.Count; i++)
                 {
-                    checkedIds.Add(ci.CustomerId);
+                    if (_customerList.GetItemChecked(i) &&
+                        _customerList.Items[i] is CustomerItem ci)
+                    {
+                        checkedIds.Add(ci.CustomerId);
+                    }
                 }
+
+                _customerList.BeginUpdate();
+                _customerList.Items.Clear();
+                foreach (var c in _filtered)
+                {
+                    _customerList.Items.Add(
+                        new CustomerItem(c.TenantCustomerId,
+                                         $"{c.CustomerName}  ·  {c.ContactNumber}"));
+                }
+                _customerList.EndUpdate();
+
+                // Restore checked state — selections outside the filter survive here.
+                for (int i = 0; i < _customerList.Items.Count; i++)
+                {
+                    if (_customerList.Items[i] is CustomerItem ci && checkedIds.Contains(ci.CustomerId))
+                        _customerList.SetItemChecked(i, true);
+                }
+
+                if (_showingLbl != null)
+                    _showingLbl.Text = $"Showing {_filtered.Count} of {_customers.Count} customers";
             }
+            finally
+            {
+                _filterRefreshInProgress = false;
+            }
+        }
+
+        // ------------------------------------------------------------
+        //  Toggle: Select all filtered / Unselect all
+        // ------------------------------------------------------------
+        private void ToggleSelectAllFiltered()
+        {
+            if (_filtered.Count == 0) return;
+            if (_existing != null) return;             // customers can't be edited on edit
+
+            // Decide direction based on whether every filtered item is checked.
+            bool allChecked = AreAllFilteredChecked();
 
             _customerList.BeginUpdate();
-            _customerList.Items.Clear();
-            foreach (var c in _filtered)
+            try
             {
-                _customerList.Items.Add(
-                    new CustomerItem(c.TenantCustomerId,
-                                     $"{c.CustomerName}  ·  {c.ContactNumber}"));
+                for (int i = 0; i < _customerList.Items.Count; i++)
+                {
+                    // The list only contains the filtered set, so every index here is in scope.
+                    _customerList.SetItemChecked(i, !allChecked);
+                }
             }
-            _customerList.EndUpdate();
+            finally
+            {
+                _customerList.EndUpdate();
+            }
 
-            // Re-check any that were checked before.
+            UpdateBadge();
+            UpdateSelectAllLabel();
+            UpdatePreview();
+        }
+
+        private bool AreAllFilteredChecked()
+        {
+            if (_customerList.Items.Count == 0) return false;
+
             for (int i = 0; i < _customerList.Items.Count; i++)
             {
-                if (_customerList.Items[i] is CustomerItem ci && checkedIds.Contains(ci.CustomerId))
-                    _customerList.SetItemChecked(i, true);
+                if (!_customerList.GetItemChecked(i))
+                    return false;
+            }
+            return true;
+        }
+
+        private void UpdateSelectAllLabel()
+        {
+            if (_selectAllFilteredLbl == null) return;
+            if (_existing != null)
+            {
+                _selectAllFilteredLbl.Visible = false;
+                return;
             }
 
-            if (_showingLbl != null)
-                _showingLbl.Text = $"Showing {_filtered.Count} of {_customers.Count} customers";
+            // Empty filter → hide and disable the link entirely.
+            if (_filtered == null || _filtered.Count == 0)
+            {
+                _selectAllFilteredLbl.Visible = false;
+                _selectAllFilteredLbl.Text = "Select all filtered";
+                return;
+            }
+
+            _selectAllFilteredLbl.Visible = true;
+            _selectAllFilteredLbl.Text = AreAllFilteredChecked()
+                ? "Unselect all"
+                : "Select all filtered";
         }
 
         private void SelectAllFiltered()
         {
-            _customerList.BeginUpdate();
-            for (int i = 0; i < _customerList.Items.Count; i++)
-                _customerList.SetItemChecked(i, true);
-            _customerList.EndUpdate();
-            UpdateBadge();
-            UpdatePreview();
+            // Kept for API compatibility; delegates to the toggle.
+            ToggleSelectAllFiltered();
         }
 
         private void PreselectCustomers()
@@ -688,6 +803,7 @@ namespace CarwashServices.Dialogs
                     _customerList.SetItemChecked(i, true);
                 }
             }
+            UpdateSelectAllLabel();
         }
 
         private void UpdateBadge()
@@ -744,23 +860,14 @@ namespace CarwashServices.Dialogs
         {
             if (_existing == null) return;
 
-            // Contact method
             SetMethod(_existing.ContactMethod == "Email" ? "Email" : "SMS");
 
-            // When: Scheduled vs Sent
-            if (_existing.ScheduledDate > DateTime.Now &&
-                string.Equals(_existing.Status, "Scheduled", StringComparison.OrdinalIgnoreCase))
-            {
-                SetWhen(false);
-                _scheduledPicker.Value = _existing.ScheduledDate;
-            }
-            else
-            {
-                SetWhen(true);
-                _scheduledPicker.Value = _existing.ScheduledDate;
-            }
+            bool isScheduled = _existing.ScheduledDate > DateTime.Now
+                && string.Equals(_existing.Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
 
-            // Discount offer
+            _scheduledPicker.Value = _existing.ScheduledDate;
+            SetWhen(!isScheduled);
+
             if (!string.IsNullOrWhiteSpace(_existing.DiscountOffer) &&
                 _discountCombo.Items.Contains(_existing.DiscountOffer))
             {
@@ -776,25 +883,21 @@ namespace CarwashServices.Dialogs
                 _discountCombo.SelectedItem = _existing.DiscountOffer;
             }
 
-            // Valid Until
             if (_existing.ValidUntil.HasValue)
                 _validUntilPicker.Value = _existing.ValidUntil.Value;
 
-            // Type
             if (!string.IsNullOrWhiteSpace(_existing.Type) &&
                 _typeCombo.Items.Contains(_existing.Type))
             {
                 _typeCombo.SelectedItem = _existing.Type;
             }
 
-            // Notes / preview
             if (!string.IsNullOrWhiteSpace(_existing.Notes))
             {
                 _previewBox.Text = _existing.Notes;
                 _previewUserEdited = true;
             }
 
-            // Check the customer (single since editing an existing record).
             for (int i = 0; i < _customerList.Items.Count; i++)
             {
                 if (_customerList.Items[i] is CustomerItem ci &&
@@ -805,7 +908,6 @@ namespace CarwashServices.Dialogs
                 }
             }
 
-            // Disable customer editing — you can't reassign a follow-up's customer.
             _customerList.Enabled = false;
             _searchBox.Enabled = false;
             _selectAllFilteredLbl.Visible = false;
@@ -818,7 +920,6 @@ namespace CarwashServices.Dialogs
         {
             var checkedIndices = _customerList.CheckedIndices.Cast<int>().ToList();
 
-            // ---- Validate ----
             if (_existing == null && checkedIndices.Count == 0)
             {
                 MessageBox.Show("Please select at least one customer.",
@@ -833,7 +934,6 @@ namespace CarwashServices.Dialogs
                 return;
             }
 
-            // Valid Until must be after today.
             if (_validUntilPicker.Value.Date < DateTime.Today)
             {
                 MessageBox.Show("Valid Until cannot be in the past.",
@@ -841,12 +941,16 @@ namespace CarwashServices.Dialogs
                 return;
             }
 
-            // Schedule must be in the future when Schedule is chosen.
             if (!_sendNow && _scheduledPicker.Value <= DateTime.Now)
             {
+                MarkScheduledError("Scheduled send time must be in the future.");
                 MessageBox.Show("When 'Schedule' is selected, the send date must be in the future.",
                     "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
+            }
+            else
+            {
+                ClearScheduledError();
             }
 
             var offer = _discountCombo.SelectedItem?.ToString();
@@ -862,7 +966,7 @@ namespace CarwashServices.Dialogs
                     customerId = _existing.CustomerId,
                     type = _typeCombo.SelectedItem?.ToString() ?? "Service Reminder",
                     contactMethod = _contactMethod,
-                    reason = _existing.Reason,          // preserved, not edited here
+                    reason = _existing.Reason,
                     discountOffer = offer,
                     notes = _previewBox.Text,
                     scheduledDate,
