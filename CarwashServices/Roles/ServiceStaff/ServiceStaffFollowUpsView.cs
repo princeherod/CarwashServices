@@ -18,11 +18,7 @@ namespace CarwashServices.Roles.ServiceStaff
     /// <summary>
     /// Service Staff → Follow-Ups / Reminders.
     ///
-    /// Scoped strictly to the signed-in staff member:
-    ///   - Only rows they created are shown.
-    ///   - Only customers with an assigned request appear in the picker.
-    ///   - Every submission lands in "Pending Approval".
-    ///   - No Send button, no Approve button.
+    /// Scoped strictly to the signed-in staff member.
     /// </summary>
     public class ServiceStaffFollowUpsView : UserControl
     {
@@ -50,29 +46,31 @@ namespace CarwashServices.Roles.ServiceStaff
         private static readonly Font FontPill = new("Segoe UI Semibold", 9f);
         private static readonly Font FontMenu = new("Segoe UI", 9.5f);
 
+        // ================================================================
+        //  Layout — Y positions in the content panel
+        // ================================================================
         private const int PadX = 32;
+        private const int TopMargin = 20;
+
+        private const int BreadcrumbY = 0;
+        private const int TitleY = 26;
+        private const int SubtitleY = 70;          // subtitle rendered here
+        private const int FilterCardY = 136;       // was 122 — pushed down to clear the subtitle
+        private const int FilterCardHeight = 96;
+        private const int GridCardY = 254;         // was 240 — follows FilterCardY + FilterCardHeight + 22
+
         private const int RowTemplateHeight = 62;
         private const int ActionBtnH = 28;
         private const int DotsBtnW = 40;
         private const int MenuItemH = 34;
 
-        // ---- Header layout (fixes title/subtitle overlap) ----
-        private const int BreadcrumbY = 0;
-        private const int TitleY = 22;
-        private const int SubtitleY = 76;
-        private const int ToolbarY = 118;
-        private const int GridTop = 166;
-
-        // Column order (left → right): Customer, Status, Scheduled, Send Via,
-        // Discount Offer, Reason, Actions. Identity + status first, the
-        // internal-only "Reason" note last since it's the least glanced-at.
         private const int ColCustomerMin = 220;
-        private const int ColStatusW = 170;
-        private const int ColScheduledW = 160;
-        private const int ColSendViaW = 110;
-        private const int ColDiscountW = 190;   // was 160 — was clipping "DISCOUNT OFFER"
-        private const int ColReasonMin = 200;
-        private const int ColActionsW = 96;     // was 80 — was clipping "ACTIONS"
+        private const int ColScheduledW = 220;
+        private const int ColReasonMin = 180;
+        private const int ColDiscountW = 180;
+        private const int ColSendViaW = 120;
+        private const int ColStatusW = 180;
+        private const int ColActionsW = 110;
 
         private readonly HttpClient _http = new()
         {
@@ -86,8 +84,11 @@ namespace CarwashServices.Roles.ServiceStaff
 
         private Panel _contentPanel = null!;
         private DataGridView _grid = null!;
+        private Panel _filterCard = null!;
+        private Panel _searchWrap = null!;
         private TextBox _searchBox = null!;
         private Button _searchBtn = null!;
+        private Button _refreshBtn = null!;
         private ComboBox _statusFilter = null!;
         private Button _addBtn = null!;
         private Label _showingLbl = null!;
@@ -124,46 +125,54 @@ namespace CarwashServices.Roles.ServiceStaff
             LostFocus += (s, e) => CloseActiveMenu();
         }
 
-        // ================================================================
-        //  UI
-        // ================================================================
         private void BuildUi()
         {
             _contentPanel = new Panel
             {
                 Dock = DockStyle.Fill,
                 BackColor = PageBg,
-                Padding = new Padding(PadX, 20, PadX, 20)
+                Padding = new Padding(PadX, TopMargin, PadX, TopMargin)
             };
             Controls.Add(_contentPanel);
 
+            // ---- Header (three stacked labels, generous vertical room) ----
+
+            // Breadcrumb
             _contentPanel.Controls.Add(new Label
             {
                 Text = "Modules  ›  Follow-Ups / Reminders",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
                 Location = new Point(0, BreadcrumbY),
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.Transparent
             });
 
+            // Title
             _contentPanel.Controls.Add(new Label
             {
                 Text = "Follow-Ups / Reminders",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 22f),
                 Location = new Point(0, TitleY),
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.Transparent
             });
 
+            // Subtitle — sits at Y = 70, which leaves 66 px of clearance to the
+            // filter card at Y = 136. Even at 125% DPI the subtitle (2 lines max)
+            // cannot overlap the filter card.
             _contentPanel.Controls.Add(new Label
             {
                 Text = "Create follow-up requests for your assigned customers. Every submission needs Admin approval before it can be sent.",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9.5f),
                 Location = new Point(0, SubtitleY),
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.Transparent
             });
 
+            // New Follow-Up button
             _addBtn = new Button
             {
                 Text = "+  New Follow-Up",
@@ -181,17 +190,60 @@ namespace CarwashServices.Roles.ServiceStaff
             _addBtn.Click += (s, e) => OpenAddDialog();
             _contentPanel.Controls.Add(_addBtn);
 
-            // ---- Search box + explicit search button ----
+            // ---- Filter card ----
+            _filterCard = new Panel
+            {
+                BackColor = Color.White,
+                Location = new Point(0, FilterCardY),
+                Height = FilterCardHeight,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _filterCard.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder);
+                e.Graphics.DrawRectangle(pen, 0, 0, _filterCard.Width - 1, _filterCard.Height - 1);
+            };
+            _contentPanel.Controls.Add(_filterCard);
+
+            _filterCard.Controls.Add(new Label
+            {
+                Text = "Search",
+                ForeColor = Muted,
+                Font = new Font("Segoe UI Semibold", 8.5f),
+                Location = new Point(16, 8),
+                AutoSize = true
+            });
+
+            _searchWrap = new Panel
+            {
+                Location = new Point(16, 38),
+                Size = new Size(400, 36),
+                BackColor = Color.White,
+                Padding = new Padding(10, 7, 10, 0)
+            };
+            _searchWrap.Paint += (s, e) =>
+            {
+                using var pen = new Pen(_searchWrap.Focused ? Blue : Faint);
+                e.Graphics.DrawRectangle(pen, 0, 0, _searchWrap.Width - 1, _searchWrap.Height - 1);
+            };
+            _filterCard.Controls.Add(_searchWrap);
+
             _searchBox = new TextBox
             {
-                Font = new Font("Segoe UI", 10f),
-                BorderStyle = BorderStyle.FixedSingle,
+                BorderStyle = BorderStyle.None,
+                Font = new Font("Segoe UI", 10.5f),
                 BackColor = Color.White,
+                ForeColor = Navy,
                 PlaceholderText = "Search by customer...",
-                Location = new Point(0, ToolbarY),
-                Width = 320
+                Dock = DockStyle.Top
             };
-            _contentPanel.Controls.Add(_searchBox);
+            _searchWrap.Controls.Add(_searchBox);
+
+            bool searchFocused = false;
+            _searchBox.Enter += (s, e) => { searchFocused = true; _searchWrap.Invalidate(); };
+            _searchBox.Leave += (s, e) => { searchFocused = false; _searchWrap.Invalidate(); };
+            _searchWrap.Resize += (s, e) => _searchWrap.Invalidate();
+
             _searchBox.TextChanged += (s, e) => { _page = 1; RenderGrid(); };
             _searchBox.KeyDown += (s, e) =>
             {
@@ -205,39 +257,50 @@ namespace CarwashServices.Roles.ServiceStaff
 
             _searchBtn = new Button
             {
-                Size = new Size(38, 27),
+                Text = "Search",
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.White,
+                Font = new Font("Segoe UI Semibold", 10f),
+                BackColor = Navy,
+                ForeColor = Color.White,
+                Size = new Size(100, 36),
                 Cursor = Cursors.Hand,
-                UseVisualStyleBackColor = false,
-                TabStop = false,
-                Text = ""
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                UseVisualStyleBackColor = false
             };
-            _searchBtn.FlatAppearance.BorderColor = CardBorder;
-            _searchBtn.FlatAppearance.MouseOverBackColor = BlueSoft;
-            _searchBtn.Paint += (s, e) =>
-            {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                bool hover = _searchBtn.ClientRectangle.Contains(_searchBtn.PointToClient(Cursor.Position));
-                int d = 13;
-                var iconRect = new Rectangle(
-                    (_searchBtn.Width - d) / 2 - 2,
-                    (_searchBtn.Height - d) / 2 - 2,
-                    d, d);
-                DrawSearchIcon(e.Graphics, iconRect, hover ? Blue : Navy);
-            };
+            _searchBtn.FlatAppearance.BorderSize = 0;
+            _searchBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(0x16, 0x2A, 0x5C);
             _searchBtn.Click += (s, e) => { _page = 1; RenderGrid(); };
-            _searchBtn.MouseEnter += (s, e) => _searchBtn.Invalidate();
-            _searchBtn.MouseLeave += (s, e) => _searchBtn.Invalidate();
-            _contentPanel.Controls.Add(_searchBtn);
+            _filterCard.Controls.Add(_searchBtn);
+
+            _refreshBtn = new Button
+            {
+                Text = "Refresh",
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 10f),
+                ForeColor = Navy,
+                Size = new Size(100, 36),
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.White,
+                UseVisualStyleBackColor = false
+            };
+            _refreshBtn.FlatAppearance.BorderColor = CardBorder;
+            _refreshBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xF5, 0xF7, 0xFA);
+            _refreshBtn.Click += async (s, e) =>
+            {
+                await LoadMyCustomersAsync();
+                await LoadAsync();
+            };
+            _filterCard.Controls.Add(_refreshBtn);
 
             _statusFilter = new ComboBox
             {
                 Font = new Font("Segoe UI", 10f),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 BackColor = Color.White,
-                Location = new Point(336, ToolbarY),
-                Width = 200
+                Size = new Size(180, 36),
+                Location = new Point(430, 38),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
             _statusFilter.Items.AddRange(new object[]
             {
@@ -252,11 +315,12 @@ namespace CarwashServices.Roles.ServiceStaff
             });
             _statusFilter.SelectedIndex = 0;
             _statusFilter.SelectedIndexChanged += (s, e) => { _page = 1; RenderGrid(); };
-            _contentPanel.Controls.Add(_statusFilter);
+            _filterCard.Controls.Add(_statusFilter);
 
+            // ---- Grid card ----
             _gridCard = new Panel
             {
-                Location = new Point(0, GridTop),
+                Location = new Point(0, GridCardY),
                 BackColor = Color.White,
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -274,11 +338,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 BorderStyle = BorderStyle.None,
                 GridColor = CardBorder,
                 EnableHeadersVisualStyles = false,
-
-                // Horizontal scrollbar appears when the sum of column widths
-                // exceeds the available width. Vertical scrollbar stays for rows.
                 ScrollBars = ScrollBars.Both,
-
                 ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
                 {
                     BackColor = HeaderBg,
@@ -314,8 +374,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal
             };
 
-            // ---- Columns, rearranged: Customer, Status, Scheduled, Send Via,
-            //      Discount Offer, Reason, Actions ----
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "FollowUpId", Visible = false });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -329,49 +387,54 @@ namespace CarwashServices.Roles.ServiceStaff
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                Name = "Status",
-                HeaderText = "STATUS",
-                Width = ColStatusW,
-                MinimumWidth = ColStatusW
-            });
-
-            _grid.Columns.Add(new DataGridViewTextBoxColumn
-            {
                 Name = "Scheduled",
-                HeaderText = "SCHEDULED",
+                HeaderText = "SCHEDULED / SEND ON",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                 Width = ColScheduledW,
                 MinimumWidth = ColScheduledW
             });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                Name = "SendVia",
-                HeaderText = "SEND VIA",
-                Width = ColSendViaW,
-                MinimumWidth = ColSendViaW
+                Name = "Reason",
+                HeaderText = "REASON",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                Width = ColReasonMin,
+                MinimumWidth = ColReasonMin
             });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Discount",
                 HeaderText = "DISCOUNT OFFER",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                 Width = ColDiscountW,
                 MinimumWidth = ColDiscountW
             });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                Name = "Reason",
-                HeaderText = "REASON",
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = ColReasonMin,
-                FillWeight = 70
+                Name = "SendVia",
+                HeaderText = "SEND VIA",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                Width = ColSendViaW,
+                MinimumWidth = ColSendViaW
             });
 
-            var actionsCol = new DataGridViewTextBoxColumn
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Status",
+                HeaderText = "STATUS",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                Width = ColStatusW,
+                MinimumWidth = ColStatusW
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Actions",
                 HeaderText = "ACTIONS",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                 Width = ColActionsW,
                 MinimumWidth = ColActionsW,
                 DefaultCellStyle = new DataGridViewCellStyle
@@ -379,10 +442,7 @@ namespace CarwashServices.Roles.ServiceStaff
                     Alignment = DataGridViewContentAlignment.MiddleCenter,
                     Padding = new Padding(0)
                 }
-            };
-            actionsCol.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            actionsCol.HeaderCell.Style.Padding = new Padding(0);
-            _grid.Columns.Add(actionsCol);
+            });
 
             _grid.CellPainting += Grid_CellPainting;
             _grid.CellMouseMove += Grid_CellMouseMove;
@@ -421,32 +481,25 @@ namespace CarwashServices.Roles.ServiceStaff
             LayoutAll();
         }
 
-        private static void DrawSearchIcon(Graphics g, Rectangle r, Color color)
-        {
-            using var pen = new Pen(color, 1.6f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            int d = (int)(r.Width * 0.78);
-            var circle = new Rectangle(r.X, r.Y, d, d);
-            g.DrawEllipse(pen, circle);
-            g.DrawLine(pen, circle.Right - 2, circle.Bottom - 2, r.Right + 2, r.Bottom + 2);
-        }
-
         private void LayoutAll()
         {
             if (_contentPanel == null) return;
             int w = _contentPanel.ClientSize.Width - _contentPanel.Padding.Horizontal;
             int h = _contentPanel.ClientSize.Height - _contentPanel.Padding.Vertical;
-            if (w < 200) return;
+            if (w < 300) return;
 
             _addBtn.Location = new Point(w - _addBtn.Width, 20);
 
-            _statusFilter.Location = new Point(w - _statusFilter.Width, ToolbarY);
-            _searchBtn.Location = new Point(_statusFilter.Left - 8 - _searchBtn.Width, ToolbarY - 1);
-            _searchBox.Width = Math.Max(160, _searchBtn.Left - 8);
-            _searchBox.Location = new Point(0, ToolbarY);
+            _filterCard.Width = w;
+
+            _refreshBtn.Location = new Point(w - 16 - _refreshBtn.Width, 38);
+            _searchBtn.Location = new Point(_refreshBtn.Left - 10 - _searchBtn.Width, 38);
+            _statusFilter.Location = new Point(_searchBtn.Left - 12 - _statusFilter.Width, 38);
+            _searchWrap.Width = Math.Max(160, _statusFilter.Left - 12 - _searchWrap.Left);
 
             int pagerH = 48;
             _pager.SetBounds(0, h - pagerH, w, pagerH);
-            _gridCard.SetBounds(0, GridTop, w, Math.Max(0, h - GridTop - pagerH));
+            _gridCard.SetBounds(0, GridCardY, w, Math.Max(0, h - GridCardY - pagerH));
 
             RecomputePageSize();
         }
@@ -583,7 +636,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 if (!string.IsNullOrWhiteSpace(second))
                     custCell += "\n" + second;
 
-                var scheduled = f.ScheduledDate.ToString("MMM d, yyyy  h:mm tt");
+                var scheduled = f.ScheduledDate.ToString("MMM d, yyyy — h:mm tt");
                 var reason = string.IsNullOrWhiteSpace(f.Reason) ? "—" : f.Reason!;
                 var discount = string.IsNullOrWhiteSpace(f.DiscountOffer) ? "—" : f.DiscountOffer;
                 var method = string.IsNullOrWhiteSpace(f.ContactMethod) ? "Email" : f.ContactMethod;
@@ -597,16 +650,14 @@ namespace CarwashServices.Roles.ServiceStaff
                     _ => f.Status ?? "Draft"
                 };
 
-                // Values supplied in column order: FollowUpId, Customer, Status,
-                // Scheduled, SendVia, Discount, Reason, Actions.
                 int idx = _grid.Rows.Add(
                     f.FollowUpId,
                     custCell,
-                    displayStatus,
                     scheduled,
-                    method,
-                    discount,
                     reason,
+                    discount,
+                    method,
+                    displayStatus,
                     "");
 
                 _grid.Rows[idx].Tag = f.FollowUpId;
@@ -694,6 +745,12 @@ namespace CarwashServices.Roles.ServiceStaff
                 return;
             }
 
+            if (col == "Scheduled")
+            {
+                PaintScheduled(e);
+                return;
+            }
+
             if (col == "Status")
             {
                 PaintStatusPill(e);
@@ -738,6 +795,27 @@ namespace CarwashServices.Roles.ServiceStaff
                 TextRenderer.DrawText(e.Graphics, l2, FontLine2,
                     new Rectangle(x, top + h1 + gap, w, h2), Muted, flags);
             }
+            e.Handled = true;
+        }
+
+        private static void PaintScheduled(DataGridViewCellPaintingEventArgs e)
+        {
+            e.Paint(e.CellBounds, DataGridViewPaintParts.Background |
+                                  DataGridViewPaintParts.Border |
+                                  DataGridViewPaintParts.SelectionBackground);
+
+            var text = Convert.ToString(e.Value) ?? "";
+            if (text.Length == 0) { e.Handled = true; return; }
+
+            var b = e.CellBounds;
+            int x = b.X + 16;
+            int w = Math.Max(10, b.Width - 24);
+
+            TextRenderer.DrawText(e.Graphics, text, FontLine1,
+                new Rectangle(x, b.Y, w, b.Height), Navy,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+
             e.Handled = true;
         }
 
@@ -839,7 +917,7 @@ namespace CarwashServices.Roles.ServiceStaff
         }
 
         // ================================================================
-        //  Hover / Click
+        //  Hover / click
         // ================================================================
         private void Grid_CellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
         {
@@ -892,7 +970,7 @@ namespace CarwashServices.Roles.ServiceStaff
         }
 
         // ================================================================
-        //  Action menu — status-aware
+        //  Menu
         // ================================================================
         private void ShowActionsMenu(int rowIndex, FollowUpDto f)
         {

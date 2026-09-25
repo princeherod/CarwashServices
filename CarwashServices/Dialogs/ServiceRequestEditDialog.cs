@@ -13,37 +13,30 @@ namespace CarwashServices.Dialogs
     /// <summary>
     /// Create / edit a service request.
     ///
-    /// On CREATE:
-    ///   - No Status field. System forces "Pending".
-    ///   - No Completed Date field.
-    ///   - Assigned Staff combo is present but "Unassigned" is the only
-    ///     sensible choice; the server also nulls AssignedStaffId on create.
+    /// This dialog edits only the CONTENT of a request:
+    ///   - Customer, Service, Priority, Requested Date, Scheduled Date, Notes.
+    ///   - Completed Date is read-only (set by the Service Staff flow).
+    ///   - No Status dropdown.
+    ///   - No Assigned Staff — that belongs in the "Assign Service Staff" module.
     ///
-    /// On EDIT:
-    ///   - Status becomes an editable combo.
-    ///   - Completed Date becomes available and is gated by status.
-    ///   - Assigned Staff combo allows reassigning the job to any Service
-    ///     Staff user or clearing the assignment.
+    /// On CREATE the API forces status = "Pending" and AssignedStaffId = null.
+    /// On EDIT the assignment is not touched by this dialog.
     /// </summary>
     public class ServiceRequestEditDialog : Form
     {
         private readonly int? _requestId;
         private readonly List<CustomerDto> _customers;
         private readonly List<ServiceDto> _services;
-        private readonly List<UserDto> _staff;
 
         private ComboBox _customerCombo = null!;
         private ComboBox _serviceCombo = null!;
-        private ComboBox _assignedStaffCombo = null!;
-        private ComboBox _statusCombo = null!;      // edit only
         private ComboBox _priorityCombo = null!;
         private DateTimePicker _requestedPicker = null!;
         private DateTimePicker _scheduledPicker = null!;
-        private DateTimePicker _completedPicker = null!;   // edit only
-        private CheckBox _completedEnabled = null!;         // edit only
+
+        private Label _completedValueLbl = null!;
         private TextBox _notesTxt = null!;
 
-        // Error labels keyed by their control
         private readonly Dictionary<Control, Label> _fieldErrors = new();
 
         // ---- Palette ----
@@ -54,12 +47,18 @@ namespace CarwashServices.Dialogs
         private static readonly Color AccentBlue = Color.FromArgb(30, 136, 229);
         private static readonly Color Danger = Color.FromArgb(0xC6, 0x28, 0x28);
         private static readonly Color FieldErrorBg = Color.FromArgb(0xFF, 0xF1, 0xF1);
+        private static readonly Color ReadOnlyBg = Color.FromArgb(0xF7, 0xFA, 0xFD);
 
         private readonly HttpClient _http = new HttpClient
         {
             BaseAddress = new Uri("http://localhost:5180/")
         };
 
+        /// <summary>
+        /// Signature kept identical to previous versions so no caller needs
+        /// to change. The `staff` argument is accepted for compatibility but
+        /// no longer used — assignment lives in its own module.
+        /// </summary>
         public ServiceRequestEditDialog(
             int? requestId,
             List<CustomerDto> customers,
@@ -69,7 +68,7 @@ namespace CarwashServices.Dialogs
             _requestId = requestId;
             _customers = customers ?? new();
             _services = services ?? new();
-            _staff = staff ?? new();
+            _ = staff;   // retained for API compatibility
 
             InitializeForm();
 
@@ -84,7 +83,7 @@ namespace CarwashServices.Dialogs
             Text = isEdit
                 ? $"Edit SERVICE_REQUEST — #{_requestId}"
                 : "New Service Request";
-            Size = new Size(860, isEdit ? 780 : 700);
+            Size = new Size(860, isEdit ? 680 : 600);
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9.5f);
@@ -142,7 +141,7 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(SectionDivider("Request Details", y, body.Width - 60));
             y += 40;
 
-            // ---- Customer (full width) ----
+            // ---- Customer ----
             body.Controls.Add(MakeLabel("Customer *", 30, y));
             _customerCombo = MakeCombo(30, y + 22, 745);
             foreach (var c in _customers)
@@ -151,7 +150,7 @@ namespace CarwashServices.Dialogs
             AddErrorLabel(body, _customerCombo, 30, y + 50);
             y += 88;
 
-            // ---- Service (full width) ----
+            // ---- Service ----
             body.Controls.Add(MakeLabel("Service *", 30, y));
             _serviceCombo = MakeCombo(30, y + 22, 745);
             foreach (var s in _services)
@@ -160,47 +159,20 @@ namespace CarwashServices.Dialogs
             AddErrorLabel(body, _serviceCombo, 30, y + 50);
             y += 88;
 
-            // ---- Assigned Staff ----
-            body.Controls.Add(MakeLabel("Assigned Staff", 30, y));
-            _assignedStaffCombo = MakeCombo(30, y + 22, 745);
-            _assignedStaffCombo.Items.Add(new ComboItem(null, "— Unassigned —"));
-            foreach (var s in _staff)
-                _assignedStaffCombo.Items.Add(new ComboItem(s.UserId, s.FullName));
-            _assignedStaffCombo.SelectedIndex = 0;
-            body.Controls.Add(_assignedStaffCombo);
-            AddErrorLabel(body, _assignedStaffCombo, 30, y + 50);
-            y += 88;
+            // (Assigned Staff combo intentionally omitted — see the
+            //  "Assign Service Staff" module.)
 
             // ============ SCHEDULING ============
             body.Controls.Add(SectionDivider("Scheduling", y, body.Width - 60));
             y += 40;
 
-            // ---- Status (edit only) + Priority ----
-            if (isEdit)
-            {
-                body.Controls.Add(MakeLabel("Status", 30, y));
-                _statusCombo = MakeCombo(30, y + 22, 360);
-                _statusCombo.Items.AddRange(new object[]
-                {
-                    "Pending", "Assigned", "InProgress", "Completed", "Cancelled"
-                });
-                _statusCombo.SelectedIndex = 0;
-                _statusCombo.SelectedIndexChanged += (s, e) =>
-                {
-                    ClearFieldError(_statusCombo);
-                    UpdateCompletedAvailability();
-                };
-                body.Controls.Add(_statusCombo);
-                AddErrorLabel(body, _statusCombo, 30, y + 50);
-            }
-
-            body.Controls.Add(MakeLabel("Priority", isEdit ? 415 : 30, y));
-            _priorityCombo = MakeCombo(isEdit ? 415 : 30, y + 22, 360);
+            // ---- Priority ----
+            body.Controls.Add(MakeLabel("Priority", 30, y));
+            _priorityCombo = MakeCombo(30, y + 22, 360);
             _priorityCombo.Items.AddRange(new object[] { "Normal", "High", "VIP" });
             _priorityCombo.SelectedIndex = 0;
             body.Controls.Add(_priorityCombo);
-            AddErrorLabel(body, _priorityCombo, isEdit ? 415 : 30, y + 50);
-
+            AddErrorLabel(body, _priorityCombo, 30, y + 50);
             y += 88;
 
             // ---- Requested Date ----
@@ -226,29 +198,35 @@ namespace CarwashServices.Dialogs
             AddErrorLabel(body, _scheduledPicker, 415, y + 50);
             y += 88;
 
-            // ---- Completed Date (edit only) ----
+            // ---- Completed Date (read-only, edit mode only) ----
             if (isEdit)
             {
                 body.Controls.Add(MakeLabel("Completed Date", 30, y));
-                _completedPicker = MakeDatePicker(30, y + 22, 320);
-                _completedPicker.Enabled = false;
 
-                _completedEnabled = new CheckBox
+                _completedValueLbl = new Label
                 {
-                    Text = "Set",
-                    Location = new Point(360, y + 26),
-                    AutoSize = true,
-                    Cursor = Cursors.Hand
+                    Location = new Point(30, y + 22),
+                    Width = 360,
+                    Height = 30,
+                    Font = new Font("Segoe UI", 10f),
+                    ForeColor = TextMuted,
+                    BackColor = ReadOnlyBg,
+                    BorderStyle = BorderStyle.FixedSingle,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Padding = new Padding(8, 0, 0, 0),
+                    Text = "—"
                 };
-                _completedEnabled.CheckedChanged += (s, e) =>
-                {
-                    _completedPicker.Enabled = _completedEnabled.Checked;
-                    ClearFieldError(_completedPicker);
-                };
+                body.Controls.Add(_completedValueLbl);
 
-                body.Controls.Add(_completedPicker);
-                body.Controls.Add(_completedEnabled);
-                AddErrorLabel(body, _completedPicker, 30, y + 50);
+                body.Controls.Add(new Label
+                {
+                    Text = "Set automatically when the Service Staff completes the job.",
+                    ForeColor = TextMuted,
+                    Font = new Font("Segoe UI", 8.5f),
+                    Location = new Point(30, y + 56),
+                    AutoSize = true
+                });
+
                 y += 88;
             }
 
@@ -269,11 +247,12 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(_notesTxt);
             y += 125;
 
+            // ---- Hint ----
             body.Controls.Add(new Label
             {
                 Text = isEdit
-                    ? "Note: Status and Completed Date are normally managed by Service Staff."
-                    : "Note: New requests are created with status Pending. Completed Date becomes available in Edit.",
+                    ? "Assignment is handled in the Assign Service Staff module. Status is updated by the assigned Service Staff."
+                    : "New requests start as Pending. Use Assign Service Staff to pick the Service Staff who will handle it.",
                 ForeColor = AccentBlue,
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Italic),
                 Location = new Point(30, y),
@@ -442,25 +421,6 @@ namespace CarwashServices.Dialogs
         }
 
         // ================================================================
-        //  Completed-date gating (edit mode only)
-        // ================================================================
-        private void UpdateCompletedAvailability()
-        {
-            if (_completedPicker == null || _statusCombo == null) return;
-
-            var status = _statusCombo.SelectedItem?.ToString() ?? "Pending";
-            bool allowSet = status == "Completed";
-
-            if (!allowSet)
-            {
-                _completedEnabled.Checked = false;
-                _completedPicker.Enabled = false;
-                _completedPicker.Value = DateTime.Now;
-                ClearFieldError(_completedPicker);
-            }
-        }
-
-        // ================================================================
         //  Live validation for Scheduled Date
         // ================================================================
         private void ValidateScheduledField()
@@ -493,52 +453,30 @@ namespace CarwashServices.Dialogs
                 SelectComboById(_customerCombo, req.CustomerId);
                 SelectComboById(_serviceCombo, req.ServiceId);
 
-                // Assigned staff: default to "Unassigned" then try to select.
-                _assignedStaffCombo.SelectedIndex = 0;
-                if (req.AssignedStaffId.HasValue)
-                {
-                    for (int i = 0; i < _assignedStaffCombo.Items.Count; i++)
-                    {
-                        if (_assignedStaffCombo.Items[i] is ComboItem ci &&
-                            ci.Id == req.AssignedStaffId.Value)
-                        {
-                            _assignedStaffCombo.SelectedIndex = i;
-                            break;
-                        }
-                    }
-                }
-
-                if (!string.IsNullOrWhiteSpace(req.Status) &&
-                    !_statusCombo.Items.Contains(req.Status))
-                {
-                    _statusCombo.Items.Add(req.Status);
-                }
-                _statusCombo.SelectedItem = req.Status ?? "Pending";
-
                 _priorityCombo.SelectedItem = req.Priority ?? "Normal";
 
                 if (req.RequestedDate != default)
                 {
-                    if (req.RequestedDate < DateTime.Today) _requestedPicker.MinDate = req.RequestedDate;
+                    if (req.RequestedDate < DateTime.Today)
+                        _requestedPicker.MinDate = req.RequestedDate;
                     _requestedPicker.Value = req.RequestedDate;
                 }
 
                 if (req.ScheduledDate.HasValue)
                 {
-                    if (req.ScheduledDate.Value < DateTime.Today) _scheduledPicker.MinDate = req.ScheduledDate.Value;
+                    if (req.ScheduledDate.Value < DateTime.Today)
+                        _scheduledPicker.MinDate = req.ScheduledDate.Value;
                     _scheduledPicker.Value = req.ScheduledDate.Value;
                 }
 
-                if (req.CompletedDate.HasValue)
+                if (_completedValueLbl != null)
                 {
-                    _completedEnabled.Checked = true;
-                    _completedPicker.Enabled = true;
-                    _completedPicker.Value = req.CompletedDate.Value;
+                    _completedValueLbl.Text = req.CompletedDate.HasValue
+                        ? req.CompletedDate.Value.ToString("MM/dd/yyyy hh:mm tt")
+                        : "—";
                 }
 
                 _notesTxt.Text = req.Notes ?? "";
-
-                UpdateCompletedAvailability();
             }
             catch (Exception ex)
             {
@@ -565,8 +503,6 @@ namespace CarwashServices.Dialogs
         // ================================================================
         private bool ValidateForm()
         {
-            bool isEdit = _requestId.HasValue;
-
             foreach (var c in _fieldErrors.Keys)
                 ClearFieldError(c);
 
@@ -597,24 +533,6 @@ namespace CarwashServices.Dialogs
                 ok = false;
             }
 
-            if (isEdit && _completedEnabled.Checked)
-            {
-                var completed = _completedPicker.Value;
-                if (completed < _requestedPicker.Value)
-                {
-                    MarkFieldError(_completedPicker,
-                        "Completed date cannot be earlier than the requested date.");
-                    ok = false;
-                }
-                else if (_scheduledPicker.Value != default
-                         && completed < _scheduledPicker.Value)
-                {
-                    MarkFieldError(_completedPicker,
-                        "Completed date cannot be earlier than the scheduled date.");
-                    ok = false;
-                }
-            }
-
             return ok;
         }
 
@@ -640,32 +558,20 @@ namespace CarwashServices.Dialogs
 
             var custItem = (ComboItem)_customerCombo.SelectedItem!;
             var svcItem = (ComboItem)_serviceCombo.SelectedItem!;
-            var staffItem = _assignedStaffCombo.SelectedItem as ComboItem;
 
-            string status = isEdit
-                ? (_statusCombo.SelectedItem?.ToString() ?? "Pending")
-                : "Pending";
-
-            DateTime? completed = null;
-            if (isEdit && _completedEnabled != null && _completedEnabled.Checked)
-                completed = _completedPicker.Value;
-
+            // Single payload for every role.
+            //   - No status (Service Staff owns it).
+            //   - No completedDate (Service Staff flow sets it).
+            //   - No assignedStaffId / clearAssignment (Assign Service Staff owns it).
             var dto = new
             {
                 requestId = _requestId ?? 0,
                 customerId = custItem.Id!.Value,
                 serviceId = svcItem.Id!.Value,
-                status,
                 priority = _priorityCombo.SelectedItem?.ToString() ?? "Normal",
                 requestedDate = _requestedPicker.Value,
                 scheduledDate = (DateTime?)_scheduledPicker.Value,
-                completedDate = completed,
                 notes = _notesTxt.Text?.Trim(),
-
-                // Assigned staff — either a user id, or null to clear
-                assignedStaffId = staffItem?.Id,
-                clearAssignment = staffItem?.Id == null,
-
                 createdAt = DateTime.UtcNow
             };
 

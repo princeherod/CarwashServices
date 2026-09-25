@@ -17,28 +17,9 @@ namespace CarwashServices.Roles.ServiceStaff
     /// <summary>
     /// Service Staff → Update Service Status.
     ///
-    /// Layout:
-    ///   ┌─ My Assigned Services ─┬─ Detail Card (customer/service/summary) ─┐
-    ///   │  #213 Rej Obenza        │   Rej Obenza        ₱10,000              │
-    ///   │  Full Service · Normal  │   09831231231 · darkrej143@gmail.com    │
-    ///   │  Sep 25 — 12:06 PM      │   LJKDS123 · Toyota Fortuner · Hatchback │
-    ///   │                         │   ─────────────────────────────────────  │
-    ///   │  #214 Axel Apduhan      │   Request ID  #213   Priority   Normal   │
-    ///   │  Washing with Wax       │   Requested   ...    Scheduled  ...      │
-    ///   │  Sep 25 — 12:11 PM      │   Assigned    xel                        │
-    ///   └─────────────────────────┴─────────────────────────────────────────┘
-    ///   ┌─ SERVICE PROGRESS ────────────────────────────────────────────────┐
-    ///   │   ●──────────○──────────○                                        │
-    ///   │ Pending   In Progress  Completed                                  │
-    ///   └───────────────────────────────────────────────────────────────────┘
-    ///   ┌─ UPDATE STATUS ───────────────────────────────────────────────────┐
-    ///   │  NEW STATUS [Pending ▼]                                           │
-    ///   │  NOTES [                                              ]           │
-    ///   │  [ Save Status ]                                                  │
-    ///   └───────────────────────────────────────────────────────────────────┘
-    ///   ┌─ STATUS HISTORY ──────────────────────────────────────────────────┐
-    ///   │ Request | Status | Updated By | Updated At | Notes                │
-    ///   └───────────────────────────────────────────────────────────────────┘
+    /// Left column lists the staff member's active assigned requests.
+    /// Right column shows details, progress timeline, update form, and
+    /// the full status history for the selected request.
     /// </summary>
     public class UpdateServiceStatusView : UserControl
     {
@@ -83,8 +64,15 @@ namespace CarwashServices.Roles.ServiceStaff
         private const int TopMargin = 16;
         private const int SectionGap = 14;
 
-        private const int LeftColWidth = 400;
-        private const int RequestCardHeight = 96;
+        // Header Y positions
+        private const int BreadcrumbY = 0;
+        private const int TitleY = 24;
+        private const int SubtitleY = 66;
+        private const int LayoutTopY = 112;
+
+        // Left column — widened so the full date/time line fits on each card
+        private const int LeftColWidth = 480;
+        private const int RequestCardHeight = 100;
 
         private readonly HttpClient _http = new()
         {
@@ -111,7 +99,7 @@ namespace CarwashServices.Roles.ServiceStaff
         private Panel _detailHost = null!;
         private Panel _emptyDetail = null!;
 
-        // Detail controls
+        // Detail controls (rebuilt each time a request is selected)
         private ComboBox _statusCombo = null!;
         private TextBox _notesBox = null!;
         private Button _saveBtn = null!;
@@ -133,7 +121,7 @@ namespace CarwashServices.Roles.ServiceStaff
         }
 
         // ================================================================
-        //  Shell UI
+        //  UI
         // ================================================================
         private void BuildUi()
         {
@@ -151,8 +139,9 @@ namespace CarwashServices.Roles.ServiceStaff
                 Text = "Modules  ›  Update Service Status",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
-                Location = new Point(0, 0),
-                AutoSize = true
+                Location = new Point(0, BreadcrumbY),
+                AutoSize = true,
+                BackColor = Color.Transparent
             });
 
             _contentPanel.Controls.Add(new Label
@@ -160,8 +149,9 @@ namespace CarwashServices.Roles.ServiceStaff
                 Text = "Update Service Status",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 22f),
-                Location = new Point(0, 24),
-                AutoSize = true
+                Location = new Point(0, TitleY),
+                AutoSize = true,
+                BackColor = Color.Transparent
             });
 
             _contentPanel.Controls.Add(new Label
@@ -169,11 +159,12 @@ namespace CarwashServices.Roles.ServiceStaff
                 Text = "Update the progress of services assigned to you.",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9.5f),
-                Location = new Point(0, 64),
-                AutoSize = true
+                Location = new Point(0, SubtitleY),
+                AutoSize = true,
+                BackColor = Color.Transparent
             });
 
-            // Two-column body
+            // ---- Two-column body ----
             _layout = new TableLayoutPanel
             {
                 ColumnCount = 2,
@@ -186,7 +177,7 @@ namespace CarwashServices.Roles.ServiceStaff
             _layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             _contentPanel.Controls.Add(_layout);
 
-            // ---- Left column: requests list ----
+            // ---- Left card: My Assigned Services ----
             var leftCard = new Panel
             {
                 BackColor = Color.White,
@@ -232,12 +223,15 @@ namespace CarwashServices.Roles.ServiceStaff
             requestsHost.Resize += (s, e) =>
             {
                 _requestsPanel.Width = requestsHost.ClientSize.Width;
+                // Resize each card so it spans the new column width.
                 foreach (Control c in _requestsPanel.Controls)
+                {
                     if (c is Panel card)
-                        card.Width = _requestsPanel.ClientSize.Width - 24;
+                        card.Width = Math.Max(200, _requestsPanel.ClientSize.Width - 24);
+                }
             };
 
-            // ---- Right column: scrollable detail host ----
+            // ---- Right column: detail host ----
             _detailHost = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -276,7 +270,7 @@ namespace CarwashServices.Roles.ServiceStaff
             int w = _contentPanel.ClientSize.Width - _contentPanel.Padding.Horizontal;
             int h = _contentPanel.ClientSize.Height - _contentPanel.Padding.Vertical;
             if (w < 300) return;
-            _layout.SetBounds(0, 100, w, Math.Max(200, h - 100));
+            _layout.SetBounds(0, LayoutTopY, w, Math.Max(200, h - LayoutTopY));
         }
 
         // ================================================================
@@ -312,7 +306,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 _svcById = _services.ToDictionary(s => s.ProductId);
                 _userById = _users.ToDictionary(u => u.UserId);
 
-                // Active = not Cancelled, not Completed
                 _myRequests = allRequests
                     .Where(r => !r.IsArchived && r.AssignedStaffId == staffId)
                     .Where(r => !string.Equals(r.Status, "Cancelled", StringComparison.OrdinalIgnoreCase)
@@ -366,7 +359,7 @@ namespace CarwashServices.Roles.ServiceStaff
             {
                 var card = BuildRequestCard(r);
                 card.Margin = new Padding(0, 0, 0, 8);
-                card.Width = Math.Max(120, _requestsPanel.ClientSize.Width - 24);
+                card.Width = Math.Max(200, _requestsPanel.ClientSize.Width - 24);
                 _requestsPanel.Controls.Add(card);
             }
 
@@ -400,6 +393,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 e.Graphics.DrawPath(pen, path);
             };
 
+            // ---- Row 1: #ID and status pill ----
             card.Controls.Add(new Label
             {
                 Text = $"#{r.RequestId}",
@@ -420,11 +414,12 @@ namespace CarwashServices.Roles.ServiceStaff
                 Font = FontPill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Size = new Size(96, 22),
-                Location = new Point(Math.Max(120, card.Width - 110), 12),
+                Location = new Point(card.Width - 118, 12),
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             card.Controls.Add(pill);
 
+            // ---- Row 2: customer name ----
             card.Controls.Add(new Label
             {
                 Text = cust?.CustomerName ?? $"id:{r.CustomerId}",
@@ -438,6 +433,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 BackColor = Color.Transparent
             });
 
+            // ---- Row 3: service · priority ----
             card.Controls.Add(new Label
             {
                 Text = $"{svc?.ProductName ?? $"Service {r.ServiceId}"} · {r.Priority ?? "Normal"}",
@@ -451,6 +447,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 BackColor = Color.Transparent
             });
 
+            // ---- Row 4: date — with wider card, the full timestamp fits ----
             card.Controls.Add(new Label
             {
                 Text = r.ScheduledDate?.ToString("MMM d, yyyy — h:mm tt") ?? "Not scheduled",
@@ -459,7 +456,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 Location = new Point(14, 74),
                 AutoSize = false,
                 Width = Math.Max(80, card.Width - 28),
-                Height = 14,
+                Height = 16,
                 AutoEllipsis = true,
                 BackColor = Color.Transparent
             });
@@ -503,7 +500,7 @@ namespace CarwashServices.Roles.ServiceStaff
         }
 
         // ================================================================
-        //  Detail panel construction
+        //  Detail panel construction (right column)
         // ================================================================
         private void BuildDetailPanel(ServiceRequestDto r)
         {
@@ -513,33 +510,25 @@ namespace CarwashServices.Roles.ServiceStaff
             int W = Math.Max(360, _detailHost.ClientSize.Width - 4);
             int y = 0;
 
-            // ============================================================
-            //  1) Summary card
-            // ============================================================
+            // Summary card
             var summary = MakeCard(W, y, 220);
             BuildSummary(summary, r, cust, svc, W);
             _detailHost.Controls.Add(summary);
             y = summary.Bottom + SectionGap;
 
-            // ============================================================
-            //  2) Service Progress
-            // ============================================================
+            // Progress timeline
             var progress = MakeCard(W, y, 170);
             BuildProgress(progress, r, W);
             _detailHost.Controls.Add(progress);
             y = progress.Bottom + SectionGap;
 
-            // ============================================================
-            //  3) Update Status
-            // ============================================================
+            // Update status form
             var update = MakeCard(W, y, 300);
             BuildUpdateStatus(update, r, W);
             _detailHost.Controls.Add(update);
             y = update.Bottom + SectionGap;
 
-            // ============================================================
-            //  4) Status History
-            // ============================================================
+            // Status history grid
             var history = MakeCard(W, y, 300);
             BuildHistory(history, W);
             _detailHost.Controls.Add(history);
@@ -553,8 +542,6 @@ namespace CarwashServices.Roles.ServiceStaff
         {
             AddSectionHeader(card, "REQUEST DETAILS");
 
-            // ---- Row 1: avatar + name + email + vehicle  |  price + service/duration ----
-            // Avatar
             var avatar = new Label
             {
                 Text = Initials(cust?.CustomerName ?? "?"),
@@ -567,7 +554,6 @@ namespace CarwashServices.Roles.ServiceStaff
             };
             card.Controls.Add(avatar);
 
-            // Name
             card.Controls.Add(new Label
             {
                 Text = cust?.CustomerName ?? $"id:{r.CustomerId}",
@@ -577,7 +563,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 AutoSize = true
             });
 
-            // Contact + email
             var contact = string.Join("  ·  ",
                 new[] { cust?.ContactNumber, cust?.EmailAddress }
                     .Where(x => !string.IsNullOrWhiteSpace(x)));
@@ -590,7 +575,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 AutoSize = true
             });
 
-            // Vehicle line
             var vehicle = string.Join("  ·  ",
                 new[] {
                     cust?.PlateNumber,
@@ -608,7 +592,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 AutoSize = true
             });
 
-            // Price (right)
             card.Controls.Add(new Label
             {
                 Text = $"₱{svc?.UnitPrice ?? 0m:N0}",
@@ -621,7 +604,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             });
 
-            // Service + duration (right)
             card.Controls.Add(new Label
             {
                 Text = $"{svc?.ProductName ?? $"Service {r.ServiceId}"}  ·  {svc?.DurationMinutes ?? 0} min",
@@ -634,7 +616,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             });
 
-            // Divider
             card.Controls.Add(new Panel
             {
                 Location = new Point(20, 148),
@@ -643,23 +624,16 @@ namespace CarwashServices.Roles.ServiceStaff
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             });
 
-            // ---- Row 2: three-column metadata grid ----
             int colWidth = (W - 40) / 3;
 
-            AddMetaBlock(card, "REQUEST ID", $"#{r.RequestId}",
-                20, 162);
-
-            AddMetaBlock(card, "PRIORITY", r.Priority ?? "Normal",
-                20 + colWidth, 162);
-
+            AddMetaBlock(card, "REQUEST ID", $"#{r.RequestId}", 20, 162);
+            AddMetaBlock(card, "PRIORITY", r.Priority ?? "Normal", 20 + colWidth, 162);
             AddMetaBlock(card, "REQUESTED",
                 r.RequestedDate.ToString("MMM d, yyyy — h:mm tt"),
                 20 + colWidth * 2, 162);
-
             AddMetaBlock(card, "SCHEDULED",
                 r.ScheduledDate?.ToString("MMM d, yyyy — h:mm tt") ?? "—",
                 20, 196);
-
             AddMetaBlock(card, "ASSIGNED SERVICE STAFF",
                 GetStaffName(r.AssignedStaffId) ?? "—",
                 20 + colWidth, 196);
@@ -688,7 +662,7 @@ namespace CarwashServices.Roles.ServiceStaff
             });
         }
 
-        // ---- Service progress card ----
+        // ---- Service progress ----
         private void BuildProgress(Panel card, ServiceRequestDto r, int W)
         {
             AddSectionHeader(card, "SERVICE PROGRESS");
@@ -742,7 +716,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 s => string.Equals(s, currentStatus, StringComparison.OrdinalIgnoreCase));
             if (currentIdx < 0) currentIdx = 0;
 
-            // Connectors
             for (int i = 0; i < stepCount - 1; i++)
             {
                 int x1 = radius + spacing * i;
@@ -752,7 +725,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 g.DrawLine(pen, x1 + radius, cy, x2 - radius, cy);
             }
 
-            // Filled connectors up to current
             for (int i = 0; i < currentIdx; i++)
             {
                 int x1 = radius + spacing * i;
@@ -806,7 +778,7 @@ namespace CarwashServices.Roles.ServiceStaff
             }
         }
 
-        // ---- Update status card ----
+        // ---- Update status form ----
         private void BuildUpdateStatus(Panel card, ServiceRequestDto r, int W)
         {
             AddSectionHeader(card, "UPDATE STATUS");
@@ -885,7 +857,7 @@ namespace CarwashServices.Roles.ServiceStaff
             PreSelectNextStatus(r.Status ?? "Pending");
         }
 
-        // ---- History card ----
+        // ---- Status history ----
         private void BuildHistory(Panel card, int W)
         {
             AddSectionHeader(card, "STATUS HISTORY");

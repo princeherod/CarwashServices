@@ -14,27 +14,29 @@ namespace CarwashServices.Dialogs
     /// <summary>
     /// Follow-Up dialog used only by Service Staff.
     ///
-    /// Layout:
-    ///   ┌───────────────────────────────────────┐
-    ///   │ Title strip (fixed 88px)              │
-    ///   ├───────────────────────────────────────┤
-    ///   │                                       │
-    ///   │ Scrollable body                       │  ← AutoScroll on a panel
-    ///   │                                       │
-    ///   ├───────────────────────────────────────┤
-    ///   │ [Cancel]              [Submit for App]│  ← Docked bottom, never scrolls
-    ///   └───────────────────────────────────────┘
-    ///
-    /// Every submission lands in Pending Approval. There is no Send Now
-    /// SMTP path here — approval is handled by an Admin later.
+    /// Layout strategy:
+    ///   ┌───────────────────────────────────────────────┐
+    ///   │ Header (docked top, fixed height)             │
+    ///   ├───────────────────────────────────────────────┤
+    ///   │ Scroll host (docked fill)                     │
+    ///   │   ┌────────────────────────────────────┐  ▓   │
+    ///   │   │ Content panel (fixed 692 wide)     │      │
+    ///   │   │   CUSTOMERS *   Select all  Show N │      │
+    ///   │   │   ...                              │      │
+    ///   │   └────────────────────────────────────┘      │
+    ///   ├───────────────────────────────────────────────┤
+    ///   │ Footer (docked bottom)                        │
+    ///   └───────────────────────────────────────────────┘
     /// </summary>
     public class ServiceStaffFollowUpDialog : Form
     {
         private readonly List<TenantCustomerDto> _myCustomers;
         private readonly int _staffId;
 
-        // Body controls
+        // ---- Controls ----
+        private TextBox _customerSearch = null!;
         private CheckedListBox _customerList = null!;
+        private LinkLabel _selectAllLink = null!;
         private TextBox _reasonTxt = null!;
         private ComboBox _discountCombo = null!;
         private DateTimePicker _validUntilPicker = null!;
@@ -42,26 +44,43 @@ namespace CarwashServices.Dialogs
         private TextBox _previewBox = null!;
         private DateTimePicker _scheduledPicker = null!;
         private Button _sendNowBtn = null!, _scheduleBtn = null!;
+        private bool _sendNow = false;
         private Label _badge = null!;
         private Label _sendOnLbl = null!;
+        private Label _showingLbl = null!;
 
-        private bool _sendNow = false;
+        // ---- Filtering state ----
+        // The "Select all" link operates on the *currently visible* rows.
+        // We keep a reference to the filtered list so we can iterate it
+        // without re-querying the backing data source.
+        private List<TenantCustomerDto> _filtered = new();
+        private bool _suppressItemCheck = false;
 
         // ---- Palette ----
         private static readonly Color Navy = Color.FromArgb(0x0A, 0x16, 0x33);
         private static readonly Color Muted = Color.FromArgb(0x6B, 0x7A, 0x9A);
+        private static readonly Color Faint = Color.FromArgb(0x9A, 0xA7, 0xBF);
         private static readonly Color Accent = Color.FromArgb(0x1E, 0x88, 0xE5);
         private static readonly Color AccentSoft = Color.FromArgb(0xD6, 0xE9, 0xFA);
         private static readonly Color BorderSoft = Color.FromArgb(0xE1, 0xE7, 0xF0);
-        private static readonly Color BodyBg = Color.White;
 
-        // ---- Layout ----
-        private const int DialogW = 720;
-        private const int DialogH = 720;      // fixed, reasonable
-        private const int HeaderH = 88;       // title strip
-        private const int FooterH = 72;       // buttons
-        private const int BodyLeft = 40;
-        private const int BodyW = 640;
+        // ================================================================
+        //  Layout
+        // ================================================================
+        private const int DialogW = 800;
+        private const int DialogH = 760;
+
+        private const int Gutter = 44;
+        private const int ContentW = DialogW - Gutter * 2 - 20;   // 692
+
+        private const int HeaderH = 108;
+        private const int FooterH = 76;
+
+        private const int Gap = 20;
+        private const int ColW = (ContentW - Gap) / 2;
+
+        private const int LabelToField = 26;
+        private const int SectionGap = 28;
 
         private readonly HttpClient _http = new()
         {
@@ -89,12 +108,14 @@ namespace CarwashServices.Dialogs
             ShowIcon = false;
             ShowInTaskbar = false;
 
-            // ---- 1. Header strip (docked top) ----
+            // ============================================================
+            //  Header — docked top
+            // ============================================================
             var header = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = HeaderH,
-                BackColor = BodyBg
+                BackColor = Color.White
             };
             header.Paint += (s, e) =>
             {
@@ -103,16 +124,15 @@ namespace CarwashServices.Dialogs
             };
             Controls.Add(header);
 
-            var title = new Label
+            header.Controls.Add(new Label
             {
                 Text = "New Follow-Up",
                 ForeColor = Navy,
-                Font = new Font("Segoe UI Semibold", 16f),
-                Location = new Point(BodyLeft, 20),
+                Font = new Font("Segoe UI Semibold", 17f),
+                Location = new Point(Gutter, 26),
                 AutoSize = true,
-                BackColor = BodyBg
-            };
-            header.Controls.Add(title);
+                BackColor = Color.Transparent
+            });
 
             _badge = new Label
             {
@@ -120,29 +140,30 @@ namespace CarwashServices.Dialogs
                 ForeColor = Accent,
                 Font = new Font("Segoe UI Semibold", 9f),
                 BackColor = AccentSoft,
-                Padding = new Padding(10, 4, 10, 4),
+                Padding = new Padding(10, 5, 10, 5),
                 AutoSize = true,
-                Location = new Point(title.PreferredWidth + BodyLeft + 14, 24)
+                Location = new Point(Gutter + 210, 30)
             };
             header.Controls.Add(_badge);
 
-            var subtitle = new Label
+            header.Controls.Add(new Label
             {
                 Text = "Pick customers from your assigned list. Your manager will approve this before it can be sent.",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
-                Location = new Point(BodyLeft + 2, 52),
+                Location = new Point(Gutter, 68),
                 AutoSize = true,
-                BackColor = BodyBg
-            };
-            header.Controls.Add(subtitle);
+                BackColor = Color.Transparent
+            });
 
-            // ---- 2. Footer strip (docked bottom, buttons never scroll) ----
+            // ============================================================
+            //  Footer — docked bottom
+            // ============================================================
             var footer = new Panel
             {
                 Dock = DockStyle.Bottom,
                 Height = FooterH,
-                BackColor = BodyBg
+                BackColor = Color.White
             };
             footer.Paint += (s, e) =>
             {
@@ -151,7 +172,6 @@ namespace CarwashServices.Dialogs
             };
             Controls.Add(footer);
 
-            // Placed from the right so they stay aligned regardless of DPI
             var submit = new Button
             {
                 Text = "Submit for Approval",
@@ -160,8 +180,9 @@ namespace CarwashServices.Dialogs
                 ForeColor = Color.White,
                 BackColor = Accent,
                 Size = new Size(200, 44),
-                Location = new Point(DialogW - 200 - 40, 14),
+                Location = new Point(DialogW - Gutter - 200, 16),
                 Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 UseVisualStyleBackColor = false
             };
             submit.FlatAppearance.BorderSize = 0;
@@ -177,115 +198,254 @@ namespace CarwashServices.Dialogs
                 ForeColor = Muted,
                 BackColor = Color.White,
                 Size = new Size(110, 44),
-                Location = new Point(submit.Left - 12 - 110, 14),
+                Location = new Point(submit.Left - 12 - 110, 16),
                 Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 UseVisualStyleBackColor = false
             };
             cancel.FlatAppearance.BorderColor = BorderSoft;
             cancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
             footer.Controls.Add(cancel);
 
-            // ---- 3. Body (fills the middle, scrolls) ----
-            var body = new Panel
+            CancelButton = cancel;
+
+            // ============================================================
+            //  Scroll host — docked fill
+            // ============================================================
+            var scrollHost = new Panel
             {
                 Dock = DockStyle.Fill,
-                AutoScroll = true,
-                BackColor = BodyBg,
-                Padding = new Padding(BodyLeft, 16, 20, 16)
+                BackColor = Color.White,
+                Padding = Padding.Empty
             };
-            Controls.Add(body);
+            Controls.Add(scrollHost);
+            scrollHost.BringToFront();
 
-            // IMPORTANT: Fill is added last so it occupies the space between
-            // the docked header and footer.
-            body.BringToFront();
+            var scrollPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                AutoScroll = true
+            };
+            scrollHost.Controls.Add(scrollPanel);
 
-            int contentW = BodyW;
+            // ============================================================
+            //  Content panel
+            // ============================================================
+            int contentTopPad = 24;
+
+            var content = new Panel
+            {
+                Location = new Point(Gutter, contentTopPad),
+                Width = ContentW,
+                Height = 4000,
+                BackColor = Color.White
+            };
+            scrollPanel.Controls.Add(content);
+
             int y = 0;
 
-            // Customers
-            body.Controls.Add(Cap("CUSTOMERS *", 0, y));
-            y += 22;
+            // ------------------------------------------------------------
+            //  CUSTOMERS section header row
+            //    left   : CUSTOMERS *
+            //    middle : Select all / Unselect all  (LinkLabel)
+            //    right  : Showing N of M
+            // ------------------------------------------------------------
+            content.Controls.Add(Cap("CUSTOMERS *", 0, y));
+
+            _selectAllLink = new LinkLabel
+            {
+                Text = "Select all",
+                Font = new Font("Segoe UI", 9f),
+                LinkColor = Accent,
+                ActiveLinkColor = Accent,
+                VisitedLinkColor = Accent,
+                AutoSize = true,
+                Location = new Point(140, y + 1),
+                Cursor = Cursors.Hand,
+                BackColor = Color.Transparent
+            };
+            _selectAllLink.LinkClicked += (s, e) => ToggleSelectAllVisible();
+            content.Controls.Add(_selectAllLink);
+
+            _showingLbl = new Label
+            {
+                Text = "",
+                ForeColor = Muted,
+                Font = new Font("Segoe UI", 8.5f),
+                Location = new Point(ContentW - 200, y + 2),
+                Size = new Size(200, 16),
+                TextAlign = ContentAlignment.TopRight,
+                AutoSize = false,
+                BackColor = Color.Transparent,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            content.Controls.Add(_showingLbl);
+
+            y += LabelToField;
+
+            // Search bar
+            var searchWrap = new Panel
+            {
+                Location = new Point(0, y),
+                Size = new Size(ContentW, 36),
+                BackColor = Color.White,
+                Padding = new Padding(30, 8, 12, 0)
+            };
+            searchWrap.Paint += (s, e) =>
+            {
+                using var pen = new Pen(searchWrap.Focused ? Accent : BorderSoft);
+                e.Graphics.DrawRectangle(pen, 0, 0, searchWrap.Width - 1, searchWrap.Height - 1);
+            };
+            content.Controls.Add(searchWrap);
+
+            var searchIcon = new Label
+            {
+                Text = "🔍",
+                ForeColor = Muted,
+                Font = new Font("Segoe UI", 11f),
+                Location = new Point(8, 8),
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            searchWrap.Controls.Add(searchIcon);
+
+            _customerSearch = new TextBox
+            {
+                BorderStyle = BorderStyle.None,
+                Font = new Font("Segoe UI", 10f),
+                BackColor = Color.White,
+                ForeColor = Navy,
+                PlaceholderText = "Search by name or phone number...",
+                Dock = DockStyle.Top
+            };
+            searchWrap.Controls.Add(_customerSearch);
+
+            _customerSearch.TextChanged += (s, e) =>
+            {
+                ApplyCustomerFilter();
+                UpdateBadge();
+                UpdateSelectAllLabel();
+            };
+            _customerSearch.Enter += (s, e) => searchWrap.Invalidate();
+            _customerSearch.Leave += (s, e) => searchWrap.Invalidate();
+
+            y += 36 + 12;
+
+            // Customer list host
+            var listHost = new Panel
+            {
+                Location = new Point(0, y),
+                Size = new Size(ContentW, 160),
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            content.Controls.Add(listHost);
 
             _customerList = new CheckedListBox
             {
-                Location = new Point(0, y),
-                Size = new Size(contentW, 130),
+                Location = new Point(1, 1),
+                Size = new Size(ContentW - 2, 158),
                 Font = new Font("Segoe UI", 9.5f),
-                BorderStyle = BorderStyle.FixedSingle,
+                BorderStyle = BorderStyle.None,
                 CheckOnClick = true,
                 IntegralHeight = false,
-                BackColor = Color.White
+                BackColor = Color.White,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
             };
-            foreach (var c in _myCustomers)
-                _customerList.Items.Add(new CustomerItem(c.TenantCustomerId,
-                    $"{c.CustomerName}  ·  {c.ContactNumber}"));
             _customerList.ItemCheck += (s, e) =>
             {
+                if (_suppressItemCheck) return;
                 if (_customerList.IsHandleCreated)
-                    BeginInvoke(new Action(UpdateBadge));
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        UpdateBadge();
+                        UpdateSelectAllLabel();
+                    }));
+                }
             };
-            body.Controls.Add(_customerList);
-            y += _customerList.Height + 16;
+            listHost.Controls.Add(_customerList);
 
-            // When
-            body.Controls.Add(Cap("WHEN *", 0, y));
-            y += 22;
+            y += 160;
+            y += SectionGap;
 
-            _sendNowBtn = MakeSegmented("Send Now (needs approval)", 0, y);
+            // ------------------------------------------------------------
+            //  WHEN
+            // ------------------------------------------------------------
+            content.Controls.Add(Cap("WHEN *", 0, y));
+            y += LabelToField;
+
+            _sendNowBtn = MakeSegmented("Send Now (needs approval)", 0, y, ColW);
             _sendNowBtn.Click += (s, e) => SetWhen(true);
-            body.Controls.Add(_sendNowBtn);
+            content.Controls.Add(_sendNowBtn);
 
-            _scheduleBtn = MakeSegmented("Schedule", 320, y);
+            _scheduleBtn = MakeSegmented("Schedule", ColW + Gap, y, ColW);
             _scheduleBtn.Click += (s, e) => SetWhen(false);
-            body.Controls.Add(_scheduleBtn);
-            y += 60;
+            content.Controls.Add(_scheduleBtn);
 
-            // Send On
+            y += 40;
+            y += SectionGap;
+
+            // ------------------------------------------------------------
+            //  SEND ON
+            // ------------------------------------------------------------
             _sendOnLbl = Cap("SEND ON", 0, y);
-            body.Controls.Add(_sendOnLbl);
-            y += 22;
+            content.Controls.Add(_sendOnLbl);
+            y += LabelToField;
 
             _scheduledPicker = new DateTimePicker
             {
                 Location = new Point(0, y),
-                Width = contentW,
+                Width = ContentW,
                 Font = new Font("Segoe UI", 10f),
                 Format = DateTimePickerFormat.Custom,
                 CustomFormat = "MM/dd/yyyy  hh:mm tt",
-                Value = DateTime.Today.AddDays(1).AddHours(9)
+                Value = DateTime.Today.AddDays(1).AddHours(9),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            body.Controls.Add(_scheduledPicker);
-            y += 52;
+            content.Controls.Add(_scheduledPicker);
 
-            // Reason
-            body.Controls.Add(Cap("REASON *", 0, y));
-            y += 22;
+            y += 32;
+            y += SectionGap;
+
+            // ------------------------------------------------------------
+            //  REASON
+            // ------------------------------------------------------------
+            content.Controls.Add(Cap("REASON *", 0, y));
+            y += LabelToField;
 
             _reasonTxt = new TextBox
             {
                 Location = new Point(0, y),
-                Width = contentW,
-                Height = 60,
+                Width = ContentW,
+                Height = 76,
                 Multiline = true,
                 BorderStyle = BorderStyle.FixedSingle,
                 Font = new Font("Segoe UI", 10f),
                 PlaceholderText = "Why is this follow-up being created?",
-                ScrollBars = ScrollBars.Vertical
+                ScrollBars = ScrollBars.Vertical,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            body.Controls.Add(_reasonTxt);
-            y += 92;
+            content.Controls.Add(_reasonTxt);
 
-            // Discount + Valid Until
-            body.Controls.Add(Cap("DISCOUNT OFFER", 0, y));
-            body.Controls.Add(Cap("VALID UNTIL", 330, y));
-            y += 22;
+            y += 76;
+            y += SectionGap;
+
+            // ------------------------------------------------------------
+            //  DISCOUNT OFFER  |  VALID UNTIL
+            // ------------------------------------------------------------
+            content.Controls.Add(Cap("DISCOUNT OFFER", 0, y));
+            content.Controls.Add(Cap("VALID UNTIL", ColW + Gap, y));
+            y += LabelToField;
 
             _discountCombo = new ComboBox
             {
                 Location = new Point(0, y),
-                Width = 310,
+                Width = ColW,
                 Font = new Font("Segoe UI", 10f),
-                DropDownStyle = ComboBoxStyle.DropDownList
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
             _discountCombo.Items.AddRange(new object[]
             {
@@ -297,30 +457,36 @@ namespace CarwashServices.Dialogs
                 "Free interior vacuum"
             });
             _discountCombo.SelectedIndex = 1;
-            body.Controls.Add(_discountCombo);
+            content.Controls.Add(_discountCombo);
 
             _validUntilPicker = new DateTimePicker
             {
-                Location = new Point(330, y),
-                Width = 310,
+                Location = new Point(ColW + Gap, y),
+                Width = ColW,
                 Font = new Font("Segoe UI", 10f),
                 Format = DateTimePickerFormat.Custom,
                 CustomFormat = "MM/dd/yyyy",
-                Value = DateTime.Today.AddDays(30)
+                Value = DateTime.Today.AddDays(30),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
-            body.Controls.Add(_validUntilPicker);
-            y += 52;
+            content.Controls.Add(_validUntilPicker);
 
-            // Type
-            body.Controls.Add(Cap("TYPE", 0, y));
-            y += 22;
+            y += 32;
+            y += SectionGap;
+
+            // ------------------------------------------------------------
+            //  TYPE
+            // ------------------------------------------------------------
+            content.Controls.Add(Cap("TYPE", 0, y));
+            y += LabelToField;
 
             _typeCombo = new ComboBox
             {
                 Location = new Point(0, y),
-                Width = contentW,
+                Width = ContentW,
                 Font = new Font("Segoe UI", 10f),
-                DropDownStyle = ComboBoxStyle.DropDownList
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _typeCombo.Items.AddRange(new object[]
             {
@@ -330,35 +496,49 @@ namespace CarwashServices.Dialogs
                 "Renewal"
             });
             _typeCombo.SelectedIndex = 0;
-            body.Controls.Add(_typeCombo);
-            y += 52;
+            content.Controls.Add(_typeCombo);
 
-            // Message Preview
-            body.Controls.Add(Cap("MESSAGE PREVIEW", 0, y));
-            y += 22;
+            y += 32;
+            y += SectionGap;
+
+            // ------------------------------------------------------------
+            //  MESSAGE PREVIEW
+            // ------------------------------------------------------------
+            content.Controls.Add(Cap("MESSAGE PREVIEW", 0, y));
+            y += LabelToField;
 
             _previewBox = new TextBox
             {
                 Location = new Point(0, y),
-                Width = contentW,
+                Width = ContentW,
                 Height = 110,
                 Multiline = true,
                 BorderStyle = BorderStyle.FixedSingle,
                 Font = new Font("Segoe UI", 10f),
-                ScrollBars = ScrollBars.Vertical
+                ScrollBars = ScrollBars.Vertical,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            body.Controls.Add(_previewBox);
-            y += 130;
+            content.Controls.Add(_previewBox);
 
-            // Bottom padding so the last field never sits flush against the footer
-            y += 20;
+            y += 110;
+            y += 24;
 
-            // Tell the scrollable body how tall its content is
-            body.AutoScrollMinSize = new Size(contentW + BodyLeft + 20, y);
+            content.Height = y;
 
+            scrollPanel.AutoScrollMinSize = new Size(
+                ContentW + Gutter * 2 + SystemInformation.VerticalScrollBarWidth + 4,
+                contentTopPad + y + contentTopPad);
+
+            // ---- Initial state ----
+            ApplyCustomerFilter();
             SetWhen(false);
+            UpdateBadge();
+            UpdateSelectAllLabel();
         }
 
+        // ================================================================
+        //  Builders
+        // ================================================================
         private static Label Cap(string text, int x, int y) => new Label
         {
             Text = text,
@@ -366,26 +546,124 @@ namespace CarwashServices.Dialogs
             Font = new Font("Segoe UI Semibold", 8.5f),
             Location = new Point(x, y),
             AutoSize = true,
-            BackColor = BodyBg
+            BackColor = Color.Transparent
         };
 
-        private Button MakeSegmented(string text, int x, int y)
+        private Button MakeSegmented(string text, int x, int y, int width)
         {
             var b = new Button
             {
                 Text = text,
-                Size = new Size(300, 40),
+                Size = new Size(width, 40),
                 Location = new Point(x, y),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 9.5f),
                 BackColor = Color.White,
                 ForeColor = Navy,
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                UseVisualStyleBackColor = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
             b.FlatAppearance.BorderColor = BorderSoft;
             return b;
         }
 
+        // ================================================================
+        //  Customer filter
+        // ================================================================
+        private void ApplyCustomerFilter()
+        {
+            var term = (_customerSearch?.Text ?? "").Trim().ToLowerInvariant();
+
+            _filtered = string.IsNullOrEmpty(term)
+                ? new List<TenantCustomerDto>(_myCustomers)
+                : _myCustomers.Where(c =>
+                    (c.CustomerName?.ToLowerInvariant().Contains(term) ?? false) ||
+                    (c.ContactNumber?.ToLowerInvariant().Contains(term) ?? false))
+                .ToList();
+
+            // Remember what was checked before the refresh
+            var checkedIds = new HashSet<int>();
+            for (int i = 0; i < _customerList.Items.Count; i++)
+            {
+                if (_customerList.GetItemChecked(i) && _customerList.Items[i] is CustomerItem ci)
+                    checkedIds.Add(ci.CustomerId);
+            }
+
+            _suppressItemCheck = true;
+            _customerList.BeginUpdate();
+            _customerList.Items.Clear();
+            foreach (var c in _filtered)
+                _customerList.Items.Add(new CustomerItem(c.TenantCustomerId,
+                    $"{c.CustomerName}  ·  {c.ContactNumber}"));
+            _customerList.EndUpdate();
+
+            for (int i = 0; i < _customerList.Items.Count; i++)
+            {
+                if (_customerList.Items[i] is CustomerItem ci && checkedIds.Contains(ci.CustomerId))
+                    _customerList.SetItemChecked(i, true);
+            }
+            _suppressItemCheck = false;
+
+            if (_showingLbl != null)
+                _showingLbl.Text = $"Showing {_filtered.Count} of {_myCustomers.Count}";
+        }
+
+        // ================================================================
+        //  Select all / Unselect all
+        // ================================================================
+        private bool AreAllVisibleChecked()
+        {
+            if (_customerList.Items.Count == 0) return false;
+
+            for (int i = 0; i < _customerList.Items.Count; i++)
+            {
+                if (!_customerList.GetItemChecked(i)) return false;
+            }
+            return true;
+        }
+
+        private void UpdateSelectAllLabel()
+        {
+            if (_selectAllLink == null) return;
+
+            if (_customerList.Items.Count == 0)
+            {
+                _selectAllLink.Visible = false;
+                return;
+            }
+
+            _selectAllLink.Visible = true;
+            _selectAllLink.Text = AreAllVisibleChecked() ? "Unselect all" : "Select all";
+        }
+
+        private void ToggleSelectAllVisible()
+        {
+            if (_customerList.Items.Count == 0) return;
+
+            bool allChecked = AreAllVisibleChecked();
+            bool target = !allChecked;
+
+            _suppressItemCheck = true;
+            _customerList.BeginUpdate();
+            try
+            {
+                for (int i = 0; i < _customerList.Items.Count; i++)
+                    _customerList.SetItemChecked(i, target);
+            }
+            finally
+            {
+                _customerList.EndUpdate();
+                _suppressItemCheck = false;
+            }
+
+            UpdateBadge();
+            UpdateSelectAllLabel();
+        }
+
+        // ================================================================
+        //  When toggle
+        // ================================================================
         private void SetWhen(bool sendNow)
         {
             _sendNow = sendNow;
@@ -399,7 +677,7 @@ namespace CarwashServices.Dialogs
             _scheduleBtn.Font = new Font("Segoe UI Semibold", 9.5f);
 
             _scheduledPicker.Enabled = !sendNow;
-            _sendOnLbl.ForeColor = sendNow ? Muted : Navy;
+            _sendOnLbl.ForeColor = sendNow ? Faint : Muted;
         }
 
         private void UpdateBadge()
@@ -407,6 +685,9 @@ namespace CarwashServices.Dialogs
             _badge.Text = $"{_customerList.CheckedItems.Count} selected";
         }
 
+        // ================================================================
+        //  Submit
+        // ================================================================
         private async Task SubmitAsync()
         {
             var checkedIndices = _customerList.CheckedIndices.Cast<int>().ToList();

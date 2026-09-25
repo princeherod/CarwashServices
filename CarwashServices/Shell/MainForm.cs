@@ -159,6 +159,22 @@ namespace CarwashServices.Shell
             }
         }
 
+        public void NavigateToAssignedRequests(string statusFilter = "All statuses")
+        {
+            if (SessionUser.Role != UserRole.ServiceStaff) return;
+
+            NavigateTo("View Assigned Requests");
+
+            foreach (Control c in _contentPanel.Controls)
+            {
+                if (c is Roles.ServiceStaff.ServiceStaffAssignedRequestsView arv)
+                {
+                    arv.ApplyStatusFilter(statusFilter);
+                    break;
+                }
+            }
+        }
+
         public void NavigateToFollowUps(string status = "All",
                                         int? focusFollowUpId = null,
                                         string source = null)

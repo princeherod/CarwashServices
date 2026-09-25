@@ -21,6 +21,9 @@ namespace CarwashServices.Roles.ServiceStaff
     /// Read-only. Every query is scoped to SessionUser.UserId via
     /// AssignedStaffId. Nothing in the UI lets the user edit or change
     /// status — that belongs in the "Update Service Status" module.
+    ///
+    /// The KPI tiles at the top are clickable: each one presets the
+    /// Status filter (or clears it) and re-renders the grid.
     /// </summary>
     public class ServiceStaffAssignedRequestsView : UserControl
     {
@@ -58,24 +61,36 @@ namespace CarwashServices.Roles.ServiceStaff
         private static readonly Font FontKpiValue = new("Segoe UI Semibold", 24f);
 
         // ================================================================
-        //  Layout constants
+        //  Layout
         // ================================================================
         private const int PadX = 32;
         private const int TopMargin = 20;
+
         private const int RowTemplateHeight = 62;
         private const int ActionBtnH = 28;
         private const int DotsBtnW = 40;
         private const int MenuItemH = 34;
         private const int KpiHeight = 96;
 
-        // Grid column widths — fixed minimums so nothing gets crushed
-        private const int ColRequestW = 90;
+        // Header Y positions
+        private const int BreadcrumbY = 0;
+        private const int TitleY = 26;
+        private const int SubtitleY = 70;
+
+        // Main column Y positions
+        private const int KpiRowY = 112;
+        private const int FilterCardY = 234;
+        private const int FilterCardHeight = 140;
+        private const int GridTop = 400;
+
+        // Grid column widths
+        private const int ColRequestW = 100;
         private const int ColCustomerMin = 200;
         private const int ColServiceMin = 180;
-        private const int ColScheduledW = 160;
-        private const int ColPriorityW = 110;
-        private const int ColStatusW = 140;
-        private const int ColActionsW = 80;
+        private const int ColScheduledW = 200;
+        private const int ColPriorityW = 120;
+        private const int ColStatusW = 150;
+        private const int ColActionsW = 110;
 
         private readonly HttpClient _http = new()
         {
@@ -83,7 +98,6 @@ namespace CarwashServices.Roles.ServiceStaff
             Timeout = TimeSpan.FromSeconds(15)
         };
 
-        // ---- Data ----
         private List<ServiceRequestDto> _myRequests = new();
         private List<TenantCustomerDto> _customers = new();
         private List<ProductDto> _services = new();
@@ -93,7 +107,6 @@ namespace CarwashServices.Roles.ServiceStaff
         private Dictionary<int, ProductDto> _svcById = new();
         private Dictionary<int, UserDto> _userById = new();
 
-        // ---- UI ----
         private Panel _contentPanel = null!;
         private Panel _kpiRow = null!;
         private Label _kpiAssigned = null!;
@@ -101,7 +114,11 @@ namespace CarwashServices.Roles.ServiceStaff
         private Label _kpiInProgress = null!;
         private Label _kpiCompleted = null!;
 
+        private Panel _filterCard = null!;
+        private Panel _searchWrap = null!;
         private TextBox _searchBox = null!;
+        private Button _searchBtn = null!;
+        private Button _refreshBtn = null!;
         private ComboBox _statusFilter = null!;
         private ComboBox _priorityFilter = null!;
         private ComboBox _dateFilter = null!;
@@ -118,9 +135,9 @@ namespace CarwashServices.Roles.ServiceStaff
         private ContextMenuStrip? _activeMenu;
         private int _menuRow = -1;
 
-        // ================================================================
-        //  Constructor
-        // ================================================================
+        // Track the hovered KPI so we can paint a highlight
+        private Panel? _hoverKpi = null;
+
         public ServiceStaffAssignedRequestsView()
         {
             Dock = DockStyle.Fill;
@@ -135,6 +152,31 @@ namespace CarwashServices.Roles.ServiceStaff
             Load += async (s, e) => await LoadAllAsync();
 
             LostFocus += (s, e) => CloseActiveMenu();
+        }
+
+        // ================================================================
+        //  Public API — allow the dashboard to pre-set the status filter
+        // ================================================================
+        public void ApplyStatusFilter(string status)
+        {
+            if (_statusFilter == null) return;
+
+            var target = string.IsNullOrWhiteSpace(status) ? "All statuses" : status;
+
+            var idx = _statusFilter.Items.IndexOf(target);
+            if (idx < 0) idx = 0;
+
+            // Only apply if the combo currently shows something different.
+            if (_statusFilter.SelectedIndex != idx)
+            {
+                _statusFilter.SelectedIndex = idx;
+            }
+            else
+            {
+                // Force a re-render even when index hasn't changed
+                _page = 1;
+                RenderGrid();
+            }
         }
 
         // ================================================================
@@ -157,8 +199,9 @@ namespace CarwashServices.Roles.ServiceStaff
                 Text = "Modules  ›  View Assigned Requests",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
-                Location = new Point(0, 0),
-                AutoSize = true
+                Location = new Point(0, BreadcrumbY),
+                AutoSize = true,
+                BackColor = Color.Transparent
             });
 
             _contentPanel.Controls.Add(new Label
@@ -166,8 +209,9 @@ namespace CarwashServices.Roles.ServiceStaff
                 Text = "View Assigned Requests",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 22f),
-                Location = new Point(0, 26),
-                AutoSize = true
+                Location = new Point(0, TitleY),
+                AutoSize = true,
+                BackColor = Color.Transparent
             });
 
             _contentPanel.Controls.Add(new Label
@@ -175,64 +219,141 @@ namespace CarwashServices.Roles.ServiceStaff
                 Text = "Read-only view of every service request assigned to you.",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9.5f),
-                Location = new Point(0, 68),
-                AutoSize = true
+                Location = new Point(0, SubtitleY),
+                AutoSize = true,
+                BackColor = Color.Transparent
             });
 
             // ---- KPI row ----
             _kpiRow = new Panel
             {
-                Location = new Point(0, 108),
+                Location = new Point(0, KpiRowY),
                 Height = KpiHeight,
                 BackColor = Color.Transparent,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             _contentPanel.Controls.Add(_kpiRow);
 
-            _kpiAssigned = AddKpiTile(_kpiRow, "ASSIGNED REQUESTS", Accent);
-            _kpiPending = AddKpiTile(_kpiRow, "PENDING", Amber);
-            _kpiInProgress = AddKpiTile(_kpiRow, "IN PROGRESS", Accent);
-            _kpiCompleted = AddKpiTile(_kpiRow, "COMPLETED", Green);
+            _kpiAssigned = AddKpiTile(_kpiRow, "ASSIGNED REQUESTS", Accent, "All statuses");
+            _kpiPending = AddKpiTile(_kpiRow, "PENDING", Amber, "Pending");
+            _kpiInProgress = AddKpiTile(_kpiRow, "IN PROGRESS", Accent, "InProgress");
+            _kpiCompleted = AddKpiTile(_kpiRow, "COMPLETED", Green, "Completed");
 
-            // ---- Filter row ----
-            var filterPanel = new Panel
+            // ---- Filter card ----
+            _filterCard = new Panel
             {
-                Location = new Point(0, 220),
-                Height = 46,
-                BackColor = Color.Transparent,
+                BackColor = Color.White,
+                Location = new Point(0, FilterCardY),
+                Height = FilterCardHeight,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            _contentPanel.Controls.Add(filterPanel);
+            _filterCard.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder);
+                e.Graphics.DrawRectangle(pen, 0, 0, _filterCard.Width - 1, _filterCard.Height - 1);
+            };
+            _contentPanel.Controls.Add(_filterCard);
+
+            _filterCard.Controls.Add(new Label
+            {
+                Text = "Search",
+                ForeColor = Muted,
+                Font = new Font("Segoe UI Semibold", 8.5f),
+                Location = new Point(16, 8),
+                AutoSize = true
+            });
+
+            _searchWrap = new Panel
+            {
+                Location = new Point(16, 34),
+                Size = new Size(400, 36),
+                BackColor = Color.White,
+                Padding = new Padding(10, 7, 10, 0)
+            };
+            _searchWrap.Paint += (s, e) =>
+            {
+                using var pen = new Pen(_searchWrap.Focused ? Accent : Faint);
+                e.Graphics.DrawRectangle(pen, 0, 0, _searchWrap.Width - 1, _searchWrap.Height - 1);
+            };
+            _filterCard.Controls.Add(_searchWrap);
 
             _searchBox = new TextBox
             {
-                Font = new Font("Segoe UI", 10f),
-                BorderStyle = BorderStyle.FixedSingle,
+                BorderStyle = BorderStyle.None,
+                Font = new Font("Segoe UI", 10.5f),
                 BackColor = Color.White,
+                ForeColor = Navy,
                 PlaceholderText = "Search by request ID, customer, or service...",
-                Location = new Point(0, 6),
-                Width = 360,
-                Height = 34
+                Dock = DockStyle.Top
             };
-            filterPanel.Controls.Add(_searchBox);
-            _searchBox.TextChanged += (s, e) => { _page = 1; RenderGrid(); };
+            _searchWrap.Controls.Add(_searchBox);
 
-            _statusFilter = AddFilterCombo(filterPanel, 376, "All statuses",
+            bool searchFocused = false;
+            _searchBox.Enter += (s, e) => { searchFocused = true; _searchWrap.Invalidate(); };
+            _searchBox.Leave += (s, e) => { searchFocused = false; _searchWrap.Invalidate(); };
+            _searchWrap.Resize += (s, e) => _searchWrap.Invalidate();
+
+            _searchBox.TextChanged += (s, e) => { _page = 1; RenderGrid(); };
+            _searchBox.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter)
+                {
+                    e.SuppressKeyPress = true;
+                    _page = 1;
+                    RenderGrid();
+                }
+            };
+
+            _searchBtn = new Button
+            {
+                Text = "Search",
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Semibold", 10f),
+                BackColor = Navy,
+                ForeColor = Color.White,
+                Size = new Size(100, 36),
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                UseVisualStyleBackColor = false
+            };
+            _searchBtn.FlatAppearance.BorderSize = 0;
+            _searchBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(0x16, 0x2A, 0x5C);
+            _searchBtn.Click += (s, e) => { _page = 1; RenderGrid(); };
+            _filterCard.Controls.Add(_searchBtn);
+
+            _refreshBtn = new Button
+            {
+                Text = "Refresh",
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 10f),
+                ForeColor = Navy,
+                Size = new Size(100, 36),
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.White,
+                UseVisualStyleBackColor = false
+            };
+            _refreshBtn.FlatAppearance.BorderColor = CardBorder;
+            _refreshBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xF5, 0xF7, 0xFA);
+            _refreshBtn.Click += async (s, e) => await LoadAllAsync();
+            _filterCard.Controls.Add(_refreshBtn);
+
+            _statusFilter = AddFilterCombo(_filterCard, 16, 86, "All statuses",
                 "All statuses", "Pending", "Assigned", "InProgress", "Completed", "Cancelled");
             _statusFilter.SelectedIndexChanged += (s, e) => { _page = 1; RenderGrid(); };
 
-            _priorityFilter = AddFilterCombo(filterPanel, 556, "All priorities",
+            _priorityFilter = AddFilterCombo(_filterCard, 200, 86, "All priorities",
                 "All priorities", "Normal", "High", "VIP");
             _priorityFilter.SelectedIndexChanged += (s, e) => { _page = 1; RenderGrid(); };
 
-            _dateFilter = AddFilterCombo(filterPanel, 736, "All dates",
+            _dateFilter = AddFilterCombo(_filterCard, 384, 86, "All dates",
                 "All dates", "Today", "Upcoming", "Past");
             _dateFilter.SelectedIndexChanged += (s, e) => { _page = 1; RenderGrid(); };
 
             // ---- Grid card ----
             _gridCard = new Panel
             {
-                Location = new Point(0, 282),
+                Location = new Point(0, GridTop),
                 BackColor = Color.White,
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -250,10 +371,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 BorderStyle = BorderStyle.None,
                 GridColor = CardBorder,
                 EnableHeadersVisualStyles = false,
-
-                // Both bars — the sum of fixed minimums can exceed the width.
                 ScrollBars = ScrollBars.Both,
-
                 ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
                 {
                     BackColor = HeaderBg,
@@ -289,13 +407,13 @@ namespace CarwashServices.Roles.ServiceStaff
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal
             };
 
-            // ---- Columns ----
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "RequestId", Visible = false });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Request",
                 HeaderText = "REQUEST",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                 Width = ColRequestW,
                 MinimumWidth = ColRequestW
             });
@@ -313,15 +431,16 @@ namespace CarwashServices.Roles.ServiceStaff
             {
                 Name = "Service",
                 HeaderText = "SERVICE",
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = ColServiceMin,
-                FillWeight = 90
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                Width = ColServiceMin,
+                MinimumWidth = ColServiceMin
             });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Scheduled",
                 HeaderText = "SCHEDULED DATE",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                 Width = ColScheduledW,
                 MinimumWidth = ColScheduledW
             });
@@ -330,6 +449,7 @@ namespace CarwashServices.Roles.ServiceStaff
             {
                 Name = "Priority",
                 HeaderText = "PRIORITY",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                 Width = ColPriorityW,
                 MinimumWidth = ColPriorityW
             });
@@ -338,6 +458,7 @@ namespace CarwashServices.Roles.ServiceStaff
             {
                 Name = "Status",
                 HeaderText = "STATUS",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                 Width = ColStatusW,
                 MinimumWidth = ColStatusW
             });
@@ -346,6 +467,7 @@ namespace CarwashServices.Roles.ServiceStaff
             {
                 Name = "Actions",
                 HeaderText = "ACTIONS",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                 Width = ColActionsW,
                 MinimumWidth = ColActionsW,
                 DefaultCellStyle = new DataGridViewCellStyle
@@ -366,7 +488,6 @@ namespace CarwashServices.Roles.ServiceStaff
 
             _gridCard.Controls.Add(_grid);
 
-            // ---- Pager ----
             _pager = new Panel
             {
                 BackColor = Color.White,
@@ -393,16 +514,16 @@ namespace CarwashServices.Roles.ServiceStaff
             LayoutAll();
         }
 
-        private ComboBox AddFilterCombo(Panel parent, int left, string firstItem, params string[] items)
+        private ComboBox AddFilterCombo(Panel parent, int left, int top, string firstItem, params string[] items)
         {
             var cb = new ComboBox
             {
                 Font = new Font("Segoe UI", 10f),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 BackColor = Color.White,
-                Location = new Point(left, 6),
-                Width = 170,
-                Height = 34
+                Location = new Point(left, top),
+                Width = 176,
+                Height = 26
             };
             cb.Items.AddRange(items);
             cb.SelectedIndex = 0;
@@ -410,19 +531,33 @@ namespace CarwashServices.Roles.ServiceStaff
             return cb;
         }
 
-        private Label AddKpiTile(Panel parent, string title, Color accent)
+        /// <summary>
+        /// KPI tile. When `filterOnClick` is not null, the tile is clickable:
+        /// clicking it sets the Status filter dropdown to that value.
+        /// </summary>
+        private Label AddKpiTile(Panel parent, string title, Color accent, string filterOnClick)
         {
-            var card = new Panel { BackColor = Color.White };
+            var card = new Panel
+            {
+                BackColor = Color.White,
+                Cursor = filterOnClick != null ? Cursors.Hand : Cursors.Default,
+                Tag = filterOnClick
+            };
             card.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+                bool hover = ReferenceEquals(_hoverKpi, card);
+                Color bg = hover ? Color.FromArgb(0xF7, 0xFB, 0xFF) : Color.White;
+
                 using (var path = RoundedRect(new Rectangle(0, 0, card.Width - 1, card.Height - 1), 10))
-                using (var fill = new SolidBrush(Color.White))
-                using (var pen = new Pen(CardBorder))
+                using (var fill = new SolidBrush(bg))
+                using (var pen = new Pen(hover ? accent : CardBorder, hover ? 1.5f : 1f))
                 {
                     e.Graphics.FillPath(fill, path);
                     e.Graphics.DrawPath(pen, path);
                 }
+
                 using (var stripe = new SolidBrush(accent))
                     e.Graphics.FillRectangle(stripe, 0, 0, 4, card.Height);
             };
@@ -449,6 +584,30 @@ namespace CarwashServices.Roles.ServiceStaff
             };
             card.Controls.Add(val);
 
+            // ---- Hover / click wiring ----
+            if (filterOnClick != null)
+            {
+                void OnEnter(object? s, EventArgs e) { _hoverKpi = card; card.Invalidate(); }
+                void OnLeave(object? s, EventArgs e) { _hoverKpi = null; card.Invalidate(); }
+                void OnClick(object? s, EventArgs e) => ApplyStatusFilter(filterOnClick);
+
+                card.MouseEnter += OnEnter;
+                card.MouseLeave += OnLeave;
+                card.Click += OnClick;
+
+                // Forward child mouse events so the whole tile is hot.
+                foreach (Control child in card.Controls)
+                {
+                    child.Cursor = Cursors.Hand;
+                    child.MouseEnter += OnEnter;
+                    child.MouseLeave += OnLeave;
+                    child.Click += OnClick;
+                }
+
+                // Also make the painted label respond
+                card.Resize += (s, e) => card.Invalidate();
+            }
+
             return val;
         }
 
@@ -458,20 +617,20 @@ namespace CarwashServices.Roles.ServiceStaff
 
             int w = _contentPanel.ClientSize.Width - _contentPanel.Padding.Horizontal;
             int h = _contentPanel.ClientSize.Height - _contentPanel.Padding.Vertical;
-            if (w < 200) return;
+            if (w < 300) return;
 
             _kpiRow.Width = w;
             LayoutKpis();
 
-            // Filter row
-            int filterRight = _contentPanel.ClientSize.Width - _contentPanel.Padding.Right;
-            _dateFilter.Left = Math.Max(736, filterRight - 170);
-            _priorityFilter.Left = _dateFilter.Left - 180;
-            _statusFilter.Left = _priorityFilter.Left - 180;
+            _filterCard.Width = w;
+
+            _refreshBtn.Location = new Point(w - 16 - _refreshBtn.Width, 34);
+            _searchBtn.Location = new Point(_refreshBtn.Left - 10 - _searchBtn.Width, 34);
+            _searchWrap.Width = Math.Max(200, _searchBtn.Left - 12 - _searchWrap.Left);
 
             int pagerH = 48;
             _pager.SetBounds(0, h - pagerH, w, pagerH);
-            _gridCard.SetBounds(0, 282, w, Math.Max(0, h - 282 - pagerH));
+            _gridCard.SetBounds(0, GridTop, w, Math.Max(0, h - GridTop - pagerH));
 
             RecomputePageSize();
         }
@@ -514,7 +673,6 @@ namespace CarwashServices.Roles.ServiceStaff
                     return;
                 }
 
-                // Load everything the view needs in parallel.
                 var reqsT = _http.GetFromJsonAsync<List<ServiceRequestDto>>("api/service-requests");
                 var custsT = _http.GetFromJsonAsync<List<TenantCustomerDto>>("api/tenant/1/tenant-customers");
                 var svcsT = _http.GetFromJsonAsync<List<ProductDto>>("api/tenant/1/products");
@@ -531,7 +689,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 _svcById = _services.ToDictionary(s => s.ProductId);
                 _userById = _users.ToDictionary(u => u.UserId);
 
-                // Scope: only this Service Staff's assigned requests.
                 _myRequests = allRequests
                     .Where(r => !r.IsArchived && r.AssignedStaffId == staffId)
                     .OrderByDescending(r => r.RequestId)
@@ -561,9 +718,6 @@ namespace CarwashServices.Roles.ServiceStaff
                 string.Equals(r.Status, "Completed", StringComparison.OrdinalIgnoreCase)).ToString();
         }
 
-        // ================================================================
-        //  Filtering + render
-        // ================================================================
         private List<ServiceRequestDto> FilteredList()
         {
             var search = _searchBox.Text?.Trim().ToLower() ?? "";
@@ -575,7 +729,6 @@ namespace CarwashServices.Roles.ServiceStaff
 
             return _myRequests.Where(r =>
             {
-                // ---- Search ----
                 if (!string.IsNullOrEmpty(search))
                 {
                     var cust = _custById.TryGetValue(r.CustomerId, out var c) ? c : null;
@@ -587,14 +740,12 @@ namespace CarwashServices.Roles.ServiceStaff
                     if (!blob.Contains(search)) return false;
                 }
 
-                // ---- Status ----
                 if (status != "All statuses")
                 {
                     if (!string.Equals(r.Status ?? "", status, StringComparison.OrdinalIgnoreCase))
                         return false;
                 }
 
-                // ---- Priority ----
                 if (priority != "All priorities")
                 {
                     var p = string.IsNullOrWhiteSpace(r.Priority) ? "Normal" : r.Priority;
@@ -602,7 +753,6 @@ namespace CarwashServices.Roles.ServiceStaff
                         return false;
                 }
 
-                // ---- Date ----
                 if (date != "All dates")
                 {
                     var when = r.ScheduledDate ?? r.RequestedDate;
@@ -737,9 +887,6 @@ namespace CarwashServices.Roles.ServiceStaff
             return b;
         }
 
-        // ================================================================
-        //  Cell painting
-        // ================================================================
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
@@ -932,9 +1079,6 @@ namespace CarwashServices.Roles.ServiceStaff
             return p;
         }
 
-        // ================================================================
-        //  Hover + click
-        // ================================================================
         private void Grid_CellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0 ||
@@ -985,9 +1129,6 @@ namespace CarwashServices.Roles.ServiceStaff
             ShowActionsMenu(e.RowIndex, dto);
         }
 
-        // ================================================================
-        //  Menu — only View Details for now
-        // ================================================================
         private void ShowActionsMenu(int rowIndex, ServiceRequestDto r)
         {
             CloseActiveMenu();
@@ -1059,9 +1200,6 @@ namespace CarwashServices.Roles.ServiceStaff
             public override Color MenuBorder => CardBorder;
         }
 
-        // ================================================================
-        //  View Details
-        // ================================================================
         private void ShowViewDetails(ServiceRequestDto r)
         {
             var cust = _custById.TryGetValue(r.CustomerId, out var c) ? c : null;

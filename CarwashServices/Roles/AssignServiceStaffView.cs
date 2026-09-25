@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -13,10 +14,11 @@ using CarwashServices.Shell;
 namespace CarwashServices.Roles
 {
     /// <summary>
-    /// Manager module: queue of service requests that have no AssignedStaffId.
-    /// One row per request; per-row staff picker + Assign button.
-    /// Writes via PUT api/service-requests/{id}/assign — the same table the
-    /// Manage Service Requests module edits.
+    /// Manager module: queue of PENDING service requests that have no
+    /// AssignedStaffId. Rows whose status is Completed or Cancelled are
+    /// excluded — they never need assignment.
+    ///
+    /// The picker and Assign button are always visible on the active row.
     /// </summary>
     public class AssignServiceStaffView : UserControl
     {
@@ -103,7 +105,7 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  UI CONSTRUCTION
+        //  UI
         // ================================================================
         private void InitializeUI()
         {
@@ -130,7 +132,7 @@ namespace CarwashServices.Roles
 
             _contentPanel.Controls.Add(new Label
             {
-                Text = "Unassigned service requests. Pick a Service Staff member to assign the job.",
+                Text = "Pending service requests waiting for a Service Staff. Pick a staff member to assign the job.",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
                 Location = new Point(PadX, 80),
@@ -318,13 +320,13 @@ namespace CarwashServices.Roles
             _grid.CellPainting += Grid_CellPainting;
             _grid.CellMouseMove += Grid_CellMouseMove;
             _grid.CellMouseClick += Grid_CellMouseClick;
+            _grid.CellMouseEnter += Grid_CellMouseEnter;
 
-            // Hosted staff picker + Assign button
             _staffCombo = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Font = new Font("Segoe UI", 9.5f),
-                Visible = false,
+                Visible = true,
                 Width = AssignComboW,
                 Height = 28
             };
@@ -340,7 +342,7 @@ namespace CarwashServices.Roles
                 BackColor = Blue,
                 Size = new Size(AssignBtnW, AssignBtnH),
                 Cursor = Cursors.Hand,
-                Visible = false,
+                Visible = true,
                 UseVisualStyleBackColor = false
             };
             _assignBtn.FlatAppearance.BorderSize = 0;
@@ -399,6 +401,24 @@ namespace CarwashServices.Roles
                 _staffCombo.Items.Add(new ComboItem(s.UserId, s.FullName));
         }
 
+        /// <summary>
+        /// A request belongs in the assign queue ONLY when:
+        ///   • it is not archived
+        ///   • it has no AssignedStaffId
+        ///   • its status is Pending (or Assigned, defensively, if the API
+        ///     ever leaves an "Assigned" row without a staff id)
+        /// Completed, Cancelled, InProgress, and everything else are excluded.
+        /// </summary>
+        private static bool IsAwaitingAssignment(ServiceRequestDto r)
+        {
+            if (r.IsArchived) return false;
+            if (r.AssignedStaffId.HasValue) return false;
+
+            var status = (r.Status ?? "").Trim();
+            return status.Equals("Pending", StringComparison.OrdinalIgnoreCase)
+                || status.Equals("Assigned", StringComparison.OrdinalIgnoreCase);
+        }
+
         private async Task LoadRequestsAsync()
         {
             try
@@ -409,7 +429,7 @@ namespace CarwashServices.Roles
                     "api/service-requests") ?? new();
 
                 _unassigned = all
-                    .Where(r => !r.IsArchived && r.AssignedStaffId == null)
+                    .Where(IsAwaitingAssignment)
                     .OrderBy(r => r.ScheduledDate ?? r.RequestedDate)
                     .ToList();
 
@@ -432,6 +452,11 @@ namespace CarwashServices.Roles
             var term = _searchBox.Text?.Trim().ToLower() ?? "";
 
             var list = _unassigned;
+
+            // Defensive re-check — keeps the queue correct even if the
+            // source list somehow contains a stale row.
+            list = list.Where(IsAwaitingAssignment).ToList();
+
             if (!string.IsNullOrEmpty(term))
             {
                 list = list.Where(r =>
@@ -472,10 +497,19 @@ namespace CarwashServices.Roles
             _grid.ResumeLayout();
 
             _statusLbl.Text = list.Count == 0
-                ? "No unassigned requests."
-                : $"{list.Count} unassigned request{(list.Count == 1 ? "" : "s")}.";
+                ? "No pending requests waiting for assignment."
+                : $"{list.Count} pending request{(list.Count == 1 ? "" : "s")} waiting for assignment.";
 
-            HideAssignControls();
+            if (_grid.Rows.Count > 0)
+            {
+                ShowAssignControls(0);
+            }
+            else
+            {
+                _activeRow = -1;
+                _staffCombo.Visible = false;
+                _assignBtn.Visible = false;
+            }
         }
 
         // ================================================================
@@ -604,23 +638,22 @@ namespace CarwashServices.Roles
         };
 
         // ================================================================
-        //  HOVER — show the picker on the hovered row
+        //  HOVER / CLICK
         // ================================================================
         private void Grid_CellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0 ||
                 _grid.Columns[e.ColumnIndex].Name != "Assign")
             {
-                if (_activeRow < 0)
-                {
-                    HideAssignControls();
-                    SetHover(-1);
-                }
                 return;
             }
-
-            ShowAssignControls(e.RowIndex);
             SetHover(e.RowIndex);
+        }
+
+        private void Grid_CellMouseEnter(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+            ShowAssignControls(e.RowIndex);
         }
 
         private void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
@@ -669,13 +702,6 @@ namespace CarwashServices.Roles
             _assignBtn.BringToFront();
 
             UpdateAssignButtonState();
-        }
-
-        private void HideAssignControls()
-        {
-            _activeRow = -1;
-            if (_staffCombo != null) _staffCombo.Visible = false;
-            if (_assignBtn != null) _assignBtn.Visible = false;
         }
 
         private void UpdateAssignButtonState()

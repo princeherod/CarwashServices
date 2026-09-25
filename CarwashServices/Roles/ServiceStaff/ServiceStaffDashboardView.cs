@@ -216,10 +216,17 @@ namespace CarwashServices.Roles.ServiceStaff
             _kpiRow = new Panel { BackColor = PageBg, Height = KpiHeight };
             _root.Controls.Add(_kpiRow);
 
-            _kpiAssigned = AddKpiTile(_kpiRow, "MY ASSIGNED REQUESTS", Accent, AccentSoft, KpiIconKind.Clipboard);
-            _kpiInProgress = AddKpiTile(_kpiRow, "IN PROGRESS", Amber, AmberSoft, KpiIconKind.Clock);
-            _kpiCompleted = AddKpiTile(_kpiRow, "COMPLETED", Green, GreenSoft, KpiIconKind.Check);
-            _kpiFollowUp = AddKpiTile(_kpiRow, "PENDING FOLLOW-UPS", Slate, SlateSoft, KpiIconKind.Mail);
+            _kpiAssigned = AddKpiTile(_kpiRow, "MY ASSIGNED REQUESTS", Accent, AccentSoft, KpiIconKind.Clipboard,
+    () => (FindForm() as MainForm)?.NavigateToAssignedRequests("All statuses"));
+
+            _kpiInProgress = AddKpiTile(_kpiRow, "IN PROGRESS", Amber, AmberSoft, KpiIconKind.Clock,
+                () => (FindForm() as MainForm)?.NavigateToAssignedRequests("InProgress"));
+
+            _kpiCompleted = AddKpiTile(_kpiRow, "COMPLETED", Green, GreenSoft, KpiIconKind.Check,
+                () => (FindForm() as MainForm)?.NavigateToAssignedRequests("Completed"));
+
+            _kpiFollowUp = AddKpiTile(_kpiRow, "PENDING FOLLOW-UPS", Slate, SlateSoft, KpiIconKind.Mail,
+                () => (FindForm() as MainForm)?.NavigateToModule("Follow-Ups / Reminders"));
 
             // ---------- Today's Assigned Services ----------
             _todayCard = MakeCard("Today's Assigned Services", hasHint: true);
@@ -305,22 +312,34 @@ namespace CarwashServices.Roles.ServiceStaff
         // ================================================================
         private enum KpiIconKind { Clipboard, Clock, Check, Mail, Calendar, Users }
 
-        private Label AddKpiTile(Panel parent, string title, Color accent, Color soft, KpiIconKind icon)
+        private Label AddKpiTile(Panel parent, string title, Color accent, Color soft, KpiIconKind icon,
+                                  Action onClick = null)
         {
-            var card = new Panel { BackColor = Color.White };
+            var card = new Panel
+            {
+                BackColor = Color.White,
+                Cursor = onClick != null ? Cursors.Hand : Cursors.Default
+            };
+
+            bool hover = false;
+
             card.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
+                Color bg = hover && onClick != null
+                    ? Color.FromArgb(0xF7, 0xFB, 0xFF)
+                    : Color.White;
+
                 using (var path = RoundedRect(new Rectangle(0, 0, card.Width - 1, card.Height - 1), 10))
-                using (var fill = new SolidBrush(Color.White))
-                using (var pen = new Pen(CardBorder))
+                using (var fill = new SolidBrush(bg))
+                using (var pen = new Pen(hover && onClick != null ? accent : CardBorder,
+                                         hover && onClick != null ? 1.5f : 1f))
                 {
                     e.Graphics.FillPath(fill, path);
                     e.Graphics.DrawPath(pen, path);
                 }
 
-                // Left accent stripe
                 using (var stripe = new SolidBrush(accent))
                 {
                     var r = new Rectangle(0, 0, 4, card.Height);
@@ -340,7 +359,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 BackColor = Color.Transparent
             });
 
-            // Icon chip (top-right)
+            // Icon chip
             var chip = new Panel
             {
                 Size = new Size(30, 30),
@@ -374,6 +393,29 @@ namespace CarwashServices.Roles.ServiceStaff
                 BackColor = Color.Transparent
             };
             card.Controls.Add(val);
+
+            // ---- Hover / click wiring ----
+            if (onClick != null)
+            {
+                void Enter(object? s, EventArgs e) { hover = true; card.Invalidate(); }
+                void Leave(object? s, EventArgs e) { hover = false; card.Invalidate(); }
+                void Click(object? s, EventArgs e) => onClick();
+
+                card.MouseEnter += Enter;
+                card.MouseLeave += Leave;
+                card.Click += Click;
+
+                // Forward events from child controls
+                void Bind(Control c)
+                {
+                    c.Cursor = Cursors.Hand;
+                    c.MouseEnter += Enter;
+                    c.MouseLeave += Leave;
+                    c.Click += Click;
+                    foreach (Control inner in c.Controls) Bind(inner);
+                }
+                foreach (Control child in card.Controls) Bind(child);
+            }
 
             return val;
         }
