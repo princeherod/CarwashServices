@@ -24,10 +24,17 @@ namespace CarwashServices.Dtos
         public DateTime CreatedAt { get; set; }
         public int? CreatedBy { get; set; }
 
-        // Archive fields
         public bool IsArchived { get; set; }
         public DateTime? ArchivedAt { get; set; }
         public string? ArchivedBy { get; set; }
+
+        // ---- Service Staff approval ----
+        public string ApprovalStatus { get; set; } = "NotRequired";
+        public int? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+        public string? RejectionReason { get; set; }
+        public int? RejectedBy { get; set; }
+        public DateTime? RejectedAt { get; set; }
     }
 
     public class FollowUpStatsDto

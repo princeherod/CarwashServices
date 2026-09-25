@@ -21,7 +21,9 @@ namespace CarwashServices.Roles
 
         private List<FollowUpDto> _all = new();
         private List<TenantCustomerDto> _customers = new();
+        private List<UserDto> _users = new();
         private Dictionary<int, TenantCustomerDto> _custById = new();
+        private Dictionary<int, UserDto> _userById = new();
 
         private int _pageSize = 8;
         private int _page = 1;
@@ -41,28 +43,28 @@ namespace CarwashServices.Roles
         private Label _drillDownChipLabel = null!;
         private readonly System.Windows.Forms.Timer _highlightTimer = new() { Interval = 3000 };
 
-        private Panel _contentPanel;
-        private Panel _statsBar;
-        private DataGridView _grid;
-        private Panel _pagerBar;
-        private DataGridView _logGrid;
-        private Label _showingLbl;
-        private Panel _gridCard;
-        private Panel _logCard;
-        private Panel _header;
-        private Button _addBtn;
-        private TextBox _searchBox;
-        private ComboBox _statusFilterCombo;
+        private Panel _contentPanel = null!;
+        private Panel _statsBar = null!;
+        private DataGridView _grid = null!;
+        private Panel _pagerBar = null!;
+        private DataGridView _logGrid = null!;
+        private Label _showingLbl = null!;
+        private Panel _gridCard = null!;
+        private Panel _logCard = null!;
+        private Panel _header = null!;
+        private Button _addBtn = null!;
+        private TextBox _searchBox = null!;
+        private ComboBox _statusFilterCombo = null!;
 
-        private Label _tabActive;
-        private Label _tabArchived;
-        private Panel _tabUnderline;
-        private Panel _tabBar;
+        private Label _tabActive = null!;
+        private Label _tabArchived = null!;
+        private Panel _tabUnderline = null!;
+        private Panel _tabBar = null!;
 
-        private Label _breadcrumb;
-        private Label _sectionLbl;
-        private Label _logTitleLbl;
-        private Label _logSubLbl;
+        private Label _breadcrumb = null!;
+        private Label _sectionLbl = null!;
+        private Label _logTitleLbl = null!;
+        private Label _logSubLbl = null!;
         private bool _relayouting;
         private int _statsLayoutWidth = -1;
         private int _logRowCount = 0;
@@ -77,7 +79,6 @@ namespace CarwashServices.Roles
         private static readonly Color PageBg = Color.FromArgb(0xF0, 0xF4, 0xFA);
         private static readonly Color CardBorder = Color.FromArgb(0xE1, 0xE7, 0xF0);
         private static readonly Color HeaderBg = Color.FromArgb(0xF8, 0xFA, 0xFD);
-        private static readonly Color ButtonBorder = Color.FromArgb(0xC9, 0xD3, 0xE3);
         private static readonly Color Green = Color.FromArgb(0x1E, 0x7A, 0x34);
         private static readonly Color Red = Color.FromArgb(0xC6, 0x28, 0x28);
         private static readonly Color Blue = Color.FromArgb(0x1E, 0x88, 0xE5);
@@ -101,6 +102,7 @@ namespace CarwashServices.Roles
         private static readonly bool TintBehindText = false;
 
         private const int MinCustomer = 180;
+        private const int MinCreatedBy = 130;
         private const int MinScheduled = 120;
         private const int MinReason = 180;
         private const int MinDiscount = 130;
@@ -109,12 +111,13 @@ namespace CarwashServices.Roles
         private const int MinActions = 70;
         private const int MinArchived = 130;
 
-        private const float WCustomer = 24f;
-        private const float WScheduled = 16f;
-        private const float WReason = 20f;
-        private const float WDiscount = 18f;
-        private const float WSendVia = 9f;
-        private const float WStatus = 11f;
+        private const float WCustomer = 22f;
+        private const float WCreatedBy = 14f;
+        private const float WScheduled = 15f;
+        private const float WReason = 18f;
+        private const float WDiscount = 17f;
+        private const float WSendVia = 8f;
+        private const float WStatus = 10f;
         private const float WActions = 6f;
 
         private const int LogMinNum = 60;
@@ -267,11 +270,7 @@ namespace CarwashServices.Roles
             };
             _contentPanel.Controls.Add(_breadcrumb);
 
-            _header = new Panel
-            {
-                Height = 92,
-                BackColor = Color.Transparent
-            };
+            _header = new Panel { Height = 92, BackColor = Color.Transparent };
             _contentPanel.Controls.Add(_header);
 
             _header.Controls.Add(new Label
@@ -310,11 +309,7 @@ namespace CarwashServices.Roles
             _addBtn.Click += (s, e) => OpenAddDialog();
             _header.Controls.Add(_addBtn);
 
-            _tabBar = new Panel
-            {
-                Height = 44,
-                BackColor = Color.White
-            };
+            _tabBar = new Panel { Height = 44, BackColor = Color.White };
             _tabBar.Paint += (s, e) =>
             {
                 using var pen = new Pen(CardBorder);
@@ -354,12 +349,7 @@ namespace CarwashServices.Roles
                 await LoadAsync();
             };
 
-            _drillDownHost = new Panel
-            {
-                Height = 36,
-                BackColor = PageBg,
-                Visible = false
-            };
+            _drillDownHost = new Panel { Height = 36, BackColor = PageBg, Visible = false };
             _contentPanel.Controls.Add(_drillDownHost);
 
             _drillDownChip = new Panel
@@ -409,11 +399,7 @@ namespace CarwashServices.Roles
 
             _drillDownHost.Controls.Add(_drillDownChip);
 
-            _statsBar = new Panel
-            {
-                Height = 100,
-                BackColor = Color.Transparent
-            };
+            _statsBar = new Panel { Height = 100, BackColor = Color.Transparent };
             _contentPanel.Controls.Add(_statsBar);
 
             _sectionLbl = new Label
@@ -450,7 +436,8 @@ namespace CarwashServices.Roles
             };
             _statusFilterCombo.Items.AddRange(new object[]
             {
-                "All statuses", "Draft", "Scheduled", "Due today", "Sent", "Redeemed", "Expired"
+                "All statuses", "Draft", "Pending Approval", "Approved", "Scheduled",
+                "Due today", "Sent", "Redeemed", "Rejected", "Expired"
             });
 
             _statusFilterCombo.SelectedIndexChanged += (s, e) =>
@@ -489,10 +476,7 @@ namespace CarwashServices.Roles
             _grid.MouseLeave += (s, e) => SetHover(-1);
             _grid.Scroll += (s, e) => CloseActiveMenu();
             _grid.Resize += (s, e) => CloseActiveMenu();
-            _grid.MouseDown += (s, e) =>
-            {
-                if (e.Button == MouseButtons.Left) CloseActiveMenu();
-            };
+            _grid.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) CloseActiveMenu(); };
             _gridCard.Controls.Add(_grid);
 
             _pagerBar = new Panel
@@ -620,11 +604,7 @@ namespace CarwashServices.Roles
         {
             _grid.Columns.Clear();
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "FollowUpId",
-                Visible = false
-            });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "FollowUpId", Visible = false });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -633,6 +613,15 @@ namespace CarwashServices.Roles
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = MinCustomer,
                 FillWeight = WCustomer
+            });
+
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "CreatedBy",
+                HeaderText = "Created by",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = MinCreatedBy,
+                FillWeight = WCreatedBy
             });
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -749,9 +738,7 @@ namespace CarwashServices.Roles
         // ================================================================
         public void ApplyDrillDown(string status, int? focusFollowUpId = null, string source = null)
         {
-            _drillDownFilter = string.IsNullOrWhiteSpace(status) || status == "All"
-                ? ""
-                : status;
+            _drillDownFilter = string.IsNullOrWhiteSpace(status) || status == "All" ? "" : status;
             _focusFollowUpId = focusFollowUpId;
             _source = source ?? "";
 
@@ -766,8 +753,7 @@ namespace CarwashServices.Roles
                 var match = _statusFilterCombo.Items.Cast<object>()
                     .FirstOrDefault(x => string.Equals(x.ToString(), _drillDownFilter,
                                                        StringComparison.OrdinalIgnoreCase));
-                if (match != null)
-                    _statusFilterCombo.SelectedItem = match;
+                if (match != null) _statusFilterCombo.SelectedItem = match;
             }
             else
             {
@@ -776,10 +762,7 @@ namespace CarwashServices.Roles
                 _statusFilterCombo.SelectedItem = "All statuses";
             }
 
-            _statusFilter = string.IsNullOrEmpty(_drillDownFilter)
-                ? "All statuses"
-                : _drillDownFilter;
-
+            _statusFilter = string.IsNullOrEmpty(_drillDownFilter) ? "All statuses" : _drillDownFilter;
             _page = 1;
             RelayoutUI();
             ApplyFilter();
@@ -793,10 +776,7 @@ namespace CarwashServices.Roles
             _ => src
         };
 
-        public void ClearDrillDown()
-        {
-            ApplyDrillDown("All");
-        }
+        public void ClearDrillDown() { ApplyDrillDown("All"); }
 
         // ================================================================
         //  LAYOUT
@@ -816,10 +796,7 @@ namespace CarwashServices.Roles
                     ApplyLayout();
                 }
             }
-            finally
-            {
-                _relayouting = false;
-            }
+            finally { _relayouting = false; }
         }
 
         private void ApplyLayout()
@@ -1031,10 +1008,13 @@ namespace CarwashServices.Roles
         private static (Color bg, Color fg) StatusColors(string s) => s switch
         {
             "Draft" => (Color.FromArgb(0xF1, 0xF4, 0xF9), Muted),
+            "Pending Approval" => (Color.FromArgb(0xFF, 0xF4, 0xDB), Color.FromArgb(0x9A, 0x6A, 0x00)),
+            "Approved" => (BlueSoft, Color.FromArgb(0x15, 0x65, 0xC0)),
             "Scheduled" => (Color.FromArgb(0xE8, 0xEA, 0xF6), Color.FromArgb(0x39, 0x49, 0xAB)),
             "Due today" => (Color.FromArgb(0xFF, 0xF4, 0xDB), Color.FromArgb(0x9A, 0x6A, 0x00)),
-            "Sent" or "Contacted" => (Color.FromArgb(0xE3, 0xF1, 0xFD), Color.FromArgb(0x15, 0x65, 0xC0)),
+            "Sent" or "Contacted" => (BlueSoft, Color.FromArgb(0x15, 0x65, 0xC0)),
             "Redeemed" => (Color.FromArgb(0xE4, 0xF5, 0xE8), Color.FromArgb(0x1E, 0x7A, 0x34)),
+            "Rejected" => (Color.FromArgb(0xFD, 0xE7, 0xE6), Color.FromArgb(0xC6, 0x28, 0x28)),
             "Expired" => (Color.FromArgb(0xFD, 0xE7, 0xE6), Color.FromArgb(0xC6, 0x28, 0x28)),
             _ => (Color.FromArgb(0xEE, 0xF1, 0xF6), Muted)
         };
@@ -1119,11 +1099,7 @@ namespace CarwashServices.Roles
         {
             if (e.ColumnIndex < 0) return;
 
-            if (e.RowIndex == -1)
-            {
-                PaintHeader(e);
-                return;
-            }
+            if (e.RowIndex == -1) { PaintHeader(e); return; }
 
             var colName = _grid.Columns[e.ColumnIndex].Name;
 
@@ -1131,6 +1107,10 @@ namespace CarwashServices.Roles
             {
                 case "Customer":
                     PaintTwoLine(e, FontStrong, Navy, FontSub, Muted);
+                    break;
+
+                case "CreatedBy":
+                    PaintTwoLine(e, FontNormal, Navy, FontSub, Muted);
                     break;
 
                 case "Scheduled":
@@ -1162,12 +1142,7 @@ namespace CarwashServices.Roles
         private void LogGrid_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.ColumnIndex < 0) return;
-
-            if (e.RowIndex == -1)
-            {
-                PaintHeader(e);
-                return;
-            }
+            if (e.RowIndex == -1) { PaintHeader(e); return; }
 
             if (_logGrid.Columns[e.ColumnIndex].Name == "Status")
                 PaintStatusPill(e);
@@ -1184,7 +1159,6 @@ namespace CarwashServices.Roles
                 SetHover(-1);
                 return;
             }
-
             SetHover(HitTestActions(e.RowIndex, e.Location));
         }
 
@@ -1254,16 +1228,11 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  ACTIONS MENU
+        //  ACTION MENU — status-aware
         // ================================================================
-        private void ShowActionsMenu(int rowIndex, FollowUpDto dto)
+        private void ShowActionsMenu(int rowIndex, FollowUpDto f)
         {
             CloseActiveMenu();
-
-            var spec = _grid.Rows[rowIndex].Cells["Actions"].Value?.ToString() ?? "";
-            if (string.IsNullOrEmpty(spec)) return;
-
-            var actions = spec.Split('|');
 
             var menu = new ContextMenuStrip
             {
@@ -1276,26 +1245,30 @@ namespace CarwashServices.Roles
                 Renderer = new ToolStripProfessionalRenderer(new MenuColors())
             };
 
-            foreach (var action in actions)
-            {
-                switch (action)
-                {
-                    case "Send":
-                        AddMenuItem(menu, "Send", () => SendFollowUpAsync(dto));
-                        break;
-                    case "Edit":
-                        AddMenuItem(menu, "Edit", () => OpenEditDialog(dto));
-                        break;
-                    case "Archive":
-                        AddMenuItem(menu, "Archive", () => ArchiveAsync(dto), isDanger: true);
-                        break;
-                    case "Restore":
-                        AddMenuItem(menu, "Restore", () => RestoreAsync(dto));
-                        break;
-                }
-            }
+            // Every state gets a View.
+            AddMenuItem(menu, "View", () => ShowViewDialog(f));
 
-            if (menu.Items.Count == 0) return;
+            // Approval-gated rows get Approve / Reject for Admin/Manager only.
+            bool canApprove = SessionUser.Role == UserRole.Admin
+                           || SessionUser.Role == UserRole.SuperAdmin
+                           || SessionUser.Role == UserRole.Manager;
+
+            if (f.ApprovalStatus == "Pending" && canApprove)
+            {
+                AddMenuItem(menu, "Approve", () => ApproveAsync(f));
+                AddMenuItem(menu, "Reject", () => RejectAsync(f), isDanger: true);
+            }
+            else if (f.ApprovalStatus == "Pending" && !canApprove)
+            {
+                // Service Staff shouldn't even reach this view, but guard anyway.
+                // No Approve / Reject items are added.
+            }
+            else
+            {
+                // Non-approval rows keep the existing actions.
+                AddMenuItem(menu, "Edit", () => OpenEditDialog(f));
+                AddMenuItem(menu, "Archive", () => ArchiveAsync(f), isDanger: true);
+            }
 
             _activeMenu = menu;
             _menuRow = rowIndex;
@@ -1327,13 +1300,9 @@ namespace CarwashServices.Roles
                 Height = MenuItemH,
                 Padding = new Padding(12, 0, 12, 0),
                 TextAlign = ContentAlignment.MiddleLeft,
-                Width = 140
+                Width = 180
             };
-            item.Click += (s, e) =>
-            {
-                menu.Close();
-                onClick();
-            };
+            item.Click += (s, e) => { menu.Close(); onClick(); };
             menu.Items.Add(item);
         }
 
@@ -1370,11 +1339,14 @@ namespace CarwashServices.Roles
                     "api/tenant/1/tenant-customers") ?? new();
                 _custById = _customers.ToDictionary(c => c.TenantCustomerId);
             }
-            catch
+            catch { _customers = new(); _custById = new(); }
+
+            try
             {
-                _customers = new();
-                _custById = new();
+                _users = await _http.GetFromJsonAsync<List<UserDto>>("api/users") ?? new();
+                _userById = _users.ToDictionary(u => u.UserId);
             }
+            catch { _users = new(); _userById = new(); }
         }
 
         private async Task LoadAsync()
@@ -1383,10 +1355,7 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
 
-                var url = _tab == ListTab.Active
-                    ? "api/follow-ups"
-                    : "api/follow-ups/archived";
-
+                var url = _tab == ListTab.Active ? "api/follow-ups" : "api/follow-ups/archived";
                 _all = await _http.GetFromJsonAsync<List<FollowUpDto>>(url) ?? new();
 
                 if (_tab == ListTab.Active)
@@ -1406,10 +1375,7 @@ namespace CarwashServices.Roles
                     $"Failed to load follow-ups.\n\n{ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-            finally
-            {
-                Cursor = Cursors.Default;
-            }
+            finally { Cursor = Cursors.Default; }
         }
 
         // ================================================================
@@ -1417,14 +1383,8 @@ namespace CarwashServices.Roles
         // ================================================================
         private void ApplyFilter()
         {
-            if (InvokeRequired)
-            {
-                Invoke(new Action(ApplyFilter));
-                return;
-            }
-
-            if (_grid == null || _pagerBar == null || _showingLbl == null)
-                return;
+            if (InvokeRequired) { Invoke(new Action(ApplyFilter)); return; }
+            if (_grid == null || _pagerBar == null || _showingLbl == null) return;
 
             var list = _all.OrderByDescending(f => f.FollowUpId).ToList();
 
@@ -1433,8 +1393,12 @@ namespace CarwashServices.Roles
                 list = list.Where(f =>
                 {
                     var cust = _custById.TryGetValue(f.CustomerId, out var c) ? c : null;
+                    var creator = f.CreatedBy.HasValue && _userById.TryGetValue(f.CreatedBy.Value, out var u)
+                        ? u.FullName : "";
                     var name = cust?.CustomerName?.ToLower() ?? "";
+                    var creatorLower = creator?.ToLower() ?? "";
                     return name.Contains(_search)
+                        || creatorLower.Contains(_search)
                         || (f.DiscountOffer ?? "").ToLower().Contains(_search)
                         || (f.Reason ?? "").ToLower().Contains(_search)
                         || (f.Notes ?? "").ToLower().Contains(_search);
@@ -1449,8 +1413,8 @@ namespace CarwashServices.Roles
                 && effectiveFilter != "All"
                 && effectiveFilter != "All statuses")
             {
-                list = list.Where(f => string.Equals(f.Status, effectiveFilter,
-                                                     StringComparison.OrdinalIgnoreCase))
+                list = list.Where(f => string.Equals(DisplayStatus(f), effectiveFilter,
+                                                      StringComparison.OrdinalIgnoreCase))
                            .ToList();
             }
 
@@ -1460,8 +1424,7 @@ namespace CarwashServices.Roles
             if (_focusFollowUpId.HasValue && _tab == ListTab.Active)
             {
                 int idx = list.FindIndex(f => f.FollowUpId == _focusFollowUpId.Value);
-                if (idx >= 0)
-                    _page = idx / Math.Max(1, _pageSize) + 1;
+                if (idx >= 0) _page = idx / Math.Max(1, _pageSize) + 1;
             }
 
             if (_page > totalPages) _page = totalPages;
@@ -1484,6 +1447,22 @@ namespace CarwashServices.Roles
                 if (!string.IsNullOrWhiteSpace(secondLine))
                     custCell += $"\n{secondLine}";
 
+                // Created By cell: staff name + role line
+                string creatorCell = "—";
+                if (f.CreatedBy.HasValue && _userById.TryGetValue(f.CreatedBy.Value, out var creator))
+                {
+                    creatorCell = creator.FullName;
+                    var roleLabel = creator.RoleId switch
+                    {
+                        1 => "Super Admin",
+                        2 => "Admin",
+                        3 => "Manager",
+                        4 => "Service Staff",
+                        _ => "User"
+                    };
+                    creatorCell += $"\n{roleLabel}";
+                }
+
                 var scheduled = f.ScheduledDate.ToString("yyyy-MM-dd");
                 var isOverdue = f.ScheduledDate.Date < DateTime.Today
                                 && f.Status != "Sent"
@@ -1492,9 +1471,7 @@ namespace CarwashServices.Roles
                                 && f.Status != "Expired";
                 if (isOverdue) scheduled += "\noverdue";
 
-                var reasonCell = string.IsNullOrWhiteSpace(f.Reason)
-                    ? "—"
-                    : f.Reason!;
+                var reasonCell = string.IsNullOrWhiteSpace(f.Reason) ? "—" : f.Reason!;
 
                 var method = f.ContactMethod switch
                 {
@@ -1502,27 +1479,21 @@ namespace CarwashServices.Roles
                     _ => f.ContactMethod
                 };
 
+                var displayStatus = DisplayStatus(f);
+
                 int rowIdx;
                 if (_tab == ListTab.Active)
                 {
-                    bool isTerminal = f.Status == "Redeemed" || f.Status == "Expired";
-                    bool canSend = f.Status == "Scheduled"
-                                || f.Status == "Due today"
-                                || f.Status == "Draft";
-
-                    string actions = isTerminal
-                        ? "Archive"
-                        : (canSend ? "Send|Edit|Archive" : "Edit|Archive");
-
                     rowIdx = _grid.Rows.Add(
                         f.FollowUpId,
                         custCell,
+                        creatorCell,
                         scheduled,
                         reasonCell,
                         string.IsNullOrWhiteSpace(f.DiscountOffer) ? "—" : f.DiscountOffer,
                         method,
-                        f.Status,
-                        actions);
+                        displayStatus,
+                        "");
                 }
                 else
                 {
@@ -1535,13 +1506,14 @@ namespace CarwashServices.Roles
                     rowIdx = _grid.Rows.Add(
                         f.FollowUpId,
                         custCell,
+                        creatorCell,
                         scheduled,
                         reasonCell,
                         string.IsNullOrWhiteSpace(f.DiscountOffer) ? "—" : f.DiscountOffer,
                         method,
-                        f.Status,
+                        displayStatus,
                         string.IsNullOrWhiteSpace(archivedCell) ? "—" : archivedCell,
-                        "Restore");
+                        "");
                 }
 
                 _grid.Rows[rowIdx].Tag = f.FollowUpId;
@@ -1563,8 +1535,7 @@ namespace CarwashServices.Roles
                 {
                     if (row.Tag is int id && id == _focusFollowUpId.Value)
                     {
-                        try { _grid.FirstDisplayedScrollingRowIndex = row.Index; }
-                        catch { }
+                        try { _grid.FirstDisplayedScrollingRowIndex = row.Index; } catch { }
                         _highlightTimer.Stop();
                         _highlightTimer.Start();
                         break;
@@ -1581,9 +1552,274 @@ namespace CarwashServices.Roles
             RebuildPager(totalPages);
         }
 
+        /// <summary>
+        /// Display status shown in the grid. Approval state overrides
+        /// the underlying lifecycle status when they disagree.
+        /// </summary>
+        private static string DisplayStatus(FollowUpDto f)
+        {
+            if (f.ApprovalStatus == "Pending") return "Pending Approval";
+            if (f.ApprovalStatus == "Rejected") return "Rejected";
+            if (f.ApprovalStatus == "Approved" && f.Status == "Scheduled") return "Approved";
+            if (f.ApprovalStatus == "Approved" && f.Status == "Sent") return "Sent";
+            return f.Status ?? "Draft";
+        }
+
         // ================================================================
-        //  ARCHIVE / RESTORE / SEND
+        //  PAGER
         // ================================================================
+        private void RebuildPager(int totalPages)
+        {
+            foreach (var btn in _pagerBar.Controls.OfType<Button>().ToList())
+                btn.Dispose();
+
+            int btnSize = 36, gap = 6, rightPad = 16;
+
+            var next = new Button
+            {
+                Text = "›",
+                Size = new Size(btnSize, btnSize),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.White,
+                ForeColor = Navy,
+                UseVisualStyleBackColor = false,
+                Font = new Font("Segoe UI Semibold", 12f),
+                Cursor = _page < totalPages ? Cursors.Hand : Cursors.Default,
+                Enabled = _page < totalPages,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            next.FlatAppearance.BorderColor = CardBorder;
+            next.Click += (s, e) => { if (_page < totalPages) { _page++; ApplyFilter(); } };
+            next.Location = new Point(_pagerBar.Width - btnSize - rightPad, 10);
+            _pagerBar.Controls.Add(next);
+            rightPad += btnSize + gap;
+
+            var startPage = Math.Max(1, totalPages - 3);
+            for (int p = totalPages; p >= startPage; p--)
+            {
+                var pb = new Button
+                {
+                    Text = p.ToString(),
+                    Size = new Size(btnSize, btnSize),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = p == _page ? Navy : Color.White,
+                    ForeColor = p == _page ? Color.White : Navy,
+                    UseVisualStyleBackColor = false,
+                    Font = new Font("Segoe UI Semibold", 9.5f),
+                    Cursor = Cursors.Hand,
+                    Anchor = AnchorStyles.Top | AnchorStyles.Right
+                };
+                pb.FlatAppearance.BorderColor = p == _page ? Navy : CardBorder;
+                var captured = p;
+                pb.Click += (s, e) => { _page = captured; ApplyFilter(); };
+                pb.Location = new Point(_pagerBar.Width - btnSize - rightPad, 10);
+                _pagerBar.Controls.Add(pb);
+                rightPad += btnSize + gap;
+            }
+
+            var prev = new Button
+            {
+                Text = "‹",
+                Size = new Size(btnSize, btnSize),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.White,
+                ForeColor = Navy,
+                UseVisualStyleBackColor = false,
+                Font = new Font("Segoe UI Semibold", 12f),
+                Cursor = _page > 1 ? Cursors.Hand : Cursors.Default,
+                Enabled = _page > 1,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            prev.FlatAppearance.BorderColor = CardBorder;
+            prev.Click += (s, e) => { if (_page > 1) { _page--; ApplyFilter(); } };
+            prev.Location = new Point(_pagerBar.Width - btnSize - rightPad, 10);
+            _pagerBar.Controls.Add(prev);
+        }
+
+        // ================================================================
+        //  LOG GRID
+        // ================================================================
+        private void BuildLog()
+        {
+            _logGrid.SuspendLayout();
+            _logGrid.Rows.Clear();
+
+            var recent = _all.OrderByDescending(f => f.ScheduledDate).Take(10).ToList();
+            foreach (var f in recent)
+            {
+                var cust = _custById.TryGetValue(f.CustomerId, out var c) ? c : null;
+                var idx = _logGrid.Rows.Add(
+                    $"#{f.FollowUpId}",
+                    cust?.CustomerName ?? $"id:{f.CustomerId}",
+                    f.Type,
+                    f.ContactMethod,
+                    f.ScheduledDate.ToString("yyyy-MM-dd"),
+                    DisplayStatus(f),
+                    f.Notes ?? "");
+                _logGrid.Rows[idx].Cells["Notes"].ToolTipText = f.Notes ?? "";
+            }
+            _logGrid.ResumeLayout();
+
+            _logRowCount = recent.Count;
+            RelayoutUI();
+        }
+
+        // ================================================================
+        //  VIEW DIALOG
+        // ================================================================
+        private void ShowViewDialog(FollowUpDto f)
+        {
+            var cust = _custById.TryGetValue(f.CustomerId, out var c) ? c : null;
+
+            string creatorText = "—";
+            if (f.CreatedBy.HasValue && _userById.TryGetValue(f.CreatedBy.Value, out var u))
+            {
+                var roleLabel = u.RoleId switch
+                {
+                    1 => "Super Admin",
+                    2 => "Admin",
+                    3 => "Manager",
+                    4 => "Service Staff",
+                    _ => "User"
+                };
+                creatorText = $"{u.FullName} ({roleLabel})";
+            }
+
+            using var dlg = new FollowUpViewDialog(
+                followUpId: f.FollowUpId,
+                customerName: cust?.CustomerName ?? $"id:{f.CustomerId}",
+                customerEmail: cust?.EmailAddress ?? "—",
+                createdBy: creatorText,
+                reason: f.Reason ?? "—",
+                discountOffer: f.DiscountOffer ?? "—",
+                validUntil: f.ValidUntil,
+                sendVia: f.ContactMethod ?? "Email",
+                sendOn: f.ScheduledDate,
+                messagePreview: f.Notes ?? "",
+                status: DisplayStatus(f),
+                approvalStatus: f.ApprovalStatus,
+                rejectionReason: f.RejectionReason,
+                approvedByName: f.ApprovedBy.HasValue && _userById.TryGetValue(f.ApprovedBy.Value, out var ap)
+                    ? ap.FullName : null,
+                approvedAt: f.ApprovedAt);
+
+            dlg.ShowDialog(FindForm());
+        }
+
+        // ================================================================
+        //  APPROVE
+        // ================================================================
+        private async void ApproveAsync(FollowUpDto f)
+        {
+            var isSendNow = f.ScheduledDate <= DateTime.Now;
+
+            var confirm = MessageBox.Show(
+                isSendNow
+                    ? "Approve this follow-up?\n\nThe email will be sent immediately because it was submitted as Send Now."
+                    : "Approve this follow-up?\n\nThe email will be sent when the scheduled time is reached.",
+                "Approve Follow-Up",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button1);
+
+            if (confirm != DialogResult.OK) return;
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+
+                var resp = await _http.PostAsJsonAsync(
+                    $"api/follow-ups/{f.FollowUpId}/approve",
+                    new
+                    {
+                        approvedBy = SessionUser.UserId,
+                        sendNow = isSendNow
+                    });
+
+                if (resp.IsSuccessStatusCode)
+                {
+                    MessageBox.Show(
+                        isSendNow
+                            ? "Follow-up approved and sent."
+                            : "Follow-up approved. It will be sent when the scheduled time is reached.",
+                        "Approved",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                    await LoadAsync();
+                }
+                else
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show(
+                        $"Approve failed.\n\n{resp.StatusCode}\n\n{body}",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Approve failed.\n\n{ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally { Cursor = Cursors.Default; }
+        }
+
+        // ================================================================
+        //  REJECT
+        // ================================================================
+        private async void RejectAsync(FollowUpDto f)
+        {
+            using var dlg = new RejectFollowUpDialog();
+            if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+
+                var resp = await _http.PostAsJsonAsync(
+                    $"api/follow-ups/{f.FollowUpId}/reject",
+                    new
+                    {
+                        rejectedBy = SessionUser.UserId,
+                        reason = dlg.RejectionReason
+                    });
+
+                if (resp.IsSuccessStatusCode)
+                {
+                    MessageBox.Show(
+                        "Follow-up rejected. The Service Staff will see the reason.",
+                        "Rejected",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                    await LoadAsync();
+                }
+                else
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show(
+                        $"Reject failed.\n\n{resp.StatusCode}\n\n{body}",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Reject failed.\n\n{ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally { Cursor = Cursors.Default; }
+        }
+
+        // ================================================================
+        //  EDIT / ARCHIVE / RESTORE / ADD
+        // ================================================================
+        private void OpenEditDialog(FollowUpDto dto)
+        {
+            using var dlg = new FollowUpEditDialog(_customers, dto);
+            if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+            {
+                _ = ReloadAllAsync();
+            }
+        }
+
         private async void ArchiveAsync(FollowUpDto f)
         {
             if (!ArchiveConfirmDialog.ConfirmArchive("follow-up")) return;
@@ -1641,187 +1877,6 @@ namespace CarwashServices.Roles
             finally { Cursor = Cursors.Default; }
         }
 
-        private async void SendFollowUpAsync(FollowUpDto f)
-        {
-            var confirm = MessageBox.Show(
-                "Send this follow-up email now?\n\n" +
-                "It will be delivered to the customer's email address on file.",
-                "Send Follow-Up",
-                MessageBoxButtons.OKCancel,
-                MessageBoxIcon.Question,
-                MessageBoxDefaultButton.Button2);
-
-            if (confirm != DialogResult.OK) return;
-
-            try
-            {
-                Cursor = Cursors.WaitCursor;
-
-                var resp = await _http.PostAsJsonAsync(
-                    $"api/follow-ups/{f.FollowUpId}/send",
-                    new { companyId = 1 });
-
-                if (resp.IsSuccessStatusCode)
-                {
-                    MessageBox.Show(
-                        "Follow-up email sent successfully.",
-                        "Sent",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
-
-                    await LoadAsync();
-                }
-                else
-                {
-                    var body = await resp.Content.ReadAsStringAsync();
-                    MessageBox.Show(
-                        "Unable to send the follow-up email. " +
-                        "Please check the email configuration and try again.\n\n" +
-                        body,
-                        "Send Failed",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
-
-                    await LoadAsync();
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Unable to send the follow-up email.\n\n{ex.Message}",
-                    "Send Failed",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-            }
-            finally
-            {
-                Cursor = Cursors.Default;
-            }
-        }
-
-        // ================================================================
-        //  EDIT
-        // ================================================================
-        private void OpenEditDialog(FollowUpDto dto)
-        {
-            using var dlg = new FollowUpEditDialog(_customers, dto);
-            if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
-            {
-                _ = ReloadAllAsync();
-            }
-        }
-
-        // ================================================================
-        //  PAGER
-        // ================================================================
-        private void RebuildPager(int totalPages)
-        {
-            foreach (var btn in _pagerBar.Controls.OfType<Button>().ToList())
-                btn.Dispose();
-
-            int btnSize = 36;
-            int gap = 6;
-            int rightPad = 16;
-
-            var next = new Button
-            {
-                Text = "›",
-                Size = new Size(btnSize, btnSize),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.White,
-                ForeColor = Navy,
-                UseVisualStyleBackColor = false,
-                Font = new Font("Segoe UI Semibold", 12f),
-                Cursor = _page < totalPages ? Cursors.Hand : Cursors.Default,
-                Enabled = _page < totalPages,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            next.FlatAppearance.BorderColor = CardBorder;
-            next.FlatAppearance.MouseOverBackColor = PageBg;
-            next.Click += (s, e) => { if (_page < totalPages) { _page++; ApplyFilter(); } };
-            next.Location = new Point(_pagerBar.Width - btnSize - rightPad, 10);
-            _pagerBar.Controls.Add(next);
-            rightPad += btnSize + gap;
-
-            var startPage = Math.Max(1, totalPages - 3);
-            for (int p = totalPages; p >= startPage; p--)
-            {
-                var pb = new Button
-                {
-                    Text = p.ToString(),
-                    Size = new Size(btnSize, btnSize),
-                    FlatStyle = FlatStyle.Flat,
-                    BackColor = p == _page ? Navy : Color.White,
-                    ForeColor = p == _page ? Color.White : Navy,
-                    UseVisualStyleBackColor = false,
-                    Font = new Font("Segoe UI Semibold", 9.5f),
-                    Cursor = Cursors.Hand,
-                    Anchor = AnchorStyles.Top | AnchorStyles.Right
-                };
-                pb.FlatAppearance.BorderColor = p == _page ? Navy : CardBorder;
-                if (p != _page) pb.FlatAppearance.MouseOverBackColor = PageBg;
-                var captured = p;
-                pb.Click += (s, e) => { _page = captured; ApplyFilter(); };
-                pb.Location = new Point(_pagerBar.Width - btnSize - rightPad, 10);
-                _pagerBar.Controls.Add(pb);
-                rightPad += btnSize + gap;
-            }
-
-            var prev = new Button
-            {
-                Text = "‹",
-                Size = new Size(btnSize, btnSize),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.White,
-                ForeColor = Navy,
-                UseVisualStyleBackColor = false,
-                Font = new Font("Segoe UI Semibold", 12f),
-                Cursor = _page > 1 ? Cursors.Hand : Cursors.Default,
-                Enabled = _page > 1,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-            prev.FlatAppearance.BorderColor = CardBorder;
-            prev.FlatAppearance.MouseOverBackColor = PageBg;
-            prev.Click += (s, e) => { if (_page > 1) { _page--; ApplyFilter(); } };
-            prev.Location = new Point(_pagerBar.Width - btnSize - rightPad, 10);
-            _pagerBar.Controls.Add(prev);
-        }
-
-        // ================================================================
-        //  LOG GRID
-        // ================================================================
-        private void BuildLog()
-        {
-            _logGrid.SuspendLayout();
-            _logGrid.Rows.Clear();
-
-            var recent = _all.OrderByDescending(f => f.ScheduledDate).Take(10).ToList();
-
-            foreach (var f in recent)
-            {
-                var cust = _custById.TryGetValue(f.CustomerId, out var c) ? c : null;
-
-                var idx = _logGrid.Rows.Add(
-                    $"#{f.FollowUpId}",
-                    cust?.CustomerName ?? $"id:{f.CustomerId}",
-                    f.Type,
-                    f.ContactMethod,
-                    f.ScheduledDate.ToString("yyyy-MM-dd"),
-                    f.Status,
-                    f.Notes ?? "");
-
-                _logGrid.Rows[idx].Cells["Notes"].ToolTipText = f.Notes ?? "";
-            }
-
-            _logGrid.ResumeLayout();
-
-            _logRowCount = recent.Count;
-            RelayoutUI();
-        }
-
-        // ================================================================
-        //  OPEN ADD DIALOG
-        // ================================================================
         private async void OpenAddDialog()
         {
             if (_customers == null || _customers.Count == 0)
@@ -1860,10 +1915,7 @@ namespace CarwashServices.Roles
             }
         }
 
-        public void RefreshData()
-        {
-            _ = ReloadAllAsync();
-        }
+        public void RefreshData() { _ = ReloadAllAsync(); }
 
         private async Task ReloadAllAsync()
         {

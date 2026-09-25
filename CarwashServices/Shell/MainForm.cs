@@ -231,8 +231,16 @@ namespace CarwashServices.Shell
                 switch (key)
                 {
                     case "View Dashboard":
-                        view = new DashboardView();
-                        headerText = "VIEW DASHBOARD";
+                        if (SessionUser.Role == UserRole.ServiceStaff)
+                        {
+                            view = new Roles.ServiceStaff.ServiceStaffDashboardView();
+                            headerText = "MY DASHBOARD";
+                        }
+                        else
+                        {
+                            view = new DashboardView();
+                            headerText = "VIEW DASHBOARD";
+                        }
                         break;
 
                     case "Analytics":
@@ -274,10 +282,42 @@ namespace CarwashServices.Shell
                         view = new MonitorServiceStatusView();
                         headerText = "MONITOR SERVICE STATUS";
                         break;
-
                     case "Follow-Ups / Reminders":
-                        view = new FollowUpsView();
-                        headerText = "FOLLOW-UPS / REMINDERS";
+                        if (SessionUser.Role == UserRole.ServiceStaff)
+                        {
+                            view = new Roles.ServiceStaff.ServiceStaffFollowUpsView();
+                            headerText = "FOLLOW-UPS / REMINDERS";
+                        }
+                        else
+                        {
+                            view = new FollowUpsView();
+                            headerText = "FOLLOW-UPS / REMINDERS";
+                        }
+                        break;
+
+                    case "View Assigned Requests":
+                        if (SessionUser.Role == UserRole.ServiceStaff)
+                        {
+                            view = new Roles.ServiceStaff.ServiceStaffAssignedRequestsView();
+                            headerText = "VIEW ASSIGNED REQUESTS";
+                        }
+                        else
+                        {
+                            ShowComingSoon(key);
+                            return;
+                        }
+                        break;
+                    case "Update Service Status":
+                        if (SessionUser.Role == UserRole.ServiceStaff)
+                        {
+                            view = new Roles.ServiceStaff.UpdateServiceStatusView();
+                            headerText = "UPDATE SERVICE STATUS";
+                        }
+                        else
+                        {
+                            ShowComingSoon(key);
+                            return;
+                        }
                         break;
 
                     default:

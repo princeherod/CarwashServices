@@ -4,6 +4,7 @@ using CRM.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CRM.infrastructure.Migrations
 {
     [DbContext(typeof(MasterErpDbContext))]
-    partial class MasterErpDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260925055641_AddFollowUpApproval")]
+    partial class AddFollowUpApproval
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -314,12 +317,6 @@ namespace CRM.infrastructure.Migrations
                     b.Property<string>("Reason")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime?>("RejectedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int?>("RejectedBy")
-                        .HasColumnType("int");
 
                     b.Property<string>("RejectionReason")
                         .HasColumnType("nvarchar(max)");

@@ -24,4 +24,16 @@ public class FollowUp
     public bool IsArchived { get; set; }
     public DateTime? ArchivedAt { get; set; }
     public string? ArchivedBy { get; set; }
+
+    // ---- Service Staff approval extension ----
+    // "NotRequired" → created by Admin/Manager, no approval gate.
+    // "Pending"     → created by Service Staff, awaiting Admin/Manager review.
+    // "Approved"    → Admin/Manager approved; row may now be Scheduled / Sent.
+    // "Rejected"    → Admin/Manager rejected; row must never be sent.
+    public string ApprovalStatus { get; set; } = "NotRequired";
+    public int? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public string? RejectionReason { get; set; }
+    public int? RejectedBy { get; set; }
+    public DateTime? RejectedAt { get; set; }
 }

@@ -66,14 +66,7 @@ namespace CarwashServices.Dialogs
         private bool _previewUserEdited = false;
         private List<TenantCustomerDto> _filtered = new();
         private bool _filterRefreshInProgress = false;
-
-        /// <summary>True when the loaded record was Draft and the user can change Status.</summary>
         private bool _statusEditable = false;
-
-        /// <summary>
-        /// Suppresses SelectedIndexChanged while we preload the combo.
-        /// Without this the handler can force the index back to 0.
-        /// </summary>
         private bool _suppressStatusEvents = false;
 
         // ---- Layout ----
@@ -239,7 +232,7 @@ namespace CarwashServices.Dialogs
             root.Controls.Add(new Label
             {
                 Text = isEdit
-                    ? "Update the details below. Changing Status to Scheduled does not send an email now."
+                    ? "Update the details below. Send Now is only triggered when explicitly chosen."
                     : "Reach out before they pass 120 days and are marked as lost.",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9.5f),
@@ -270,26 +263,14 @@ namespace CarwashServices.Dialogs
                         DropDownStyle = ComboBoxStyle.DropDownList,
                         BackColor = Color.White
                     };
-                    _statusCombo.Items.AddRange(new object[]
-                    {
-                        "Draft",
-                        "Scheduled"
-                    });
-
-                    // Set the index BEFORE attaching the handler, then
-                    // attach. This guarantees the user's preload doesn't
-                    // trigger the toggle.
+                    _statusCombo.Items.AddRange(new object[] { "Draft", "Scheduled" });
                     _statusCombo.SelectedIndex = 0;
-
                     _statusCombo.SelectedIndexChanged += (s, e) =>
                     {
                         if (_suppressStatusEvents) return;
-
                         var sel = _statusCombo.SelectedItem?.ToString() ?? "Draft";
-                        if (sel == "Scheduled")
-                            SetWhen(false);
-                        else
-                            SetWhen(true);
+                        if (sel == "Scheduled") SetWhen(false);
+                        else SetWhen(true);
                     };
                     root.Controls.Add(_statusCombo);
                 }
@@ -332,7 +313,6 @@ namespace CarwashServices.Dialogs
             root.Controls.Add(_selectAllFilteredLbl);
             y += 24;
 
-            // Search box
             var searchWrap = new Panel
             {
                 Location = new Point(0, y),
@@ -429,8 +409,6 @@ namespace CarwashServices.Dialogs
             _sendNowBtn.Click += (s, e) =>
             {
                 SetWhen(true);
-                // If the user manually picks Send now while editing a Draft,
-                // keep the status combo consistent with their intent.
                 SetStatusCombo("Draft");
             };
             root.Controls.Add(_sendNowBtn);
@@ -439,7 +417,6 @@ namespace CarwashServices.Dialogs
             _scheduleBtn.Click += (s, e) =>
             {
                 SetWhen(false);
-                // Pick "Schedule" → the status combo shows "Scheduled".
                 SetStatusCombo("Scheduled");
             };
             root.Controls.Add(_scheduleBtn);
@@ -511,7 +488,7 @@ namespace CarwashServices.Dialogs
 
             y += 92;
 
-            // ---- Discount Offer / Valid Until ----
+            // ---- Discount / Valid Until ----
             root.Controls.Add(Caption("DISCOUNT OFFER", 0, y));
             root.Controls.Add(Caption("VALID UNTIL", RightColX, y));
             y += 22;
@@ -654,7 +631,7 @@ namespace CarwashServices.Dialogs
             sendBtn.Click += async (s, e) => await SaveAsync(draft: false);
             footer.Controls.Add(sendBtn);
 
-            // ---- Initial visual state ----
+            // ---- Initial ----
             SetMethod("Email");
             SetWhen(true);
             ApplyCustomerFilter();
@@ -679,11 +656,6 @@ namespace CarwashServices.Dialogs
             return btn;
         }
 
-        /// <summary>
-        /// Programmatically set the status combo without re-triggering the
-        /// SelectedIndexChanged handler (which would call SetWhen again and
-        /// could loop).
-        /// </summary>
         private void SetStatusCombo(string status)
         {
             if (!_statusEditable || _statusCombo == null) return;
@@ -694,14 +666,8 @@ namespace CarwashServices.Dialogs
             if (_statusCombo.SelectedIndex == idx) return;
 
             _suppressStatusEvents = true;
-            try
-            {
-                _statusCombo.SelectedIndex = idx;
-            }
-            finally
-            {
-                _suppressStatusEvents = false;
-            }
+            try { _statusCombo.SelectedIndex = idx; }
+            finally { _suppressStatusEvents = false; }
         }
 
         // ============================================================
@@ -732,7 +698,6 @@ namespace CarwashServices.Dialogs
             {
                 if (_scheduledPicker.Value <= DateTime.Now)
                     _scheduledPicker.Value = DateTime.Today.AddDays(1).AddHours(9);
-
                 _sendOnLbl.ForeColor = Muted;
             }
 
@@ -816,11 +781,8 @@ namespace CarwashServices.Dialogs
                 var checkedIds = new HashSet<int>();
                 for (int i = 0; i < _customerList.Items.Count; i++)
                 {
-                    if (_customerList.GetItemChecked(i) &&
-                        _customerList.Items[i] is CustomerItem ci)
-                    {
+                    if (_customerList.GetItemChecked(i) && _customerList.Items[i] is CustomerItem ci)
                         checkedIds.Add(ci.CustomerId);
-                    }
                 }
 
                 _customerList.BeginUpdate();
@@ -842,10 +804,7 @@ namespace CarwashServices.Dialogs
                 if (_showingLbl != null)
                     _showingLbl.Text = $"Showing {_filtered.Count} of {_customers.Count} customers";
             }
-            finally
-            {
-                _filterRefreshInProgress = false;
-            }
+            finally { _filterRefreshInProgress = false; }
         }
 
         private void ToggleSelectAllFiltered()
@@ -861,10 +820,7 @@ namespace CarwashServices.Dialogs
                 for (int i = 0; i < _customerList.Items.Count; i++)
                     _customerList.SetItemChecked(i, !allChecked);
             }
-            finally
-            {
-                _customerList.EndUpdate();
-            }
+            finally { _customerList.EndUpdate(); }
 
             UpdateBadge();
             UpdateSelectAllLabel();
@@ -874,35 +830,23 @@ namespace CarwashServices.Dialogs
         private bool AreAllFilteredChecked()
         {
             if (_customerList.Items.Count == 0) return false;
-
             for (int i = 0; i < _customerList.Items.Count; i++)
-            {
-                if (!_customerList.GetItemChecked(i))
-                    return false;
-            }
+                if (!_customerList.GetItemChecked(i)) return false;
             return true;
         }
 
         private void UpdateSelectAllLabel()
         {
             if (_selectAllFilteredLbl == null) return;
-            if (_existing != null)
-            {
-                _selectAllFilteredLbl.Visible = false;
-                return;
-            }
-
+            if (_existing != null) { _selectAllFilteredLbl.Visible = false; return; }
             if (_filtered == null || _filtered.Count == 0)
             {
                 _selectAllFilteredLbl.Visible = false;
                 _selectAllFilteredLbl.Text = "Select all filtered";
                 return;
             }
-
             _selectAllFilteredLbl.Visible = true;
-            _selectAllFilteredLbl.Text = AreAllFilteredChecked()
-                ? "Unselect all"
-                : "Select all filtered";
+            _selectAllFilteredLbl.Text = AreAllFilteredChecked() ? "Unselect all" : "Select all filtered";
         }
 
         private void PreselectCustomers()
@@ -911,9 +855,7 @@ namespace CarwashServices.Dialogs
             {
                 if (_customerList.Items[i] is CustomerItem ci &&
                     _preselectedIds!.Contains(ci.CustomerId))
-                {
                     _customerList.SetItemChecked(i, true);
-                }
             }
             UpdateSelectAllLabel();
         }
@@ -922,9 +864,7 @@ namespace CarwashServices.Dialogs
         {
             if (_badge == null || _customerList == null) return;
             if (IsDisposed || Disposing) return;
-
-            int n = _customerList.CheckedItems.Count;
-            _badge.Text = $"{n} selected";
+            _badge.Text = $"{_customerList.CheckedItems.Count} selected";
         }
 
         // ============================================================
@@ -934,7 +874,6 @@ namespace CarwashServices.Dialogs
         {
             if (_previewBox == null) return;
             if (IsDisposed || Disposing) return;
-
             if (_previewUserEdited) return;
 
             var firstChecked = FirstCheckedCustomerName();
@@ -953,9 +892,7 @@ namespace CarwashServices.Dialogs
 
         private string FirstCheckedCustomerName()
         {
-            if (_customerList == null || _customerList.CheckedItems.Count == 0)
-                return "there";
-
+            if (_customerList == null || _customerList.CheckedItems.Count == 0) return "there";
             if (_customerList.CheckedItems[0] is CustomerItem ci &&
                 _custById.TryGetValue(ci.CustomerId, out var cust))
             {
@@ -966,7 +903,7 @@ namespace CarwashServices.Dialogs
         }
 
         // ============================================================
-        //  PRELOAD EXISTING (edit)
+        //  PRELOAD
         // ============================================================
         private void PreloadExisting()
         {
@@ -976,9 +913,6 @@ namespace CarwashServices.Dialogs
 
             var loadedStatus = _existing.Status ?? "Draft";
 
-            // ---- Status ----
-            // The combo is only present when the loaded row is Draft.
-            // Set the index without firing the handler.
             _suppressStatusEvents = true;
             try
             {
@@ -988,41 +922,25 @@ namespace CarwashServices.Dialogs
                     _statusCombo.SelectedIndex = idx >= 0 ? idx : 0;
                 }
             }
-            finally
-            {
-                _suppressStatusEvents = false;
-            }
+            finally { _suppressStatusEvents = false; }
 
-            // ---- Send On ----
             if (_existing.ScheduledDate != default)
                 _scheduledPicker.Value = _existing.ScheduledDate;
 
-            // ---- When toggle ----
-            // Scheduled → Schedule toggle on; Draft → Send now is the
-            // natural default so the user can promote it explicitly.
-            bool isScheduled = string.Equals(loadedStatus, "Scheduled",
-                                             StringComparison.OrdinalIgnoreCase);
+            bool isScheduled = string.Equals(loadedStatus, "Scheduled", StringComparison.OrdinalIgnoreCase);
             SetWhen(!isScheduled);
 
-            // Re-assert the combo value after SetWhen so nothing slips.
-            if (_statusEditable)
-                SetStatusCombo(loadedStatus);
+            if (_statusEditable) SetStatusCombo(loadedStatus);
 
-            // ---- Reason ----
             if (!string.IsNullOrWhiteSpace(_existing.Reason))
                 _reasonTxt.Text = _existing.Reason!;
             ClearReasonError();
 
-            // ---- Discount offer ----
             if (!string.IsNullOrWhiteSpace(_existing.DiscountOffer) &&
                 _discountCombo.Items.Contains(_existing.DiscountOffer))
-            {
                 _discountCombo.SelectedItem = _existing.DiscountOffer;
-            }
             else if (string.IsNullOrWhiteSpace(_existing.DiscountOffer))
-            {
                 _discountCombo.SelectedItem = "No discount";
-            }
             else
             {
                 _discountCombo.Items.Add(_existing.DiscountOffer);
@@ -1032,11 +950,8 @@ namespace CarwashServices.Dialogs
             if (_existing.ValidUntil.HasValue)
                 _validUntilPicker.Value = _existing.ValidUntil.Value;
 
-            if (!string.IsNullOrWhiteSpace(_existing.Type) &&
-                _typeCombo.Items.Contains(_existing.Type))
-            {
+            if (!string.IsNullOrWhiteSpace(_existing.Type) && _typeCombo.Items.Contains(_existing.Type))
                 _typeCombo.SelectedItem = _existing.Type;
-            }
 
             if (!string.IsNullOrWhiteSpace(_existing.Notes))
             {
@@ -1046,8 +961,7 @@ namespace CarwashServices.Dialogs
 
             for (int i = 0; i < _customerList.Items.Count; i++)
             {
-                if (_customerList.Items[i] is CustomerItem ci &&
-                    ci.CustomerId == _existing.CustomerId)
+                if (_customerList.Items[i] is CustomerItem ci && ci.CustomerId == _existing.CustomerId)
                 {
                     _customerList.SetItemChecked(i, true);
                     break;
@@ -1066,7 +980,6 @@ namespace CarwashServices.Dialogs
         {
             var checkedIndices = _customerList.CheckedIndices.Cast<int>().ToList();
 
-            // ---- Validation ----
             if (_existing == null && checkedIndices.Count == 0)
             {
                 MessageBox.Show("Please select at least one customer.",
@@ -1099,41 +1012,27 @@ namespace CarwashServices.Dialogs
                 return;
             }
 
-            // ---- Determine the new status ----
-            // Edit mode: the combo is the source of truth when editable.
-            // Non-editable edits keep whatever the row already had.
-            // Create mode: draft flag wins; otherwise Send now vs Schedule.
             string newStatus;
             if (_existing != null)
             {
-                if (_statusEditable && _statusCombo != null)
-                {
-                    newStatus = _statusCombo.SelectedItem?.ToString() ?? "Draft";
-                }
-                else
-                {
-                    newStatus = _existing.Status ?? "Scheduled";
-                }
+                newStatus = _statusEditable && _statusCombo != null
+                    ? (_statusCombo.SelectedItem?.ToString() ?? "Draft")
+                    : (_existing.Status ?? "Scheduled");
             }
             else
             {
                 newStatus = draft ? "Draft" : (_sendNow ? "Sent" : "Scheduled");
             }
 
-            // Scheduled needs a future Send On.
             if (newStatus == "Scheduled" && _scheduledPicker.Value <= DateTime.Now)
             {
                 MarkScheduledError("Scheduled send time must be in the future.");
                 MessageBox.Show(
-                    "Status is Scheduled but Send On is in the past.\n\n" +
-                    "Pick a future date and time, or switch Status back to Draft.",
+                    "Status is Scheduled but Send On is in the past.",
                     "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            else
-            {
-                ClearScheduledError();
-            }
+            else ClearScheduledError();
 
             var offer = _discountCombo.SelectedItem?.ToString();
             if (offer == "No discount") offer = null;
@@ -1144,7 +1043,7 @@ namespace CarwashServices.Dialogs
                     ? (_existing?.ScheduledDate ?? DateTime.Now)
                     : DateTime.Now);
 
-            // ---- Edit mode ----
+            // ---- Edit ----
             if (_existing != null)
             {
                 var body = new
@@ -1152,7 +1051,7 @@ namespace CarwashServices.Dialogs
                     customerId = _existing.CustomerId,
                     type = _typeCombo.SelectedItem?.ToString() ?? "Service Reminder",
                     contactMethod = "Email",
-                    reason = reason,
+                    reason,
                     discountOffer = offer,
                     notes = _previewBox.Text,
                     scheduledDate,
@@ -1165,29 +1064,23 @@ namespace CarwashServices.Dialogs
                     var resp = await _http.PutAsJsonAsync(
                         $"api/follow-ups/{_existing.FollowUpId}", body);
 
-                    if (resp.IsSuccessStatusCode)
-                    {
-                        DialogResult = DialogResult.OK;
-                        Close();
-                    }
+                    if (resp.IsSuccessStatusCode) { DialogResult = DialogResult.OK; Close(); }
                     else
                     {
                         var text = await resp.Content.ReadAsStringAsync();
-                        MessageBox.Show(
-                            $"Save failed.\n\n{resp.StatusCode}\n\n{text}",
+                        MessageBox.Show($"Save failed.\n\n{resp.StatusCode}\n\n{text}",
                             "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(
-                        $"Save failed.\n\n{ex.Message}",
+                    MessageBox.Show($"Save failed.\n\n{ex.Message}",
                         "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 return;
             }
 
-            // ---- Create mode ----
+            // ---- Create ----
             var customerIds = checkedIndices
                 .Where(i => i >= 0 && i < _customerList.Items.Count)
                 .Select(i => ((CustomerItem)_customerList.Items[i]).CustomerId)
@@ -1198,7 +1091,7 @@ namespace CarwashServices.Dialogs
                 customerIds,
                 type = _typeCombo.SelectedItem?.ToString() ?? "Service Reminder",
                 contactMethod = "Email",
-                reason = reason,
+                reason,
                 discountOffer = offer,
                 notes = _previewBox.Text,
                 scheduledDate,
@@ -1214,10 +1107,7 @@ namespace CarwashServices.Dialogs
                 if (resp.IsSuccessStatusCode)
                 {
                     BulkFollowUpResponse? parsed = null;
-                    try
-                    {
-                        parsed = await resp.Content.ReadFromJsonAsync<BulkFollowUpResponse>();
-                    }
+                    try { parsed = await resp.Content.ReadFromJsonAsync<BulkFollowUpResponse>(); }
                     catch { }
 
                     int created = parsed?.Count ?? 0;
@@ -1236,12 +1126,8 @@ namespace CarwashServices.Dialogs
 
                     lines.Add("");
                     lines.Add($"Created: {created}");
-
-                    if (sent > 0)
-                        lines.Add($"Emailed: {sent}");
-
-                    if (skipped > 0)
-                        lines.Add($"Skipped (already contacted): {skipped}");
+                    if (sent > 0) lines.Add($"Emailed: {sent}");
+                    if (skipped > 0) lines.Add($"Skipped (already contacted): {skipped}");
 
                     if (failures.Count > 0)
                     {
@@ -1252,7 +1138,6 @@ namespace CarwashServices.Dialogs
                             string who = _custById.TryGetValue(f.CustomerId, out var c)
                                 ? c.CustomerName ?? $"Customer {f.CustomerId}"
                                 : $"Customer {f.CustomerId}";
-
                             lines.Add($"  • {who}: {f.Error}");
                         }
                         if (failures.Count > 10)
@@ -1271,30 +1156,23 @@ namespace CarwashServices.Dialogs
                 else if (resp.StatusCode == HttpStatusCode.Conflict)
                 {
                     MessageBox.Show(
-                        "None of the selected customers can receive a new follow-up.\n\n" +
-                        "They all already have an open follow-up.",
-                        "Already Contacted",
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        "None of the selected customers can receive a new follow-up.",
+                        "Already Contacted", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 else
                 {
                     var body = await resp.Content.ReadAsStringAsync();
-                    MessageBox.Show(
-                        $"Save failed.\n\n{resp.StatusCode}\n\n{body}",
+                    MessageBox.Show($"Save failed.\n\n{resp.StatusCode}\n\n{body}",
                         "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
-                    $"Save failed.\n\n{ex.Message}",
+                MessageBox.Show($"Save failed.\n\n{ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
-        // ============================================================
-        //  SMALL HELPER TYPE
-        // ============================================================
         private sealed class CustomerItem
         {
             public int CustomerId { get; }
@@ -1305,13 +1183,14 @@ namespace CarwashServices.Dialogs
     }
 
     // ================================================================
-    //  Bulk response DTOs (unchanged)
+    //  Bulk response DTOs — one definition only, shared across the app
     // ================================================================
     public class BulkFollowUpResponse
     {
         public int Count { get; set; }
         public int Sent { get; set; }
         public int Skipped { get; set; }
+        public int PendingApproval { get; set; }
         public List<int> SkippedIds { get; set; } = new();
         public List<BulkFollowUpFailure> Failures { get; set; } = new();
         public string? Message { get; set; }

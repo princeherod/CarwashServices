@@ -9,11 +9,12 @@ namespace CarwashServices.Auth
     /// construct a view that doesn't exist.
     ///
     /// The list is role-aware: a key is only "coming soon" for the roles that
-    /// don't yet have a working view. Admin and SuperAdmin ship with every
-    /// operational view, so nothing is coming soon for them.
+    /// don't yet have a working view.
     ///
-    /// Manager: Follow-Ups / Reminders is now implemented.
-    /// Manager: Monitor Service Status is still a stub.
+    /// Service Staff:
+    ///   - Follow-Ups / Reminders    → implemented
+    ///   - View Assigned Requests    → implemented
+    ///   - Update Service Status     → implemented
     /// </summary>
     internal static class ComingSoonModules
     {
@@ -22,12 +23,8 @@ namespace CarwashServices.Auth
             // Manager: all modules implemented.
             [UserRole.Manager] = Array.Empty<string>(),
 
-            // Service Staff: both operational modules are still stubs.
-            [UserRole.ServiceStaff] = new[]
-        {
-        "View Assigned Requests",
-        "Update Service Status"
-            }   
+            // Service Staff: all modules implemented.
+            [UserRole.ServiceStaff] = Array.Empty<string>()
         };
 
         public static bool Contains(string key)

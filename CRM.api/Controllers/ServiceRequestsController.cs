@@ -232,15 +232,9 @@ public class ServiceRequestsController : ControllerBase
 
     // ================================================================
     //  ASSIGN ENDPOINT — used by the Manager's Assign Service Staff view.
-    //
-    //  Single-purpose: sets or clears AssignedStaffId without touching
-    //  any other field on the request. The staff member must exist and
-    //  have RoleId = 4 (Service Staff).
     // ================================================================
     public class AssignRequest
     {
-        // null = unassign. Anything else must reference an existing
-        // Service Staff user (RoleId = 4).
         public int? AssignedStaffId { get; set; }
     }
 
@@ -275,7 +269,6 @@ public class ServiceRequestsController : ControllerBase
 
         existing.AssignedStaffId = req.AssignedStaffId.Value;
 
-        // Any request that gains a staff member is considered assigned.
         if (string.Equals(existing.Status, "Pending", StringComparison.OrdinalIgnoreCase))
             existing.Status = "Assigned";
 
@@ -283,7 +276,9 @@ public class ServiceRequestsController : ControllerBase
         return Ok(existing);
     }
 
-    // PUT: api/service-requests/5/status
+    // ================================================================
+    //  STATUS — generic update (used by Admin/Manager edit)
+    // ================================================================
     [HttpPut("{requestId:int}/status")]
     public async Task<IActionResult> UpdateStatus(int requestId, [FromBody] StatusUpdateDto dto)
     {
@@ -303,6 +298,130 @@ public class ServiceRequestsController : ControllerBase
 
         await _db.SaveChangesAsync();
         return Ok(existing);
+    }
+
+    // ================================================================
+    //  SERVICE STAFF — Update Status (scoped, validated, logged)
+    //
+    //  Only the Service Staff assigned to the request can call this.
+    //  Only valid transitions are accepted. Every change writes a
+    //  ServiceStatusLog entry. No other fields are touched.
+    // ================================================================
+    public class StaffStatusUpdateRequest
+    {
+        public int StaffId { get; set; }
+        public string Status { get; set; } = "";
+        public string? Notes { get; set; }
+    }
+
+    [HttpPut("{requestId:int}/staff-status")]
+    public async Task<IActionResult> UpdateStatusByStaff(int requestId,
+                                                          [FromBody] StaffStatusUpdateRequest req)
+    {
+        if (req.StaffId <= 0)
+            return BadRequest(new { message = "StaffId is required." });
+
+        var allowed = new[] { "Pending", "Assigned", "InProgress", "Completed", "Cancelled" };
+        if (string.IsNullOrWhiteSpace(req.Status) || !allowed.Contains(req.Status))
+            return BadRequest(new { message = $"Status must be one of: {string.Join(", ", allowed)}." });
+
+        var existing = await _db.ServiceRequests
+            .FirstOrDefaultAsync(r => r.RequestId == requestId);
+
+        if (existing is null)
+            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+
+        if (existing.IsArchived)
+            return Conflict(new { message = "Cannot update an archived request." });
+
+        // ---- Scoping: only the assigned Service Staff may update ----
+        if (existing.AssignedStaffId != req.StaffId)
+            return StatusCode(403, new { message = "This request is not assigned to you." });
+
+        // ---- Transition validation ----
+        var from = (existing.Status ?? "Pending").Trim();
+        var to = req.Status.Trim();
+
+        if (!IsValidTransition(from, to))
+        {
+            return Conflict(new
+            {
+                message = $"Invalid status transition: {from} → {to}."
+            });
+        }
+
+        var now = DateTime.Now;
+
+        existing.Status = to;
+
+        if (string.Equals(to, "Completed", StringComparison.OrdinalIgnoreCase))
+            existing.CompletedDate = now;
+
+        if (string.Equals(to, "Pending", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(to, "InProgress", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(to, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            existing.CompletedDate = null;
+
+        // ---- Log ----
+        _db.ServiceStatusLogs.Add(new ServiceStatusLog
+        {
+            RequestId = existing.RequestId,
+            Status = to,
+            UpdatedBy = req.StaffId,
+            UpdatedAt = now,
+            Notes = string.IsNullOrWhiteSpace(req.Notes)
+                ? $"Status updated to {to}."
+                : req.Notes!.Trim()
+        });
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+        {
+            var inner = ex.InnerException?.Message ?? ex.Message;
+            return StatusCode(500, new { message = "Save failed.", detail = inner });
+        }
+
+        return Ok(new
+        {
+            existing.RequestId,
+            status = existing.Status,
+            completedDate = existing.CompletedDate,
+            updatedAt = now
+        });
+    }
+
+    /// <summary>
+    /// Allowed transitions for the Service Staff workflow.
+    ///   Pending / Assigned → InProgress
+    ///   InProgress         → Completed
+    ///   Any non-terminal   → Cancelled
+    ///   Completed / Cancelled are terminal.
+    /// </summary>
+    private static bool IsValidTransition(string from, string to)
+    {
+        from = from?.Trim() ?? "Pending";
+        to = to?.Trim() ?? "Pending";
+
+        if (string.Equals(from, to, StringComparison.OrdinalIgnoreCase)) return true;
+
+        if (string.Equals(from, "Completed", StringComparison.OrdinalIgnoreCase)) return false;
+        if (string.Equals(from, "Cancelled", StringComparison.OrdinalIgnoreCase)) return false;
+
+        if (string.Equals(to, "Cancelled", StringComparison.OrdinalIgnoreCase)) return true;
+
+        if ((string.Equals(from, "Pending", StringComparison.OrdinalIgnoreCase)
+             || string.Equals(from, "Assigned", StringComparison.OrdinalIgnoreCase))
+            && string.Equals(to, "InProgress", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.Equals(from, "InProgress", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(to, "Completed", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
     }
 
     // PUT: api/service-requests/5/archive
@@ -348,7 +467,6 @@ public class ServiceRequestsController : ControllerBase
     }
 
     // DELETE: api/service-requests/5
-    // Kept for parity but no longer used by the UI. Archive replaces it.
     [HttpDelete("{requestId:int}")]
     public async Task<IActionResult> Delete(int requestId)
     {

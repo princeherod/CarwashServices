@@ -48,11 +48,12 @@ namespace CarwashServices.Auth
             },
 
             UserRole.ServiceStaff => new[]
-            {
-                "View Dashboard",
-                "View Assigned Requests",
-                "Update Service Status"
-            },
+{
+    "View Dashboard",
+    "Follow-Ups / Reminders",
+    "View Assigned Requests",
+    "Update Service Status"
+},
 
             _ => Array.Empty<string>()
         };

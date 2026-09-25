@@ -23,7 +23,6 @@
 
 	<ItemGroup>
 		<Folder Include="Roles\Manager\" />
-		<Folder Include="Roles\ServiceStaff\" />
 		<Folder Include="Roles\SuperAdmin\" />
 	</ItemGroup>
 
