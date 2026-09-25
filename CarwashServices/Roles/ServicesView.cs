@@ -33,11 +33,10 @@ namespace CarwashServices.Roles
         private static readonly Font StatusFont = new Font("Segoe UI Semibold", 9.5f);
         private static readonly Font ButtonFont = new Font("Segoe UI Semibold", 8.5f);
 
-        private const int ActionsColW = 280;
-        private const int ActionBtnW = 78;
+        private const int ActionsColW = 80;
         private const int ActionBtnH = 30;
-        private const int ActionBtnGap = 8;
-        private const int ArchiveBtnW = 92;
+        private const int DotsBtnW = 40;
+        private const int MenuItemH = 34;
 
         // ---- Layout ----
         private const int MarginX = 30;
@@ -84,6 +83,8 @@ namespace CarwashServices.Roles
         private Panel _tabUnderline = null!;
 
         private int _hoverAction = -1;
+        private ContextMenuStrip? _activeMenu;
+        private int _menuRow = -1;
 
         private string CurrentUserName =>
             string.IsNullOrWhiteSpace(SessionUser.FullName) ? "Admin" : SessionUser.FullName;
@@ -99,10 +100,11 @@ namespace CarwashServices.Roles
 
             InitializeUI();
 
-            // FIX: turn on double-buffering for every child control.
             Sidebar.EnableDoubleBuffering(this);
 
             Load += async (s, e) => await LoadServicesAsync();
+
+            LostFocus += (s, e) => CloseActiveMenu();
         }
 
         private void InitializeUI()
@@ -162,7 +164,6 @@ namespace CarwashServices.Roles
             _addBtn.Click += (s, e) => OpenAddServiceDialog();
             _contentPanel.Controls.Add(_addBtn);
 
-            // ---- Tab strip ----
             _tabBar = new Panel
             {
                 Location = new Point(0, 118),
@@ -209,7 +210,6 @@ namespace CarwashServices.Roles
                 await LoadServicesAsync();
             };
 
-            // ---- Category chips ----
             _chipBar = new Panel
             {
                 Location = new Point(0, 172),
@@ -220,7 +220,6 @@ namespace CarwashServices.Roles
             _contentPanel.Controls.Add(_chipBar);
             BuildChips();
 
-            // ---- Filter card ----
             _filterCard = new Panel
             {
                 BackColor = Color.White,
@@ -319,7 +318,6 @@ namespace CarwashServices.Roles
             _refreshBtn.Click += async (s, e) => await LoadServicesAsync();
             _filterCard.Controls.Add(_refreshBtn);
 
-            // ---- Grid host + pager ----
             _gridHost = new Panel
             {
                 BackColor = Color.White,
@@ -426,7 +424,8 @@ namespace CarwashServices.Roles
                 {
                     BackColor = Color.White,
                     SelectionBackColor = Color.FromArgb(0xEA, 0xF2, 0xFD),
-                    Padding = new Padding(0)
+                    Padding = new Padding(0),
+                    Alignment = DataGridViewContentAlignment.MiddleCenter
                 }
             });
 
@@ -435,6 +434,12 @@ namespace CarwashServices.Roles
             _grid.CellMouseLeave += (s, e) => SetHover(-1);
             _grid.MouseLeave += (s, e) => SetHover(-1);
             _grid.CellMouseClick += Grid_CellMouseClick;
+            _grid.Scroll += (s, e) => CloseActiveMenu();
+            _grid.Resize += (s, e) => CloseActiveMenu();
+            _grid.MouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left) CloseActiveMenu();
+            };
 
             _gridHost.Controls.Add(_grid);
 
@@ -451,7 +456,6 @@ namespace CarwashServices.Roles
             };
             _contentPanel.Controls.Add(_pager);
 
-            // FIX: swap ClientSizeChanged for Resize.
             _contentPanel.Resize += (s, e) => RelayoutUI();
             RelayoutUI();
 
@@ -597,7 +601,8 @@ namespace CarwashServices.Roles
         }
 
         // ================================================================
-        //  DATA        // ================================================================
+        //  DATA
+        // ================================================================
         private async Task LoadServicesAsync()
         {
             try
@@ -818,65 +823,43 @@ namespace CarwashServices.Roles
                                   DataGridViewPaintParts.Border |
                                   DataGridViewPaintParts.SelectionBackground);
 
-            if (_tab == ListTab.Active)
-            {
-                var (viewRect, editRect, arcRect) = ActiveButtonRects(e.CellBounds);
-                PaintOutlineButton(e.Graphics, viewRect, "View",
-                    _hoverAction == (e.RowIndex << 2) + 0, Accent);
-                PaintOutlineButton(e.Graphics, editRect, "Edit",
-                    _hoverAction == (e.RowIndex << 2) + 1, Accent);
-                PaintOutlineButton(e.Graphics, arcRect, "Archive",
-                    _hoverAction == (e.RowIndex << 2) + 2, Red);
-            }
-            else
-            {
-                var restoreRect = RestoreButtonRect(e.CellBounds);
-                PaintOutlineButton(e.Graphics, restoreRect, "Restore",
-                    _hoverAction == (e.RowIndex << 2) + 2, Green);
-            }
+            var rect = DotsRect(e.CellBounds);
+            bool hover = _hoverAction == (e.RowIndex << 2);
 
+            DrawDotsButton(e.Graphics, rect, hover);
             e.Handled = true;
         }
 
-        private static (Rectangle view, Rectangle edit, Rectangle archive) ActiveButtonRects(Rectangle cell)
+        private static Rectangle DotsRect(Rectangle cell)
         {
-            int totalW = ActionBtnW * 2 + ArchiveBtnW + ActionBtnGap * 2;
-            int x0 = cell.X + (cell.Width - totalW) / 2;
-            int y0 = cell.Y + (cell.Height - ActionBtnH) / 2;
-
-            return (
-                new Rectangle(x0, y0, ActionBtnW, ActionBtnH),
-                new Rectangle(x0 + ActionBtnW + ActionBtnGap, y0, ActionBtnW, ActionBtnH),
-                new Rectangle(x0 + ActionBtnW * 2 + ActionBtnGap * 2, y0, ArchiveBtnW, ActionBtnH)
-            );
+            int x = cell.X + (cell.Width - DotsBtnW) / 2;
+            int y = cell.Y + (cell.Height - ActionBtnH) / 2;
+            return new Rectangle(x, y, DotsBtnW, ActionBtnH);
         }
 
-        private static Rectangle RestoreButtonRect(Rectangle cell)
-        {
-            int w = 110;
-            int x0 = cell.X + (cell.Width - w) / 2;
-            int y0 = cell.Y + (cell.Height - ActionBtnH) / 2;
-            return new Rectangle(x0, y0, w, ActionBtnH);
-        }
-
-        private static void PaintOutlineButton(Graphics g, Rectangle rect, string text, bool hover, Color tone)
+        private static void DrawDotsButton(Graphics g, Rectangle rect, bool hover)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            Color fill = hover ? tone : Color.White;
-            Color fore = hover ? Color.White : tone;
+            Color fill = hover ? Color.FromArgb(0xEA, 0xF2, 0xFD) : Color.White;
+            Color border = hover ? Accent : CardBorder;
+            Color dotColor = hover ? Accent : Navy;
 
             using (var path = RoundedRect(rect, 6))
             using (var fillBrush = new SolidBrush(fill))
-            using (var pen = new Pen(tone, 1f))
+            using (var pen = new Pen(border, 1f))
             {
                 g.FillPath(fillBrush, path);
                 g.DrawPath(pen, path);
             }
 
-            TextRenderer.DrawText(g, text, ButtonFont, rect, fore,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            const int dotSize = 3;
+            int cx = rect.X + rect.Width / 2 - dotSize / 2;
+            int cy = rect.Y + rect.Height / 2;
+            using var dotBrush = new SolidBrush(dotColor);
+            g.FillEllipse(dotBrush, cx, cy - 8, dotSize, dotSize);
+            g.FillEllipse(dotBrush, cx, cy - dotSize / 2, dotSize, dotSize);
+            g.FillEllipse(dotBrush, cx, cy + 5, dotSize, dotSize);
         }
 
         private static GraphicsPath RoundedRect(Rectangle r, int radius)
@@ -913,18 +896,8 @@ namespace CarwashServices.Roles
 
             var absolute = new Point(cellBounds.X + local.X, cellBounds.Y + local.Y);
 
-            if (_tab == ListTab.Active)
-            {
-                var (viewRect, editRect, arcRect) = ActiveButtonRects(cellBounds);
-                if (viewRect.Contains(absolute)) return (rowIndex << 2) + 0;
-                if (editRect.Contains(absolute)) return (rowIndex << 2) + 1;
-                if (arcRect.Contains(absolute)) return (rowIndex << 2) + 2;
-            }
-            else
-            {
-                var restoreRect = RestoreButtonRect(cellBounds);
-                if (restoreRect.Contains(absolute)) return (rowIndex << 2) + 2;
-            }
+            if (DotsRect(cellBounds).Contains(absolute))
+                return rowIndex << 2;
 
             return -1;
         }
@@ -955,27 +928,104 @@ namespace CarwashServices.Roles
             int hit = HitTestActions(e.RowIndex, e.Location);
             if (hit < 0) return;
 
-            int buttonIndex = hit & 0b11;
-
             var idText = _grid.Rows[e.RowIndex].Cells["ServiceId"].Value?.ToString() ?? "";
             if (!int.TryParse(idText, out var id)) return;
 
             var svc = _allServices.FirstOrDefault(x => x.ProductId == id);
             if (svc == null) return;
 
+            ShowActionsMenu(e.RowIndex, svc);
+        }
+
+        // ================================================================
+        //  ACTIONS MENU
+        // ================================================================
+        private void ShowActionsMenu(int rowIndex, ProductDto svc)
+        {
+            CloseActiveMenu();
+
+            var menu = new ContextMenuStrip
+            {
+                ShowImageMargin = false,
+                ShowCheckMargin = false,
+                Font = new Font("Segoe UI", 9.5f),
+                BackColor = Color.White,
+                ForeColor = Navy,
+                Padding = new Padding(4),
+                Renderer = new ToolStripProfessionalRenderer(new MenuColors())
+            };
+
             if (_tab == ListTab.Active)
             {
-                switch (buttonIndex)
-                {
-                    case 0: OpenViewServiceDialog(svc); break;
-                    case 1: OpenEditServiceDialog(id); break;
-                    case 2: ArchiveServiceAsync(svc); break;
-                }
+                AddMenuItem(menu, "View", () => OpenViewServiceDialog(svc));
+                AddMenuItem(menu, "Edit", () => OpenEditServiceDialog(svc.ProductId));
+                AddMenuItem(menu, "Archive", () => ArchiveServiceAsync(svc), isDanger: true);
             }
             else
             {
-                if (buttonIndex == 2) RestoreServiceAsync(svc);
+                AddMenuItem(menu, "Restore", () => RestoreServiceAsync(svc));
             }
+
+            _activeMenu = menu;
+            _menuRow = rowIndex;
+
+            menu.Closed += (s, e) =>
+            {
+                if (ReferenceEquals(_activeMenu, menu))
+                {
+                    _activeMenu = null;
+                    _menuRow = -1;
+                    _grid.InvalidateCell(_grid.Columns["Actions"].Index, rowIndex);
+                }
+            };
+
+            var cellBounds = _grid.GetCellDisplayRectangle(
+                _grid.Columns["Actions"].Index, rowIndex, false);
+
+            menu.Show(_grid,
+                new Point(cellBounds.Right - 8, cellBounds.Bottom - 4),
+                ToolStripDropDownDirection.BelowLeft);
+        }
+
+        private static void AddMenuItem(ContextMenuStrip menu, string text, Action onClick, bool isDanger = false)
+        {
+            var item = new ToolStripMenuItem(text)
+            {
+                ForeColor = isDanger ? Red : Navy,
+                AutoSize = false,
+                Height = MenuItemH,
+                Padding = new Padding(12, 0, 12, 0),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Width = 140
+            };
+            item.Click += (s, e) =>
+            {
+                menu.Close();
+                onClick();
+            };
+            menu.Items.Add(item);
+        }
+
+        private void CloseActiveMenu()
+        {
+            if (_activeMenu == null) return;
+            var m = _activeMenu;
+            _activeMenu = null;
+            m.Close();
+            if (_menuRow >= 0)
+            {
+                _grid.InvalidateCell(_grid.Columns["Actions"].Index, _menuRow);
+                _menuRow = -1;
+            }
+        }
+
+        private sealed class MenuColors : ProfessionalColorTable
+        {
+            public override Color MenuItemSelected => Color.FromArgb(0xEA, 0xF2, 0xFD);
+            public override Color MenuItemSelectedGradientBegin => Color.FromArgb(0xEA, 0xF2, 0xFD);
+            public override Color MenuItemSelectedGradientEnd => Color.FromArgb(0xEA, 0xF2, 0xFD);
+            public override Color MenuItemBorder => CardBorder;
+            public override Color MenuBorder => CardBorder;
         }
 
         // ================================================================

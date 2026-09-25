@@ -452,7 +452,12 @@ namespace CarwashServices.Dialogs
                 else
                 {
                     var text = await resp.Content.ReadAsStringAsync();
-                    _errorLbl.Text = $"Save failed ({(int)resp.StatusCode}). {text}";
+                    _errorLbl.Text = $"Save failed ({(int)resp.StatusCode}).";
+                    MessageBox.Show(
+                        $"Save failed.\n\nHTTP {(int)resp.StatusCode}\n\n{text}",
+                        "Save User Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
                 }
             }
             catch (Exception ex)

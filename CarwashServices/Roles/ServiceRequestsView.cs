@@ -60,11 +60,9 @@ namespace CarwashServices.Roles
 
         private const int RowTemplateHeight = 62;
 
-        private const int EditBtnW = 72;
-        private const int ArcBtnW = 88;
-        private const int ResBtnW = 88;
         private const int ActionBtnH = 30;
-        private const int ActionGap = 8;
+        private const int DotsBtnW = 40;
+        private const int MenuItemH = 34;
 
         private readonly HttpClient _http = new HttpClient
         {
@@ -90,6 +88,8 @@ namespace CarwashServices.Roles
         private int? _focusRequestId;
         private string _source = "";
         private int _hoverAction = -1;
+        private ContextMenuStrip? _activeMenu;
+        private int _menuRow = -1;
         private readonly System.Windows.Forms.Timer _debounce = new() { Interval = 300 };
         private readonly System.Windows.Forms.Timer _highlightTimer = new() { Interval = 3000 };
 
@@ -144,6 +144,8 @@ namespace CarwashServices.Roles
                 await LoadLookupsAsync();
                 await LoadRequestsAsync();
             };
+
+            LostFocus += (s, e) => CloseActiveMenu();
         }
 
         // ================================================================
@@ -493,12 +495,13 @@ namespace CarwashServices.Roles
             {
                 Name = "Actions",
                 HeaderText = "ACTIONS",
-                Width = 200,
+                Width = 80,
                 DefaultCellStyle = new DataGridViewCellStyle
                 {
                     BackColor = Color.White,
                     SelectionBackColor = Color.FromArgb(0xEA, 0xF2, 0xFD),
-                    Padding = new Padding(0)
+                    Padding = new Padding(0),
+                    Alignment = DataGridViewContentAlignment.MiddleCenter
                 }
             });
 
@@ -507,6 +510,12 @@ namespace CarwashServices.Roles
             _grid.CellMouseLeave += (s, e) => SetHover(-1);
             _grid.MouseLeave += (s, e) => SetHover(-1);
             _grid.CellMouseClick += Grid_CellMouseClick;
+            _grid.Scroll += (s, e) => CloseActiveMenu();
+            _grid.Resize += (s, e) => CloseActiveMenu();
+            _grid.MouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left) CloseActiveMenu();
+            };
             _gridHost.Controls.Add(_grid);
 
             _pager = new Panel
@@ -653,7 +662,6 @@ namespace CarwashServices.Roles
                 if (_drillDownChipBar != null) _drillDownChipBar.Visible = false;
             }
 
-            // Add service / vehicle filters to the chip text if provided.
             if (!string.IsNullOrEmpty(_drillDownChipLabel?.Text))
             {
                 var extra = new List<string>();
@@ -868,7 +876,6 @@ namespace CarwashServices.Roles
                     !string.Equals(r.Status, effectiveStatus, StringComparison.OrdinalIgnoreCase))
                     return false;
 
-                // Service filter (name match against the resolved service).
                 if (!string.IsNullOrEmpty(_serviceFilter))
                 {
                     var svc = _serviceLookup.FirstOrDefault(s => s.ServiceId == r.ServiceId);
@@ -876,7 +883,6 @@ namespace CarwashServices.Roles
                         return false;
                 }
 
-                // Vehicle filter (customer's vehicle type).
                 if (!string.IsNullOrEmpty(_vehicleFilter))
                 {
                     var tenantCust = _tenantCustomers.FirstOrDefault(c => c.TenantCustomerId == r.CustomerId);
@@ -900,7 +906,6 @@ namespace CarwashServices.Roles
 
             if (resetPage) _page = 1;
 
-            // Jump to the page containing the focused request.
             if (_focusRequestId.HasValue && _tab == ListTab.Active)
             {
                 int idx = _filtered.FindIndex(r => r.RequestId == _focusRequestId.Value);
@@ -997,7 +1002,6 @@ namespace CarwashServices.Roles
             _grid.ClearSelection();
             _grid.ResumeLayout();
 
-            // Scroll the highlighted row into view.
             if (_focusRequestId.HasValue)
             {
                 foreach (DataGridViewRow row in _grid.Rows)
@@ -1209,59 +1213,43 @@ namespace CarwashServices.Roles
                                   DataGridViewPaintParts.Border |
                                   DataGridViewPaintParts.SelectionBackground);
 
-            if (_tab == ListTab.Active)
-            {
-                var (editRect, arcRect) = ActiveButtonRects(e.CellBounds);
-                PaintOutlineButton(e.Graphics, editRect, "Edit",
-                    _hoverAction == (e.RowIndex << 2) + 0, Blue);
-                PaintOutlineButton(e.Graphics, arcRect, "Archive",
-                    _hoverAction == (e.RowIndex << 2) + 1, Red);
-            }
-            else
-            {
-                var restoreRect = RestoreButtonRect(e.CellBounds);
-                PaintOutlineButton(e.Graphics, restoreRect, "Restore",
-                    _hoverAction == (e.RowIndex << 2) + 1, Green);
-            }
+            var rect = DotsRect(e.CellBounds);
+            bool hover = _hoverAction == (e.RowIndex << 2);
 
+            DrawDotsButton(e.Graphics, rect, hover);
             e.Handled = true;
         }
 
-        private static (Rectangle edit, Rectangle archive) ActiveButtonRects(Rectangle cellBounds)
+        private static Rectangle DotsRect(Rectangle cell)
         {
-            int totalW = EditBtnW + ArcBtnW + ActionGap;
-            int x0 = cellBounds.X + (cellBounds.Width - totalW) / 2;
-            int y0 = cellBounds.Y + (cellBounds.Height - ActionBtnH) / 2;
-            return (
-                new Rectangle(x0, y0, EditBtnW, ActionBtnH),
-                new Rectangle(x0 + EditBtnW + ActionGap, y0, ArcBtnW, ActionBtnH)
-            );
+            int x = cell.X + (cell.Width - DotsBtnW) / 2;
+            int y = cell.Y + (cell.Height - ActionBtnH) / 2;
+            return new Rectangle(x, y, DotsBtnW, ActionBtnH);
         }
 
-        private static Rectangle RestoreButtonRect(Rectangle cellBounds)
-        {
-            int x0 = cellBounds.X + (cellBounds.Width - ResBtnW) / 2;
-            int y0 = cellBounds.Y + (cellBounds.Height - ActionBtnH) / 2;
-            return new Rectangle(x0, y0, ResBtnW, ActionBtnH);
-        }
-
-        private static void PaintOutlineButton(Graphics g, Rectangle rect, string text, bool hover, Color tone)
+        private static void DrawDotsButton(Graphics g, Rectangle rect, bool hover)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            Color fill = hover ? tone : Color.White;
-            Color fore = hover ? Color.White : tone;
+
+            Color fill = hover ? Color.FromArgb(0xEA, 0xF2, 0xFD) : Color.White;
+            Color border = hover ? Blue : CardBorder;
+            Color dotColor = hover ? Blue : Navy;
 
             using (var path = RoundedRect(rect, 6))
             using (var fillBrush = new SolidBrush(fill))
-            using (var pen = new Pen(tone, 1f))
+            using (var pen = new Pen(border, 1f))
             {
                 g.FillPath(fillBrush, path);
                 g.DrawPath(pen, path);
             }
 
-            TextRenderer.DrawText(g, text, FontButton, rect, fore,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            const int dotSize = 3;
+            int cx = rect.X + rect.Width / 2 - dotSize / 2;
+            int cy = rect.Y + rect.Height / 2;
+            using var dotBrush = new SolidBrush(dotColor);
+            g.FillEllipse(dotBrush, cx, cy - 8, dotSize, dotSize);
+            g.FillEllipse(dotBrush, cx, cy - dotSize / 2, dotSize, dotSize);
+            g.FillEllipse(dotBrush, cx, cy + 5, dotSize, dotSize);
         }
 
         private static GraphicsPath RoundedRect(Rectangle r, int radius)
@@ -1313,17 +1301,8 @@ namespace CarwashServices.Roles
 
             var absolute = new Point(cellBounds.X + local.X, cellBounds.Y + local.Y);
 
-            if (_tab == ListTab.Active)
-            {
-                var (editRect, arcRect) = ActiveButtonRects(cellBounds);
-                if (editRect.Contains(absolute)) return (rowIndex << 2) + 0;
-                if (arcRect.Contains(absolute)) return (rowIndex << 2) + 1;
-            }
-            else
-            {
-                var restoreRect = RestoreButtonRect(cellBounds);
-                if (restoreRect.Contains(absolute)) return (rowIndex << 2) + 1;
-            }
+            if (DotsRect(cellBounds).Contains(absolute))
+                return rowIndex << 2;
 
             return -1;
         }
@@ -1349,13 +1328,10 @@ namespace CarwashServices.Roles
             if (e.Button != MouseButtons.Left) return;
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
 
-            // Actions column → edit / archive / restore.
             if (_grid.Columns[e.ColumnIndex].Name == "Actions")
             {
                 int hit = HitTestActions(e.RowIndex, e.Location);
                 if (hit < 0) return;
-
-                int buttonIndex = hit & 0b11;
 
                 var idText = _grid.Rows[e.RowIndex].Cells["RequestId"].Value?.ToString() ?? "";
                 if (!int.TryParse(idText.TrimStart('#'), out var id)) return;
@@ -1363,22 +1339,10 @@ namespace CarwashServices.Roles
                 var req = _all.FirstOrDefault(r => r.RequestId == id);
                 if (req == null) return;
 
-                if (_tab == ListTab.Active)
-                {
-                    switch (buttonIndex)
-                    {
-                        case 0: OpenEditRequestDialog(id); break;
-                        case 1: ArchiveRequestAsync(req); break;
-                    }
-                }
-                else
-                {
-                    if (buttonIndex == 1) RestoreRequestAsync(req);
-                }
+                ShowActionsMenu(e.RowIndex, req);
                 return;
             }
 
-            // Any other column → drill into the customer.
             if (_grid.Columns[e.ColumnIndex].Name == "Customer")
             {
                 var idText = _grid.Rows[e.RowIndex].Cells["RequestId"].Value?.ToString() ?? "";
@@ -1392,6 +1356,96 @@ namespace CarwashServices.Roles
                     focusCustomerId: req.CustomerId,
                     source: "dashboard");
             }
+        }
+
+        // ================================================================
+        //  ACTIONS MENU
+        // ================================================================
+        private void ShowActionsMenu(int rowIndex, ServiceRequestDto req)
+        {
+            CloseActiveMenu();
+
+            var menu = new ContextMenuStrip
+            {
+                ShowImageMargin = false,
+                ShowCheckMargin = false,
+                Font = new Font("Segoe UI", 9.5f),
+                BackColor = Color.White,
+                ForeColor = Navy,
+                Padding = new Padding(4),
+                Renderer = new ToolStripProfessionalRenderer(new MenuColors())
+            };
+
+            if (_tab == ListTab.Active)
+            {
+                AddMenuItem(menu, "Edit", () => OpenEditRequestDialog(req.RequestId));
+                AddMenuItem(menu, "Archive", () => ArchiveRequestAsync(req), isDanger: true);
+            }
+            else
+            {
+                AddMenuItem(menu, "Restore", () => RestoreRequestAsync(req));
+            }
+
+            _activeMenu = menu;
+            _menuRow = rowIndex;
+
+            menu.Closed += (s, e) =>
+            {
+                if (ReferenceEquals(_activeMenu, menu))
+                {
+                    _activeMenu = null;
+                    _menuRow = -1;
+                    _grid.InvalidateCell(_grid.Columns["Actions"].Index, rowIndex);
+                }
+            };
+
+            var cellBounds = _grid.GetCellDisplayRectangle(
+                _grid.Columns["Actions"].Index, rowIndex, false);
+
+            menu.Show(_grid,
+                new Point(cellBounds.Right - 8, cellBounds.Bottom - 4),
+                ToolStripDropDownDirection.BelowLeft);
+        }
+
+        private static void AddMenuItem(ContextMenuStrip menu, string text, Action onClick, bool isDanger = false)
+        {
+            var item = new ToolStripMenuItem(text)
+            {
+                ForeColor = isDanger ? Red : Navy,
+                AutoSize = false,
+                Height = MenuItemH,
+                Padding = new Padding(12, 0, 12, 0),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Width = 140
+            };
+            item.Click += (s, e) =>
+            {
+                menu.Close();
+                onClick();
+            };
+            menu.Items.Add(item);
+        }
+
+        private void CloseActiveMenu()
+        {
+            if (_activeMenu == null) return;
+            var m = _activeMenu;
+            _activeMenu = null;
+            m.Close();
+            if (_menuRow >= 0)
+            {
+                _grid.InvalidateCell(_grid.Columns["Actions"].Index, _menuRow);
+                _menuRow = -1;
+            }
+        }
+
+        private sealed class MenuColors : ProfessionalColorTable
+        {
+            public override Color MenuItemSelected => Color.FromArgb(0xEA, 0xF2, 0xFD);
+            public override Color MenuItemSelectedGradientBegin => Color.FromArgb(0xEA, 0xF2, 0xFD);
+            public override Color MenuItemSelectedGradientEnd => Color.FromArgb(0xEA, 0xF2, 0xFD);
+            public override Color MenuItemBorder => CardBorder;
+            public override Color MenuBorder => CardBorder;
         }
 
         // ================================================================

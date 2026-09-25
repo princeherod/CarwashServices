@@ -111,8 +111,22 @@ public class UsersController : ControllerBase
         }
         catch (DbUpdateException ex)
         {
-            var inner = ex.InnerException?.Message ?? ex.Message;
-            return StatusCode(500, new { message = "Create failed.", detail = inner });
+            Exception? deepest = ex;
+            while (deepest.InnerException != null) deepest = deepest.InnerException;
+            var msg = deepest.Message;
+
+            if (msg.Contains("FOREIGN KEY", StringComparison.OrdinalIgnoreCase)
+                || msg.Contains("conflicted", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict(new
+                {
+                    message = "Role does not exist in the Roles table.",
+                    detail = msg,
+                    hint = "Insert the missing row into Roles with the same RoleId."
+                });
+            }
+
+            return StatusCode(500, new { message = "Create failed.", detail = msg });
         }
 
         return CreatedAtAction(nameof(GetById), new { id = user.UserId }, new

@@ -33,9 +33,11 @@ public class FollowUpsController : ControllerBase
 
     private const int DefaultCompanyId = 1;
 
+    // "Draft" is a first-class status. A draft is never promoted to Sent by
+    // the background pass and never blocks a new follow-up for the customer.
     private static readonly string[] AllowedStatuses =
     {
-        "Pending", "Scheduled", "Due today", "Sent", "Contacted", "Redeemed", "Expired"
+        "Draft", "Pending", "Scheduled", "Due today", "Sent", "Contacted", "Redeemed", "Expired"
     };
 
     private string BusinessName
@@ -48,18 +50,24 @@ public class FollowUpsController : ControllerBase
     }
 
     // ================================================================
-    //  AUTO-EXPIRE
-    //  Reads run this first so Scheduled rows whose time has arrived
-    //  are promoted to Sent, and non-redeemed rows past ValidUntil
-    //  become Expired.
+    //  AUTO-EXPIRE / AUTO-SEND
+    //
+    //  Runs on every read so the list is always fresh.
+    //  • Draft rows are never touched here.
+    //  • A Scheduled row past its time is EMAILED first; only successful
+    //    sends flip the row to Sent with a SentAt stamp.
+    //  • Failed sends stay Scheduled so they retry on the next read.
+    //  • Expired rows are expired without an email.
     // ================================================================
     private async Task<int> AutoExpireAsync()
     {
         var today = DateTime.Today;
         var now = DateTime.Now;
 
+        // ---- Expire (no email) ----
         var toExpire = await _db.FollowUps
             .Where(f => !f.IsArchived
+                     && f.Status != "Draft"
                      && f.Status != "Redeemed"
                      && f.Status != "Expired"
                      && f.ValidUntil.HasValue
@@ -69,19 +77,52 @@ public class FollowUpsController : ControllerBase
         foreach (var f in toExpire)
             f.Status = "Expired";
 
+        // ---- Promote Scheduled → Sent WITH an email ----
         var toSend = await _db.FollowUps
             .Where(f => !f.IsArchived
                      && f.Status == "Scheduled"
                      && f.ScheduledDate <= now)
             .ToListAsync();
 
-        foreach (var f in toSend)
+        int sentCount = 0;
+        if (toSend.Count > 0)
         {
-            f.Status = "Sent";
-            f.SentAt ??= f.ScheduledDate;
+            await using var tenant = await _tenantFactory.CreateAsync(DefaultCompanyId);
+
+            foreach (var f in toSend)
+            {
+                var customer = await tenant.TenantCustomers
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.TenantCustomerId == f.CustomerId);
+
+                if (customer is null || string.IsNullOrWhiteSpace(customer.EmailAddress))
+                    continue;   // leave as Scheduled so the user can fix the data
+
+                var subject = FollowUpEmailTemplate.BuildSubject(BusinessName);
+                var html = FollowUpEmailTemplate.BuildHtml(
+                    customerName: customer.CustomerName ?? "there",
+                    messagePreview: f.Notes ?? "",
+                    discountOffer: f.DiscountOffer,
+                    validUntil: f.ValidUntil,
+                    businessName: BusinessName);
+
+                var result = await _emailSender.SendAsync(
+                    toEmail: customer.EmailAddress,
+                    toName: customer.CustomerName ?? customer.EmailAddress,
+                    subject: subject,
+                    htmlBody: html);
+
+                if (result.Success)
+                {
+                    f.Status = "Sent";
+                    f.SentAt = DateTime.Now;
+                    sentCount++;
+                }
+                // else: leave as Scheduled — will retry on next read
+            }
         }
 
-        int changed = toExpire.Count + toSend.Count;
+        int changed = toExpire.Count + sentCount;
         if (changed > 0) await _db.SaveChangesAsync();
         return changed;
     }
@@ -150,6 +191,7 @@ public class FollowUpsController : ControllerBase
         var dueToday = await _db.FollowUps
             .CountAsync(f => !f.IsArchived
                           && f.ScheduledDate.Date == today
+                          && f.Status != "Draft"
                           && f.Status != "Sent"
                           && f.Status != "Redeemed"
                           && f.Status != "Expired");
@@ -168,10 +210,6 @@ public class FollowUpsController : ControllerBase
 
     // ================================================================
     //  CREATE (single)
-    //
-    //  Trust the ScheduledNow flag from the caller.
-    //  Do NOT infer it from the timestamp — Save draft also sends
-    //  "now" as the scheduled date but must land as Scheduled.
     // ================================================================
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FollowUpRequest req)
@@ -191,7 +229,6 @@ public class FollowUpsController : ControllerBase
         }
 
         var scheduled = req.ScheduledDate ?? DateTime.Now;
-        bool sendNow = req.ScheduledNow;
 
         var entity = new FollowUp
         {
@@ -207,7 +244,7 @@ public class FollowUpsController : ControllerBase
             IsArchived = false,
             ArchivedAt = null,
             ArchivedBy = null,
-            Status = DeriveStatusOnCreate(scheduled, req.ValidUntil, sendNow)
+            Status = DeriveStatusOnCreate(scheduled, req.ValidUntil, req.ScheduledNow, isDraft: false)
         };
 
         if (entity.Status == "Sent")
@@ -230,18 +267,23 @@ public class FollowUpsController : ControllerBase
     // ================================================================
     //  STATUS DERIVATION
     //
-    //  sendNow = true   → Sent      (user clicked Send follow-up + Send now)
-    //  sendNow = false  → Scheduled (Save draft OR Schedule — AutoExpire
-    //                                later promotes to Sent when time arrives)
-    //  ValidUntil past  → Expired   (overrides everything)
+    //  isDraft = true   → "Draft"     (no email ever, until user sends)
+    //  sendNow = true   → "Sent"      (email immediately)
+    //  sendNow = false  → "Scheduled" (email fires when the time arrives)
+    //  ValidUntil past  → "Expired"   (overrides everything except Draft)
     // ================================================================
-    private static string DeriveStatusOnCreate(DateTime scheduled, DateTime? validUntil, bool sendNow)
+    private static string DeriveStatusOnCreate(
+        DateTime scheduled,
+        DateTime? validUntil,
+        bool sendNow,
+        bool isDraft)
     {
+        if (isDraft) return "Draft";
+
         if (validUntil.HasValue && validUntil.Value.Date < DateTime.Today)
             return "Expired";
 
-        if (sendNow)
-            return "Sent";
+        if (sendNow) return "Sent";
 
         return "Scheduled";
     }
@@ -249,10 +291,9 @@ public class FollowUpsController : ControllerBase
     // ================================================================
     //  BULK CREATE
     //
-    //  For each row that would land as "Sent", actually send the email
-    //  first. On success the row keeps Status=Sent and stamps SentAt.
-    //  On failure the row falls back to Scheduled so the user can fix
-    //  SMTP and retry — it is NOT marked Sent.
+    //  isDraft = true  → every row lands as Draft, no SMTP.
+    //  sendNow = true  → email fires per customer, row becomes Sent.
+    //  sendNow = false → row becomes Scheduled; the auto-pass sends later.
     // ================================================================
     [HttpPost("bulk")]
     public async Task<IActionResult> BulkCreate([FromBody] BulkFollowUpRequest req)
@@ -279,10 +320,12 @@ public class FollowUpsController : ControllerBase
             return BadRequest(new { message = "None of the selected customers exist." });
 
         // A customer who already has an open follow-up cannot receive another.
+        // Draft rows don't block — they can be edited or sent explicitly.
         var blockedIds = await _db.FollowUps
             .Where(f => requestedIds.Contains(f.CustomerId)
                      && !f.IsArchived
-                     && f.Status != "Expired")
+                     && f.Status != "Expired"
+                     && f.Status != "Draft")
             .Select(f => f.CustomerId)
             .Distinct()
             .ToListAsync();
@@ -306,8 +349,6 @@ public class FollowUpsController : ControllerBase
 
         var scheduled = req.ScheduledDate ?? DateTime.Now;
 
-        // Load the customers we'll be emailing so we can personalise and
-        // validate their address before sending.
         var customers = await tenant.TenantCustomers
             .AsNoTracking()
             .Where(c => allowedIds.Contains(c.TenantCustomerId))
@@ -321,9 +362,12 @@ public class FollowUpsController : ControllerBase
 
         foreach (var cid in allowedIds)
         {
-            // Derive status first — the send only happens if the row
-            // would have landed as "Sent" in the first place.
-            var status = DeriveStatusOnCreate(scheduled, req.ValidUntil, req.ScheduledNow);
+            var status = DeriveStatusOnCreate(
+                scheduled,
+                req.ValidUntil,
+                req.ScheduledNow,
+                isDraft: req.IsDraft);
+
             if (!AllowedStatuses.Contains(status)) status = "Scheduled";
 
             var entity = new FollowUp
@@ -344,8 +388,7 @@ public class FollowUpsController : ControllerBase
                 ArchivedBy = null
             };
 
-            // If the user chose "Send now", try to send before stamping
-            // the row as Sent.
+            // Only email if the user explicitly chose "Send now".
             if (status == "Sent")
             {
                 if (!custById.TryGetValue(cid, out var cust) ||
@@ -421,6 +464,10 @@ public class FollowUpsController : ControllerBase
 
     // ================================================================
     //  UPDATE
+    //
+    //  Handles the Edit dialog's PUT. Only legal status transition out of
+    //  Draft is Draft → Scheduled, and it never triggers SMTP. Non-draft
+    //  rows follow the same lifecycle re-derivation as before.
     // ================================================================
     public class FollowUpUpdateRequest
     {
@@ -432,6 +479,7 @@ public class FollowUpsController : ControllerBase
         public string? Notes { get; set; }
         public DateTime? ScheduledDate { get; set; }
         public DateTime? ValidUntil { get; set; }
+        public string? Status { get; set; }
     }
 
     [HttpPut("{id:int}")]
@@ -441,6 +489,7 @@ public class FollowUpsController : ControllerBase
         if (existing is null)
             return NotFound(new { message = $"FollowUp {id} not found." });
 
+        // ---- Customer swap (unchanged) ----
         if (req.CustomerId.HasValue && req.CustomerId.Value != existing.CustomerId)
         {
             await using var tenant = await _tenantFactory.CreateAsync(DefaultCompanyId);
@@ -452,10 +501,10 @@ public class FollowUpsController : ControllerBase
             existing.CustomerId = req.CustomerId.Value;
         }
 
+        // ---- Field updates ----
         if (!string.IsNullOrWhiteSpace(req.Type))
             existing.Type = Clamp(req.Type, 50, existing.Type);
 
-        // ContactMethod is fixed to Email now. Ignore whatever the client sends.
         existing.ContactMethod = "Email";
 
         if (req.Reason != null) existing.Reason = ClampNullable(req.Reason, 200);
@@ -464,6 +513,83 @@ public class FollowUpsController : ControllerBase
         if (req.ScheduledDate.HasValue) existing.ScheduledDate = req.ScheduledDate.Value;
         if (req.ValidUntil.HasValue) existing.ValidUntil = req.ValidUntil.Value;
 
+        // ============================================================
+        //  STATUS
+        //
+        //  Order matters: apply the explicit status FIRST, then fall back
+        //  to the previous value, then run the lifecycle re-derivation only
+        //  when the client didn't specify a status at all.
+        // ============================================================
+        var originalStatus = existing.Status;
+
+        if (!string.IsNullOrWhiteSpace(req.Status))
+        {
+            var requested = req.Status!.Trim();
+
+            // Legal transitions per current spec:
+            //   Draft      → Draft       (stays Draft)
+            //   Draft      → Scheduled   (needs a future ScheduledDate)
+            //   Anything else keeps its lifecycle-managed status.
+            if (string.Equals(originalStatus, "Draft", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.Equals(requested, "Draft", StringComparison.OrdinalIgnoreCase))
+                {
+                    existing.Status = "Draft";
+                }
+                else if (string.Equals(requested, "Scheduled", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (existing.ScheduledDate <= DateTime.Now)
+                    {
+                        return BadRequest(new
+                        {
+                            message = "Scheduled status requires a ScheduledDate in the future."
+                        });
+                    }
+                    existing.Status = "Scheduled";
+                }
+                // Any other requested status from Draft is ignored — the row
+                // stays Draft. This is the safe default.
+            }
+            // Non-Draft rows ignore req.Status entirely — their status is
+            // driven by lifecycle rules below.
+        }
+
+        // ---- Draft short-circuit ----
+        // Runs only when the row is still Draft after the explicit-status
+        // step. We save and return without touching the lifecycle rules.
+        if (string.Equals(existing.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await _db.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex)
+            {
+                var inner = ex.InnerException?.Message ?? ex.Message;
+                return StatusCode(500, new { message = "Update failed.", detail = inner });
+            }
+            return Ok(existing);
+        }
+
+        // ---- Explicit transition Draft → Scheduled ----
+        // No SMTP fires from Update. Scheduler sends when the time arrives.
+        if (!string.IsNullOrWhiteSpace(req.Status)
+            && string.Equals(originalStatus, "Draft", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(existing.Status, "Scheduled", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await _db.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex)
+            {
+                var inner = ex.InnerException?.Message ?? ex.Message;
+                return StatusCode(500, new { message = "Update failed.", detail = inner });
+            }
+            return Ok(existing);
+        }
+
+        // ---- Lifecycle re-derivation for everything else ----
         if (!string.Equals(existing.Status, "Redeemed", StringComparison.OrdinalIgnoreCase))
         {
             if (existing.ValidUntil.HasValue && existing.ValidUntil.Value.Date < DateTime.Today)
@@ -493,130 +619,6 @@ public class FollowUpsController : ControllerBase
         return Ok(existing);
     }
 
-    // ================================================================
-    //  SEND EMAIL VIA SMTP
-    //
-    //  This is the endpoint the UI calls when the user clicks Send.
-    //  The row is only marked Sent after SMTP accepts the message.
-    //  On failure the row is left unchanged so it can be retried.
-    // ================================================================
-    public class SendFollowUpRequest
-    {
-        public int? CompanyId { get; set; }
-    }
-
-    [HttpPost("{id:int}/send")]
-    public async Task<IActionResult> SendEmail(int id, [FromBody] SendFollowUpRequest? req)
-    {
-        var existing = await _db.FollowUps
-            .FirstOrDefaultAsync(f => f.FollowUpId == id);
-
-        if (existing is null)
-            return NotFound(new { message = $"FollowUp {id} not found." });
-
-        if (existing.IsArchived)
-            return Conflict(new { message = "This follow-up is archived and cannot be sent." });
-
-        if (string.Equals(existing.Status, "Redeemed", StringComparison.OrdinalIgnoreCase))
-            return Conflict(new { message = "This follow-up has already been redeemed." });
-
-        if (string.Equals(existing.Status, "Sent", StringComparison.OrdinalIgnoreCase))
-            return Conflict(new { message = "This follow-up has already been sent." });
-
-        if (string.Equals(existing.Status, "Expired", StringComparison.OrdinalIgnoreCase))
-            return Conflict(new { message = "This follow-up has already expired." });
-
-        var companyId = req?.CompanyId ?? DefaultCompanyId;
-        await using var tenant = await _tenantFactory.CreateAsync(companyId);
-
-        var customer = await tenant.TenantCustomers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.TenantCustomerId == existing.CustomerId);
-
-        if (customer is null)
-            return BadRequest(new { message = "Customer record not found for this follow-up." });
-
-        if (string.IsNullOrWhiteSpace(customer.EmailAddress))
-            return BadRequest(new { message = "The customer does not have an email address on file." });
-
-        // ---- Build the message ----
-        // NOTE: the customer-facing message is Notes (the Message Preview),
-        // NOT Reason. Reason is internal retention metadata and must never
-        // be included in the outbound email.
-        var subject = FollowUpEmailTemplate.BuildSubject(BusinessName);
-        var html = FollowUpEmailTemplate.BuildHtml(
-            customerName: customer.CustomerName ?? "there",
-            messagePreview: existing.Notes ?? "",
-            discountOffer: existing.DiscountOffer,
-            validUntil: existing.ValidUntil,
-            businessName: BusinessName);
-
-        // ---- Send via SMTP ----
-        var result = await _emailSender.SendAsync(
-            toEmail: customer.EmailAddress,
-            toName: customer.CustomerName ?? customer.EmailAddress,
-            subject: subject,
-            htmlBody: html);
-
-        if (!result.Success)
-        {
-            // Leave the row untouched so the user can fix SMTP and retry.
-            return StatusCode(500, new
-            {
-                message = "Unable to send the follow-up email. Please check the email configuration and try again.",
-                detail = result.ErrorMessage
-            });
-        }
-
-        // ---- Success: mark as Sent and stamp the real send time ----
-        existing.Status = "Sent";
-        existing.SentAt = DateTime.Now;
-        await _db.SaveChangesAsync();
-
-        return Ok(new
-        {
-            message = $"Follow-up email sent successfully to {customer.CustomerName}.",
-            followUpId = existing.FollowUpId,
-            status = existing.Status,
-            sentAt = existing.SentAt
-        });
-    }
-
-    // ================================================================
-    //  MARK-SENT (internal, no SMTP)
-    //
-    //  Kept for bookkeeping — flips status without sending an email.
-    //  Not exposed in the UI. Use /send for the real customer flow.
-    // ================================================================
-    [HttpPost("{id:int}/mark-sent")]
-    public async Task<IActionResult> MarkSent(int id)
-    {
-        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
-        if (existing is null)
-            return NotFound(new { message = $"FollowUp {id} not found." });
-
-        if (string.Equals(existing.Status, "Redeemed", StringComparison.OrdinalIgnoreCase))
-            return Conflict(new { message = "This follow-up has already been redeemed." });
-
-        existing.Status = "Sent";
-        existing.SentAt ??= DateTime.Now;
-
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
-        catch (DbUpdateException ex)
-        {
-            var inner = ex.InnerException?.Message ?? ex.Message;
-            return StatusCode(500, new { message = "Mark-sent failed.", detail = inner });
-        }
-
-        return Ok(existing);
-    }
-
-    // ================================================================
-    //  REDEEM
-    // ================================================================
     [HttpPost("{id:int}/redeem")]
     public async Task<IActionResult> Redeem(int id)
     {
@@ -629,10 +631,7 @@ public class FollowUpsController : ControllerBase
 
         existing.Status = "Redeemed";
 
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
+        try { await _db.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
@@ -642,9 +641,6 @@ public class FollowUpsController : ControllerBase
         return Ok(existing);
     }
 
-    // ================================================================
-    //  ARCHIVE / RESTORE
-    // ================================================================
     public class ArchiveRequest { public string? ArchivedBy { get; set; } }
 
     [HttpPut("{id:int}/archive")]
@@ -660,10 +656,7 @@ public class FollowUpsController : ControllerBase
         existing.ArchivedAt = DateTime.UtcNow;
         existing.ArchivedBy = string.IsNullOrWhiteSpace(req?.ArchivedBy) ? "Admin" : req!.ArchivedBy;
 
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
+        try { await _db.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
@@ -686,10 +679,7 @@ public class FollowUpsController : ControllerBase
         existing.ArchivedAt = null;
         existing.ArchivedBy = null;
 
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
+        try { await _db.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
@@ -708,10 +698,7 @@ public class FollowUpsController : ControllerBase
 
         _db.FollowUps.Remove(row);
 
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
+        try { await _db.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
@@ -722,7 +709,7 @@ public class FollowUpsController : ControllerBase
     }
 
     // ================================================================
-    //  STRING CLAMP HELPERS
+    //  HELPERS
     // ================================================================
     private static string Clamp(string? value, int max, string fallback)
     {
@@ -741,15 +728,8 @@ public class FollowUpsController : ControllerBase
 }
 
 // ================================================================
-//  REQUEST DTOS
+//  REQUEST DTOs
 // ================================================================
-
-/// <summary>
-/// Body for POST api/follow-ups (single create).
-/// ScheduledNow carries the user's intent:
-///   true  → Send follow-up + Send now  → status Sent
-///   false → Schedule or Save draft      → status Scheduled
-/// </summary>
 public class FollowUpRequest
 {
     public int CustomerId { get; set; }
@@ -761,12 +741,9 @@ public class FollowUpRequest
     public DateTime? ScheduledDate { get; set; }
     public DateTime? ValidUntil { get; set; }
     public bool ScheduledNow { get; set; }
+    public bool IsDraft { get; set; }
 }
 
-/// <summary>
-/// Body for POST api/follow-ups/bulk.
-/// ScheduledNow = true only when the user clicked Send follow-up + Send now.
-/// </summary>
 public class BulkFollowUpRequest
 {
     public List<int> CustomerIds { get; set; } = new();
@@ -778,4 +755,5 @@ public class BulkFollowUpRequest
     public DateTime? ScheduledDate { get; set; }
     public DateTime? ValidUntil { get; set; }
     public bool ScheduledNow { get; set; }
+    public bool IsDraft { get; set; }
 }

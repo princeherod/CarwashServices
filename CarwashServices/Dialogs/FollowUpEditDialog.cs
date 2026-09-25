@@ -18,22 +18,22 @@ namespace CarwashServices.Dialogs
     ///
     /// On CREATE:
     ///   - Customer search + checkbox list with a dynamic "Select all filtered / Unselect all" toggle.
-    ///   - Send Via: Email only (SMS was removed per the updated requirements).
+    ///   - Send Via: Email only.
     ///   - When: Send now / Schedule.
-    ///   - Send On picker is disabled when "Send now" is selected.
     ///   - Reason is required.
     ///   - Discount Offer, Valid Until, Type, Message Preview.
     ///
     /// On EDIT:
     ///   - Same fields preloaded from an existing FollowUpDto.
-    ///   - Status is shown read-only.
-    ///   - Reason is editable.
+    ///   - Status is EDITABLE only while the record is Draft.
+    ///     Changing the combo to "Scheduled" switches the When toggle and
+    ///     enables the Send On picker. Saving does NOT send an email.
     /// </summary>
     public class FollowUpEditDialog : Form
     {
         // ---- Input ----
         private readonly List<TenantCustomerDto> _customers;
-        private readonly FollowUpDto? _existing;      // null = create
+        private readonly FollowUpDto? _existing;
         private readonly List<int>? _preselectedIds;
         private readonly Dictionary<int, TenantCustomerDto> _custById;
 
@@ -55,7 +55,10 @@ namespace CarwashServices.Dialogs
         private DateTimePicker _validUntilPicker = null!;
         private ComboBox _typeCombo = null!;
         private TextBox _previewBox = null!;
+
+        // Edit-only status controls
         private Label _statusLbl = null!;
+        private ComboBox _statusCombo = null!;
 
         // ---- State ----
         private bool _sendNow = true;
@@ -63,6 +66,15 @@ namespace CarwashServices.Dialogs
         private bool _previewUserEdited = false;
         private List<TenantCustomerDto> _filtered = new();
         private bool _filterRefreshInProgress = false;
+
+        /// <summary>True when the loaded record was Draft and the user can change Status.</summary>
+        private bool _statusEditable = false;
+
+        /// <summary>
+        /// Suppresses SelectedIndexChanged while we preload the combo.
+        /// Without this the handler can force the index back to 0.
+        /// </summary>
+        private bool _suppressStatusEvents = false;
 
         // ---- Layout ----
         private const int ContentW = 640;
@@ -227,7 +239,7 @@ namespace CarwashServices.Dialogs
             root.Controls.Add(new Label
             {
                 Text = isEdit
-                    ? "Update the details below. Status is managed automatically."
+                    ? "Update the details below. Changing Status to Scheduled does not send an email now."
                     : "Reach out before they pass 120 days and are marked as lost.",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9.5f),
@@ -236,25 +248,68 @@ namespace CarwashServices.Dialogs
             });
             y += 34;
 
-            // ---- Status (read-only, edit only) ----
+            // ---- Status (edit only) ----
             if (isEdit)
             {
-                root.Controls.Add(Caption("STATUS (READ-ONLY)", 0, y));
+                bool wasDraft = string.Equals(_existing!.Status, "Draft",
+                                              StringComparison.OrdinalIgnoreCase);
+
+                root.Controls.Add(Caption(
+                    wasDraft ? "STATUS *" : "STATUS (READ-ONLY)", 0, y));
                 y += 22;
 
-                _statusLbl = new Label
+                if (wasDraft)
                 {
-                    Text = _existing!.Status,
-                    ForeColor = Navy,
-                    Font = new Font("Segoe UI Semibold", 10f),
-                    Location = new Point(0, y),
-                    Size = new Size(ContentW, 26),
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Padding = new Padding(10, 0, 0, 0),
-                    BackColor = BgCard,
-                    BorderStyle = BorderStyle.FixedSingle
-                };
-                root.Controls.Add(_statusLbl);
+                    _statusEditable = true;
+
+                    _statusCombo = new ComboBox
+                    {
+                        Location = new Point(0, y),
+                        Width = ContentW,
+                        Font = new Font("Segoe UI", 10f),
+                        DropDownStyle = ComboBoxStyle.DropDownList,
+                        BackColor = Color.White
+                    };
+                    _statusCombo.Items.AddRange(new object[]
+                    {
+                        "Draft",
+                        "Scheduled"
+                    });
+
+                    // Set the index BEFORE attaching the handler, then
+                    // attach. This guarantees the user's preload doesn't
+                    // trigger the toggle.
+                    _statusCombo.SelectedIndex = 0;
+
+                    _statusCombo.SelectedIndexChanged += (s, e) =>
+                    {
+                        if (_suppressStatusEvents) return;
+
+                        var sel = _statusCombo.SelectedItem?.ToString() ?? "Draft";
+                        if (sel == "Scheduled")
+                            SetWhen(false);
+                        else
+                            SetWhen(true);
+                    };
+                    root.Controls.Add(_statusCombo);
+                }
+                else
+                {
+                    _statusLbl = new Label
+                    {
+                        Text = _existing!.Status,
+                        ForeColor = Navy,
+                        Font = new Font("Segoe UI Semibold", 10f),
+                        Location = new Point(0, y),
+                        Size = new Size(ContentW, 26),
+                        TextAlign = ContentAlignment.MiddleLeft,
+                        Padding = new Padding(10, 0, 0, 0),
+                        BackColor = BgCard,
+                        BorderStyle = BorderStyle.FixedSingle
+                    };
+                    root.Controls.Add(_statusLbl);
+                }
+
                 y += 40;
             }
 
@@ -366,17 +421,27 @@ namespace CarwashServices.Dialogs
             root.Controls.Add(Caption("WHEN", RightColX, y));
             y += 22;
 
-            // Email only — SMS was removed.
             _emailBtn = MakeSegmented("Email", 0, y);
             _emailBtn.Click += (s, e) => SetMethod("Email");
             root.Controls.Add(_emailBtn);
 
             _sendNowBtn = MakeSegmented("Send now", RightColX, y);
-            _sendNowBtn.Click += (s, e) => SetWhen(true);
+            _sendNowBtn.Click += (s, e) =>
+            {
+                SetWhen(true);
+                // If the user manually picks Send now while editing a Draft,
+                // keep the status combo consistent with their intent.
+                SetStatusCombo("Draft");
+            };
             root.Controls.Add(_sendNowBtn);
 
             _scheduleBtn = MakeSegmented("Schedule", RightColX + 160, y);
-            _scheduleBtn.Click += (s, e) => SetWhen(false);
+            _scheduleBtn.Click += (s, e) =>
+            {
+                SetWhen(false);
+                // Pick "Schedule" → the status combo shows "Scheduled".
+                SetStatusCombo("Scheduled");
+            };
             root.Controls.Add(_scheduleBtn);
 
             y += 60;
@@ -412,7 +477,7 @@ namespace CarwashServices.Dialogs
 
             y += 52;
 
-            // ---- Reason (required) ----
+            // ---- Reason ----
             root.Controls.Add(Caption("REASON *", 0, y));
             y += 22;
 
@@ -614,12 +679,37 @@ namespace CarwashServices.Dialogs
             return btn;
         }
 
+        /// <summary>
+        /// Programmatically set the status combo without re-triggering the
+        /// SelectedIndexChanged handler (which would call SetWhen again and
+        /// could loop).
+        /// </summary>
+        private void SetStatusCombo(string status)
+        {
+            if (!_statusEditable || _statusCombo == null) return;
+            if (string.IsNullOrWhiteSpace(status)) return;
+
+            var idx = _statusCombo.Items.IndexOf(status);
+            if (idx < 0) return;
+            if (_statusCombo.SelectedIndex == idx) return;
+
+            _suppressStatusEvents = true;
+            try
+            {
+                _statusCombo.SelectedIndex = idx;
+            }
+            finally
+            {
+                _suppressStatusEvents = false;
+            }
+        }
+
         // ============================================================
         //  STATE HELPERS
         // ============================================================
         private void SetMethod(string m)
         {
-            _contactMethod = "Email";  // only Email is supported now
+            _contactMethod = "Email";
             Highlight(_emailBtn, true);
             UpdatePreview();
         }
@@ -882,21 +972,48 @@ namespace CarwashServices.Dialogs
         {
             if (_existing == null) return;
 
-            // Contact method — force Email since SMS is no longer supported.
             SetMethod("Email");
 
-            bool isScheduled = _existing.ScheduledDate > DateTime.Now
-                && string.Equals(_existing.Status, "Scheduled", StringComparison.OrdinalIgnoreCase);
+            var loadedStatus = _existing.Status ?? "Draft";
 
-            _scheduledPicker.Value = _existing.ScheduledDate;
+            // ---- Status ----
+            // The combo is only present when the loaded row is Draft.
+            // Set the index without firing the handler.
+            _suppressStatusEvents = true;
+            try
+            {
+                if (_statusCombo != null)
+                {
+                    var idx = _statusCombo.Items.IndexOf(loadedStatus);
+                    _statusCombo.SelectedIndex = idx >= 0 ? idx : 0;
+                }
+            }
+            finally
+            {
+                _suppressStatusEvents = false;
+            }
+
+            // ---- Send On ----
+            if (_existing.ScheduledDate != default)
+                _scheduledPicker.Value = _existing.ScheduledDate;
+
+            // ---- When toggle ----
+            // Scheduled → Schedule toggle on; Draft → Send now is the
+            // natural default so the user can promote it explicitly.
+            bool isScheduled = string.Equals(loadedStatus, "Scheduled",
+                                             StringComparison.OrdinalIgnoreCase);
             SetWhen(!isScheduled);
 
-            // Reason
+            // Re-assert the combo value after SetWhen so nothing slips.
+            if (_statusEditable)
+                SetStatusCombo(loadedStatus);
+
+            // ---- Reason ----
             if (!string.IsNullOrWhiteSpace(_existing.Reason))
                 _reasonTxt.Text = _existing.Reason!;
             ClearReasonError();
 
-            // Discount offer
+            // ---- Discount offer ----
             if (!string.IsNullOrWhiteSpace(_existing.DiscountOffer) &&
                 _discountCombo.Items.Contains(_existing.DiscountOffer))
             {
@@ -982,10 +1099,34 @@ namespace CarwashServices.Dialogs
                 return;
             }
 
-            if (!_sendNow && _scheduledPicker.Value <= DateTime.Now)
+            // ---- Determine the new status ----
+            // Edit mode: the combo is the source of truth when editable.
+            // Non-editable edits keep whatever the row already had.
+            // Create mode: draft flag wins; otherwise Send now vs Schedule.
+            string newStatus;
+            if (_existing != null)
+            {
+                if (_statusEditable && _statusCombo != null)
+                {
+                    newStatus = _statusCombo.SelectedItem?.ToString() ?? "Draft";
+                }
+                else
+                {
+                    newStatus = _existing.Status ?? "Scheduled";
+                }
+            }
+            else
+            {
+                newStatus = draft ? "Draft" : (_sendNow ? "Sent" : "Scheduled");
+            }
+
+            // Scheduled needs a future Send On.
+            if (newStatus == "Scheduled" && _scheduledPicker.Value <= DateTime.Now)
             {
                 MarkScheduledError("Scheduled send time must be in the future.");
-                MessageBox.Show("When 'Schedule' is selected, the send date must be in the future.",
+                MessageBox.Show(
+                    "Status is Scheduled but Send On is in the past.\n\n" +
+                    "Pick a future date and time, or switch Status back to Draft.",
                     "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -997,7 +1138,11 @@ namespace CarwashServices.Dialogs
             var offer = _discountCombo.SelectedItem?.ToString();
             if (offer == "No discount") offer = null;
 
-            var scheduledDate = _sendNow ? DateTime.Now : _scheduledPicker.Value;
+            var scheduledDate = newStatus == "Scheduled"
+                ? _scheduledPicker.Value
+                : (newStatus == "Draft"
+                    ? (_existing?.ScheduledDate ?? DateTime.Now)
+                    : DateTime.Now);
 
             // ---- Edit mode ----
             if (_existing != null)
@@ -1011,7 +1156,8 @@ namespace CarwashServices.Dialogs
                     discountOffer = offer,
                     notes = _previewBox.Text,
                     scheduledDate,
-                    validUntil = (DateTime?)_validUntilPicker.Value
+                    validUntil = (DateTime?)_validUntilPicker.Value,
+                    status = newStatus
                 };
 
                 try
@@ -1057,7 +1203,8 @@ namespace CarwashServices.Dialogs
                 notes = _previewBox.Text,
                 scheduledDate,
                 validUntil = (DateTime?)_validUntilPicker.Value,
-                scheduledNow = !draft && _sendNow
+                scheduledNow = !draft && _sendNow,
+                isDraft = draft
             };
 
             try
@@ -1078,14 +1225,13 @@ namespace CarwashServices.Dialogs
                     int skipped = parsed?.Skipped ?? 0;
                     var failures = parsed?.Failures ?? new List<BulkFollowUpFailure>();
 
-                    // ---- Build a multi-line result message ----
                     var lines = new List<string>
                     {
                         draft
-                            ? "Saved as draft."
+                            ? "Saved as draft. No email was sent."
                             : _sendNow
                                 ? "Follow-ups sent."
-                                : "Follow-ups scheduled."
+                                : "Follow-ups scheduled. Email will be sent on the scheduled date."
                     };
 
                     lines.Add("");
@@ -1159,7 +1305,7 @@ namespace CarwashServices.Dialogs
     }
 
     // ================================================================
-    //  DTOs shared with the API's bulk-create response
+    //  Bulk response DTOs (unchanged)
     // ================================================================
     public class BulkFollowUpResponse
     {

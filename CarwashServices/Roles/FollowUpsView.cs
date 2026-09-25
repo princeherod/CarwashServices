@@ -106,7 +106,7 @@ namespace CarwashServices.Roles
         private const int MinDiscount = 130;
         private const int MinSendVia = 80;
         private const int MinStatus = 110;
-        private const int MinActions = 130;
+        private const int MinActions = 70;
         private const int MinArchived = 130;
 
         private const float WCustomer = 24f;
@@ -115,7 +115,7 @@ namespace CarwashServices.Roles
         private const float WDiscount = 18f;
         private const float WSendVia = 9f;
         private const float WStatus = 11f;
-        private const float WActions = 22f;
+        private const float WActions = 6f;
 
         private const int LogMinNum = 60;
         private const int LogMinCustomer = 160;
@@ -133,14 +133,13 @@ namespace CarwashServices.Roles
         private const float LogWStatus = 12f;
         private const float LogWNotes = 22f;
 
-        private const int SendBtnW = 72;
-        private const int EditBtnW = 72;
-        private const int ArcBtnW = 78;
-        private const int ResBtnW = 82;
         private const int ActionBtnH = 28;
-        private const int ActionBtnGap = 6;
+        private const int DotsBtnW = 40;
+        private const int MenuItemH = 34;
 
         private int _hoverAction = -1;
+        private ContextMenuStrip? _activeMenu;
+        private int _menuRow = -1;
 
         private string CurrentUserName =>
             string.IsNullOrWhiteSpace(SessionUser.FullName) ? "Admin" : SessionUser.FullName;
@@ -170,6 +169,8 @@ namespace CarwashServices.Roles
             Sidebar.EnableDoubleBuffering(this);
 
             _uiReady = true;
+
+            LostFocus += (s, e) => CloseActiveMenu();
         }
 
         private sealed class BufferedGrid : DataGridView
@@ -449,7 +450,7 @@ namespace CarwashServices.Roles
             };
             _statusFilterCombo.Items.AddRange(new object[]
             {
-                "All statuses", "Scheduled", "Due today", "Sent", "Redeemed", "Expired"
+                "All statuses", "Draft", "Scheduled", "Due today", "Sent", "Redeemed", "Expired"
             });
 
             _statusFilterCombo.SelectedIndexChanged += (s, e) =>
@@ -486,6 +487,12 @@ namespace CarwashServices.Roles
             _grid.CellMouseClick += Grid_CellMouseClick;
             _grid.CellMouseLeave += (s, e) => SetHover(-1);
             _grid.MouseLeave += (s, e) => SetHover(-1);
+            _grid.Scroll += (s, e) => CloseActiveMenu();
+            _grid.Resize += (s, e) => CloseActiveMenu();
+            _grid.MouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left) CloseActiveMenu();
+            };
             _gridCard.Controls.Add(_grid);
 
             _pagerBar = new Panel
@@ -1023,6 +1030,7 @@ namespace CarwashServices.Roles
 
         private static (Color bg, Color fg) StatusColors(string s) => s switch
         {
+            "Draft" => (Color.FromArgb(0xF1, 0xF4, 0xF9), Muted),
             "Scheduled" => (Color.FromArgb(0xE8, 0xEA, 0xF6), Color.FromArgb(0x39, 0x49, 0xAB)),
             "Due today" => (Color.FromArgb(0xFF, 0xF4, 0xDB), Color.FromArgb(0x9A, 0x6A, 0x00)),
             "Sent" or "Contacted" => (Color.FromArgb(0xE3, 0xF1, 0xFD), Color.FromArgb(0x15, 0x65, 0xC0)),
@@ -1068,83 +1076,43 @@ namespace CarwashServices.Roles
         {
             e.Paint(e.CellBounds, BaseParts);
 
-            var spec = Convert.ToString(e.Value) ?? "";
-            if (string.IsNullOrEmpty(spec)) { e.Handled = true; return; }
+            var rect = DotsRect(e.CellBounds);
+            bool hover = _hoverAction == (e.RowIndex << 2);
 
-            var parts = spec.Split('|');
-
-            int totalW = 0;
-            for (int i = 0; i < parts.Length; i++)
-            {
-                totalW += parts[i] switch
-                {
-                    "Send" => SendBtnW,
-                    "Edit" => EditBtnW,
-                    "Archive" => ArcBtnW,
-                    "Restore" => ResBtnW,
-                    _ => ArcBtnW
-                };
-                if (i > 0) totalW += ActionBtnGap;
-            }
-
-            int x0 = e.CellBounds.X + (e.CellBounds.Width - totalW) / 2;
-            int y0 = e.CellBounds.Y + (e.CellBounds.Height - ActionBtnH) / 2;
-
-            for (int i = 0; i < parts.Length; i++)
-            {
-                int w = parts[i] switch
-                {
-                    "Send" => SendBtnW,
-                    "Edit" => EditBtnW,
-                    "Archive" => ArcBtnW,
-                    "Restore" => ResBtnW,
-                    _ => ArcBtnW
-                };
-
-                var rect = new Rectangle(x0, y0, w, ActionBtnH);
-                bool hover = _hoverAction == (e.RowIndex << 2) + i;
-
-                switch (parts[i])
-                {
-                    case "Send":
-                        PaintButton(e.Graphics, rect, "Send", hover, Blue);
-                        break;
-                    case "Edit":
-                        PaintButton(e.Graphics, rect, "Edit", hover, Navy);
-                        break;
-                    case "Archive":
-                        PaintButton(e.Graphics, rect, "Archive", hover, Red);
-                        break;
-                    case "Restore":
-                        PaintButton(e.Graphics, rect, "Restore", hover, Green);
-                        break;
-                }
-
-                x0 += w + ActionBtnGap;
-            }
-
+            DrawDotsButton(e.Graphics, rect, hover);
             e.Handled = true;
         }
 
-        private static void PaintButton(Graphics g, Rectangle rect, string text,
-            bool hover, Color tone)
+        private static Rectangle DotsRect(Rectangle cell)
+        {
+            int x = cell.X + (cell.Width - DotsBtnW) / 2;
+            int y = cell.Y + (cell.Height - ActionBtnH) / 2;
+            return new Rectangle(x, y, DotsBtnW, ActionBtnH);
+        }
+
+        private static void DrawDotsButton(Graphics g, Rectangle rect, bool hover)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            Color fill = hover ? tone : Color.White;
-            Color fore = hover ? Color.White : tone;
+            Color fill = hover ? BlueSoft : Color.White;
+            Color border = hover ? Blue : CardBorder;
+            Color dotColor = hover ? Blue : Navy;
 
             using (var path = RoundedRect(rect, 6))
             using (var fillBrush = new SolidBrush(fill))
-            using (var pen = new Pen(tone, 1))
+            using (var pen = new Pen(border, 1f))
             {
                 g.FillPath(fillBrush, path);
                 g.DrawPath(pen, path);
             }
 
-            TextRenderer.DrawText(g, text, FontAction, rect, fore,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            const int dotSize = 3;
+            int cx = rect.X + rect.Width / 2 - dotSize / 2;
+            int cy = rect.Y + rect.Height / 2;
+            using var dotBrush = new SolidBrush(dotColor);
+            g.FillEllipse(dotBrush, cx, cy - 8, dotSize, dotSize);
+            g.FillEllipse(dotBrush, cx, cy - dotSize / 2, dotSize, dotSize);
+            g.FillEllipse(dotBrush, cx, cy + 5, dotSize, dotSize);
         }
 
         private void Grid_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
@@ -1225,21 +1193,10 @@ namespace CarwashServices.Roles
             if (e.Button != MouseButtons.Left) return;
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
 
-            // Actions column → Send / Edit / Archive / Restore.
             if (_grid.Columns[e.ColumnIndex].Name == "Actions")
             {
                 int hit = HitTestActions(e.RowIndex, e.Location);
                 if (hit < 0) return;
-
-                int buttonIndex = hit & 0b11;
-
-                var spec = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
-                if (string.IsNullOrEmpty(spec)) return;
-
-                var parts = spec.Split('|');
-                if (buttonIndex >= parts.Length) return;
-
-                string action = parts[buttonIndex];
 
                 var idText = _grid.Rows[e.RowIndex].Cells["FollowUpId"].Value?.ToString() ?? "";
                 if (!int.TryParse(idText, out var rowId)) return;
@@ -1247,17 +1204,10 @@ namespace CarwashServices.Roles
                 var dto = _all.FirstOrDefault(f => f.FollowUpId == rowId);
                 if (dto == null) return;
 
-                switch (action)
-                {
-                    case "Send": SendFollowUpAsync(dto); break;
-                    case "Edit": OpenEditDialog(dto); break;
-                    case "Archive": ArchiveAsync(dto); break;
-                    case "Restore": RestoreAsync(dto); break;
-                }
+                ShowActionsMenu(e.RowIndex, dto);
                 return;
             }
 
-            // Customer column → drill into the customer.
             if (_grid.Columns[e.ColumnIndex].Name == "Customer")
             {
                 var idText = _grid.Rows[e.RowIndex].Cells["FollowUpId"].Value?.ToString() ?? "";
@@ -1280,44 +1230,8 @@ namespace CarwashServices.Roles
 
             var absolute = new Point(cellBounds.X + local.X, cellBounds.Y + local.Y);
 
-            var spec = _grid.Rows[rowIndex].Cells["Actions"].Value?.ToString() ?? "";
-            if (string.IsNullOrEmpty(spec)) return -1;
-
-            var parts = spec.Split('|');
-
-            int totalW = 0;
-            for (int i = 0; i < parts.Length; i++)
-            {
-                totalW += parts[i] switch
-                {
-                    "Send" => SendBtnW,
-                    "Edit" => EditBtnW,
-                    "Archive" => ArcBtnW,
-                    "Restore" => ResBtnW,
-                    _ => ArcBtnW
-                };
-                if (i > 0) totalW += ActionBtnGap;
-            }
-
-            int x0 = cellBounds.X + (cellBounds.Width - totalW) / 2;
-            int y0 = cellBounds.Y + (cellBounds.Height - ActionBtnH) / 2;
-
-            for (int i = 0; i < parts.Length; i++)
-            {
-                int w = parts[i] switch
-                {
-                    "Send" => SendBtnW,
-                    "Edit" => EditBtnW,
-                    "Archive" => ArcBtnW,
-                    "Restore" => ResBtnW,
-                    _ => ArcBtnW
-                };
-
-                var rect = new Rectangle(x0, y0, w, ActionBtnH);
-                if (rect.Contains(absolute)) return (rowIndex << 2) + i;
-
-                x0 += w + ActionBtnGap;
-            }
+            if (DotsRect(cellBounds).Contains(absolute))
+                return rowIndex << 2;
 
             return -1;
         }
@@ -1337,6 +1251,112 @@ namespace CarwashServices.Roles
             }
 
             _grid.Cursor = encoded >= 0 ? Cursors.Hand : Cursors.Default;
+        }
+
+        // ================================================================
+        //  ACTIONS MENU
+        // ================================================================
+        private void ShowActionsMenu(int rowIndex, FollowUpDto dto)
+        {
+            CloseActiveMenu();
+
+            var spec = _grid.Rows[rowIndex].Cells["Actions"].Value?.ToString() ?? "";
+            if (string.IsNullOrEmpty(spec)) return;
+
+            var actions = spec.Split('|');
+
+            var menu = new ContextMenuStrip
+            {
+                ShowImageMargin = false,
+                ShowCheckMargin = false,
+                Font = new Font("Segoe UI", 9.5f),
+                BackColor = Color.White,
+                ForeColor = Navy,
+                Padding = new Padding(4),
+                Renderer = new ToolStripProfessionalRenderer(new MenuColors())
+            };
+
+            foreach (var action in actions)
+            {
+                switch (action)
+                {
+                    case "Send":
+                        AddMenuItem(menu, "Send", () => SendFollowUpAsync(dto));
+                        break;
+                    case "Edit":
+                        AddMenuItem(menu, "Edit", () => OpenEditDialog(dto));
+                        break;
+                    case "Archive":
+                        AddMenuItem(menu, "Archive", () => ArchiveAsync(dto), isDanger: true);
+                        break;
+                    case "Restore":
+                        AddMenuItem(menu, "Restore", () => RestoreAsync(dto));
+                        break;
+                }
+            }
+
+            if (menu.Items.Count == 0) return;
+
+            _activeMenu = menu;
+            _menuRow = rowIndex;
+
+            menu.Closed += (s, e) =>
+            {
+                if (ReferenceEquals(_activeMenu, menu))
+                {
+                    _activeMenu = null;
+                    _menuRow = -1;
+                    _grid.InvalidateCell(_grid.Columns["Actions"].Index, rowIndex);
+                }
+            };
+
+            var cellBounds = _grid.GetCellDisplayRectangle(
+                _grid.Columns["Actions"].Index, rowIndex, false);
+
+            menu.Show(_grid,
+                new Point(cellBounds.Right - 8, cellBounds.Bottom - 4),
+                ToolStripDropDownDirection.BelowLeft);
+        }
+
+        private static void AddMenuItem(ContextMenuStrip menu, string text, Action onClick, bool isDanger = false)
+        {
+            var item = new ToolStripMenuItem(text)
+            {
+                ForeColor = isDanger ? Red : Navy,
+                AutoSize = false,
+                Height = MenuItemH,
+                Padding = new Padding(12, 0, 12, 0),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Width = 140
+            };
+            item.Click += (s, e) =>
+            {
+                menu.Close();
+                onClick();
+            };
+            menu.Items.Add(item);
+        }
+
+        private void CloseActiveMenu()
+        {
+            if (_activeMenu == null) return;
+            var m = _activeMenu;
+            _activeMenu = null;
+            m.Close();
+            if (_menuRow >= 0)
+            {
+                _grid.InvalidateCell(_grid.Columns["Actions"].Index, _menuRow);
+                _menuRow = -1;
+            }
+        }
+
+        private sealed class MenuColors : ProfessionalColorTable
+        {
+            public override Color MenuItemSelected => BlueSoft;
+            public override Color MenuItemSelectedGradientBegin => BlueSoft;
+            public override Color MenuItemSelectedGradientEnd => BlueSoft;
+            public override Color MenuItemBorder => CardBorder;
+            public override Color MenuBorder => CardBorder;
         }
 
         // ================================================================
@@ -1437,7 +1457,6 @@ namespace CarwashServices.Roles
             var total = list.Count;
             var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)_pageSize));
 
-            // Jump to the page containing the focused follow-up.
             if (_focusFollowUpId.HasValue && _tab == ListTab.Active)
             {
                 int idx = list.FindIndex(f => f.FollowUpId == _focusFollowUpId.Value);
@@ -1487,7 +1506,9 @@ namespace CarwashServices.Roles
                 if (_tab == ListTab.Active)
                 {
                     bool isTerminal = f.Status == "Redeemed" || f.Status == "Expired";
-                    bool canSend = f.Status == "Scheduled" || f.Status == "Due today";
+                    bool canSend = f.Status == "Scheduled"
+                                || f.Status == "Due today"
+                                || f.Status == "Draft";
 
                     string actions = isTerminal
                         ? "Archive"
@@ -1536,7 +1557,6 @@ namespace CarwashServices.Roles
             _grid.ResumeLayout();
             _grid.PerformLayout();
 
-            // Scroll the focused row into view.
             if (_focusFollowUpId.HasValue)
             {
                 foreach (DataGridViewRow row in _grid.Rows)
@@ -1662,8 +1682,6 @@ namespace CarwashServices.Roles
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
 
-                    // Reload in case the status changed on the server (it shouldn't
-                    // on failure, but this keeps the grid in sync either way).
                     await LoadAsync();
                 }
             }
