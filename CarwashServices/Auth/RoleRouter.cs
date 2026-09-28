@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace CarwashServices.Auth
 {
@@ -13,15 +13,10 @@ namespace CarwashServices.Auth
         {
             UserRole.SuperAdmin => new[]
             {
-                "View Dashboard",
-                "Analytics",
-                "View Reports",
-                "Manage Users",
-                "Manage Customers",
-                "Manage Services",
-                "Manage Service Requests",
-                "Follow-Ups / Reminders",
-                "Manage Admin Accounts"
+                "Manage Admin Accounts",
+                "Backup & Restore Data",
+                "Manage Subscription / Billing",
+                "Terms & Conditions"
             },
 
             UserRole.Admin => new[]
@@ -33,7 +28,8 @@ namespace CarwashServices.Auth
                 "Manage Customers",
                 "Manage Services",
                 "Manage Service Requests",
-                "Follow-Ups / Reminders"
+                "Follow-Ups / Reminders",
+                "Terms & Conditions"
             },
 
             UserRole.Manager => new[]

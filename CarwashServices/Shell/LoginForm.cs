@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -385,6 +385,7 @@ namespace CarwashServices.Shell
                             SessionUser.UserId = user.UserId;
                             SessionUser.FullName = user.FullName;
                             SessionUser.Email = user.Email;
+                            SessionUser.RoleId = user.RoleId;
                             SessionUser.Role = (UserRole)user.RoleId;
                         }
                     }

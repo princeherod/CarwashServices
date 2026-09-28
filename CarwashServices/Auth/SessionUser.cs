@@ -1,4 +1,4 @@
-﻿namespace CarwashServices.Auth
+namespace CarwashServices.Auth
 {
     /// <summary>
     /// Holds the currently logged-in user for the lifetime of the app.
@@ -6,10 +6,43 @@
     /// </summary>
     public static class SessionUser
     {
+        private static int _roleId;
+        private static UserRole _role = UserRole.Unknown;
+
         public static int UserId { get; set; }
         public static string FullName { get; set; } = "";
         public static string Email { get; set; } = "";
-        public static UserRole Role { get; set; } = UserRole.Unknown;
+
+        public static UserRole Role
+        {
+            get => _role;
+            set
+            {
+                _role = value;
+                _roleId = (int)value;
+            }
+        }
+
+        /// <summary>
+        /// Numeric role ID:
+        /// 1 = Admin, 2 = Manager, 3 = Staff/ServiceStaff, 4 = Super Admin
+        /// </summary>
+        public static int RoleId
+        {
+            get => _roleId != 0 ? _roleId : (int)_role;
+            set
+            {
+                _roleId = value;
+                _role = value switch
+                {
+                    1 => UserRole.Admin,
+                    2 => UserRole.Manager,
+                    3 => UserRole.ServiceStaff,
+                    4 => UserRole.SuperAdmin,
+                    _ => (UserRole)value
+                };
+            }
+        }
 
         public static bool IsLoggedIn => UserId > 0;
 
@@ -18,7 +51,8 @@
             UserId = 0;
             FullName = "";
             Email = "";
-            Role = UserRole.Unknown;
+            _role = UserRole.Unknown;
+            _roleId = 0;
         }
     }
 }

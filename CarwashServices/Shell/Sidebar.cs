@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -46,7 +46,7 @@ namespace CarwashServices.Shell
             EnableDoubleBuffering(this);
         }
 
-        public void SetActiveModule(string moduleKey)
+        public void SetActiveModule(string? moduleKey)
         {
             if (_activeModule == moduleKey) return;
 
@@ -58,7 +58,7 @@ namespace CarwashServices.Shell
 
             _activeModule = moduleKey;
 
-            if (_moduleButtons.TryGetValue(moduleKey, out var newBtn))
+            if (!string.IsNullOrEmpty(moduleKey) && _moduleButtons.TryGetValue(moduleKey, out var newBtn))
             {
                 newBtn.SetActive(true);
             }
@@ -138,30 +138,41 @@ namespace CarwashServices.Shell
                 _ => "Unknown"
             };
 
+            bool isSuperAdmin = SessionUser.Role == UserRole.SuperAdmin;
+            Color pillBg = isSuperAdmin ? Color.FromArgb(0x2E, 0x1A, 0x4D) : Color.FromArgb(0x1A, 0x2A, 0x48);
+            Color pillBorder = isSuperAdmin ? Color.FromArgb(0x6D, 0x28, 0xD9) : Color.Transparent;
+            Color pillDot = isSuperAdmin ? Color.FromArgb(0xA8, 0x55, 0xF7) : AccentBlue;
+            Color pillTextColor = isSuperAdmin ? Color.FromArgb(0xF3, 0xE8, 0xFF) : TextMain;
+
             var adminPill = new Panel
             {
                 Location = new Point(24, y),
                 Size = new Size(140, 30),
-                BackColor = Color.FromArgb(0x1A, 0x2A, 0x48)
+                BackColor = pillBg
             };
             adminPill.Paint += (s, e) =>
             {
-                using var path = RoundedRect(new Rectangle(0, 0, adminPill.Width, adminPill.Height), 15);
+                using var path = RoundedRect(new Rectangle(0, 0, adminPill.Width - 1, adminPill.Height - 1), 15);
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using var brush = new SolidBrush(adminPill.BackColor);
                 e.Graphics.FillPath(brush, path);
+                if (pillBorder != Color.Transparent)
+                {
+                    using var pen = new Pen(pillBorder, 1.2f);
+                    e.Graphics.DrawPath(pen, path);
+                }
             };
 
             var adminDot = new Panel
             {
-                Location = new Point(14, 12),
-                Size = new Size(7, 7),
-                BackColor = AccentBlue
+                Location = new Point(14, 11),
+                Size = new Size(8, 8),
+                BackColor = pillDot
             };
             adminDot.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using var brush = new SolidBrush(AccentBlue);
+                using var brush = new SolidBrush(pillDot);
                 e.Graphics.FillEllipse(brush, 0, 0, 7, 7);
             };
             adminPill.Controls.Add(adminDot);
@@ -169,7 +180,7 @@ namespace CarwashServices.Shell
             var adminLabel = new Label
             {
                 Text = roleLabel,
-                ForeColor = TextMain,
+                ForeColor = pillTextColor,
                 Font = new Font("Segoe UI Semibold", 9f),
                 Location = new Point(28, 6),
                 AutoSize = true,
@@ -186,15 +197,29 @@ namespace CarwashServices.Shell
             var modules = RoleRouter.ModulesFor(SessionUser.Role);
             var overviewKeys = new[] { "View Dashboard", "Analytics", "View Reports" };
 
-            y = AddGroupLabel("OVERVIEW", y);
+            bool hasOverview = false;
             foreach (var key in modules)
+            {
                 if (Array.IndexOf(overviewKeys, key) >= 0)
-                    y = AddItem(key, IconKeyFor(key), y, key);
+                {
+                    hasOverview = true;
+                    break;
+                }
+            }
 
-            y += 22;
+            if (hasOverview)
+            {
+                y = AddGroupLabel("OVERVIEW", y);
+                foreach (var key in modules)
+                    if (Array.IndexOf(overviewKeys, key) >= 0)
+                        y = AddItem(key, IconKeyFor(key), y, key);
+
+                y += 22;
+            }
 
             string modulesLabel = SessionUser.Role switch
             {
+                UserRole.SuperAdmin => "SUPER ADMIN MODULES",
                 UserRole.Manager => "MANAGER MODULES",
                 UserRole.ServiceStaff => "SERVICE STAFF MODULES",
                 _ => "MODULES"
@@ -321,6 +346,9 @@ namespace CarwashServices.Shell
             "Manage Service Requests" => "requests",
             "Follow-Ups / Reminders" => "reminders",
             "Manage Admin Accounts" => "admin",
+            "Backup & Restore Data" => "database",
+            "Manage Subscription / Billing" => "billing",
+            "Terms & Conditions" => "terms",
             "Assign Service Staff" => "users",
             "Monitor Service Status" => "analytics",
             "View Assigned Requests" => "requests",
@@ -355,9 +383,9 @@ namespace CarwashServices.Shell
 
             var btn = new SidebarButton(iconKey, label, isComingSoon)
             {
-                Width = 240,
+                Width = 248,
                 Height = 42,
-                Left = 20,
+                Left = 16,
                 Top = y,
                 Cursor = Cursors.Hand,
                 Tag = key
@@ -446,7 +474,7 @@ namespace CarwashServices.Shell
                 FlatAppearance.BorderSize = 0;
                 BackColor = BgNormal;
                 ForeColor = TextMain;
-                Font = new Font("Segoe UI", 9.5f);
+                Font = new Font("Segoe UI", 9f);
                 Text = "";
             }
 
@@ -489,12 +517,12 @@ namespace CarwashServices.Shell
                 Color iconColor = _comingSoon
                     ? IconMuted
                     : (_active ? Accent : IconIdle);
-                var iconRect = new RectangleF(20, (Height - 20) / 2f, 20, 20);
+                var iconRect = new RectangleF(16, (Height - 20) / 2f, 20, 20);
                 DrawIcon(g, _iconKey, iconRect, iconColor);
 
                 // Leave room for the COMING SOON tag when present.
-                int textWidth = _comingSoon ? Width - 56 - 92 : Width - 56;
-                var textRect = new Rectangle(52, 0, Math.Max(40, textWidth), Height);
+                int textWidth = _comingSoon ? Width - 46 - 92 : Width - 46;
+                var textRect = new Rectangle(44, 0, Math.Max(40, textWidth), Height);
 
                 Color textColor = _comingSoon ? TextMuted : TextMain;
                 TextRenderer.DrawText(
@@ -584,6 +612,24 @@ namespace CarwashServices.Shell
                             new PointF(3, 5)
                         };
                         g.DrawPolygon(pen, shield);
+                        break;
+                    case "database":
+                        g.DrawEllipse(pen, 3, 3, 14, 5);
+                        g.DrawLine(pen, 3, 5, 3, 15);
+                        g.DrawLine(pen, 17, 5, 17, 15);
+                        g.DrawArc(pen, 3, 7, 14, 5, 0, 180);
+                        g.DrawArc(pen, 3, 12, 14, 5, 0, 180);
+                        break;
+                    case "billing":
+                        g.DrawRectangle(pen, 2, 4, 16, 12);
+                        g.DrawLine(pen, 2, 8, 18, 8);
+                        g.DrawLine(pen, 5, 12, 9, 12);
+                        break;
+                    case "terms":
+                        g.DrawRectangle(pen, 3, 2, 14, 16);
+                        g.DrawLine(pen, 6, 6, 14, 6);
+                        g.DrawLine(pen, 6, 10, 14, 10);
+                        g.DrawLine(pen, 6, 14, 11, 14);
                         break;
                     default:
                         g.DrawEllipse(pen, 4, 4, 12, 12);

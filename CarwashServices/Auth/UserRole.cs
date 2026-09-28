@@ -1,12 +1,13 @@
-﻿namespace CarwashServices.Auth
+namespace CarwashServices.Auth
 {
-    // Keep these values in sync with the Roles table in the master DB.
+    // Role IDs aligned with system specifications:
+    // 1 = Admin, 2 = Manager, 3 = Staff/ServiceStaff, 4 = SuperAdmin
     public enum UserRole
     {
         Unknown = 0,
-        SuperAdmin = 1,
-        Admin = 2,
-        Manager = 3,
-        ServiceStaff = 4
+        Admin = 1,
+        Manager = 2,
+        ServiceStaff = 3,
+        SuperAdmin = 4
     }
 }

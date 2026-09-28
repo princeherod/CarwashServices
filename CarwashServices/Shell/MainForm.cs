@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -73,6 +73,7 @@ namespace CarwashServices.Shell
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI Semibold", 14f),
                 AutoSize = true,
+                UseMnemonic = false,
                 Location = new Point(24, 16)
             };
             _headerPanel.Controls.Add(_titleLabel);
@@ -212,14 +213,27 @@ namespace CarwashServices.Shell
         // ================================================================
         private void NavigateTo(string key)
         {
-            if (!CanAccess(key))
+            // Role guards for Super Admin modules (reachable only by RoleId == 4)
+            if (key is "Manage Admin Accounts" or "Backup & Restore Data" or "Manage Subscription / Billing" or "Manage Subscription/Billing")
             {
-                MessageBox.Show(
-                    $"Access denied.\n\nYour role ({SessionUser.Role}) is not authorized to open '{key}'.",
-                    "Access Denied",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                _sidebar.SetActiveModule(_sidebar.ActiveModuleKey);
+                if (SessionUser.RoleId != 4)
+                {
+                    ShowAccessDenied(key, "Super Admin (Role 4)");
+                    return;
+                }
+            }
+            // Terms & Conditions guard: reachable by Role 1 (Admin) and Role 4 (Super Admin)
+            else if (key == "Terms & Conditions")
+            {
+                if (SessionUser.RoleId != 4 && SessionUser.RoleId != 1)
+                {
+                    ShowAccessDenied(key, "Super Admin (Role 4) or Admin (Role 1)");
+                    return;
+                }
+            }
+            else if (!CanAccess(key))
+            {
+                ShowAccessDenied(key, $"Authorized Roles for {key}");
                 return;
             }
 
@@ -336,6 +350,28 @@ namespace CarwashServices.Shell
                         }
                         break;
 
+                    case "Manage Admin Accounts":
+                        view = new Roles.SuperAdmin.ManageAdminAccountsView();
+                        headerText = "MANAGE ADMIN ACCOUNTS";
+                        break;
+
+                    case "Backup & Restore Data":
+                        view = new Roles.SuperAdmin.BackupRestoreDataView();
+                        headerText = "BACKUP & RESTORE DATA";
+                        break;
+
+                    case "Manage Subscription / Billing":
+                    case "Manage Subscription/Billing":
+                        view = new Roles.SuperAdmin.ManageSubscriptionBillingView();
+                        headerText = "MANAGE SUBSCRIPTION / BILLING";
+                        break;
+
+                    case "Terms & Conditions":
+                        bool isReadOnly = SessionUser.RoleId != 4;
+                        view = new Roles.SuperAdmin.TermsAndConditionsView(isReadOnly);
+                        headerText = "TERMS & CONDITIONS";
+                        break;
+
                     default:
                         ShowComingSoon(key);
                         return;
@@ -363,6 +399,39 @@ namespace CarwashServices.Shell
                 MessageBoxIcon.Information);
 
             _sidebar.SetActiveModule(_sidebar.ActiveModuleKey);
+        }
+
+        private void ShowAccessDenied(string key, string requiredRole)
+        {
+            _contentPanel.SuspendLayout();
+            try
+            {
+                foreach (Control c in _contentPanel.Controls)
+                    c.Dispose();
+                _contentPanel.Controls.Clear();
+
+                var deniedView = new Roles.AccessDeniedView(key, requiredRole, () =>
+                {
+                    RedirectToAuthorized();
+                });
+                deniedView.Dock = DockStyle.Fill;
+                _contentPanel.Controls.Add(deniedView);
+                _titleLabel.Text = "403 — ACCESS DENIED";
+                _sidebar.SetActiveModule(null);
+            }
+            finally
+            {
+                _contentPanel.ResumeLayout(true);
+            }
+        }
+
+        private void RedirectToAuthorized()
+        {
+            var modules = RoleRouter.ModulesFor(SessionUser.Role);
+            if (modules.Length > 0)
+            {
+                NavigateTo(modules[0]);
+            }
         }
     }
 }

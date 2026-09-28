@@ -1,4 +1,4 @@
-﻿using CRM.domain.Entities;
+using CRM.domain.Entities;
 using CRM.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,13 +20,32 @@ public class UsersController : ControllerBase
     // Super Admin (1) and Admin (2) are intentionally excluded.
     private static readonly int[] AllowedRoleIds = { 3, 4 };   // 3=Service Staff, 4=Manager
 
-    // GET: api/users
+    // GET: api/users?roleIds=1,4
     [HttpGet]
-    public async Task<IActionResult> GetAll()
+    public async Task<IActionResult> GetAll([FromQuery] string? roleIds = null)
     {
-        var list = await _db.Users
-            .AsNoTracking()
-            .Where(u => AllowedRoleIds.Contains(u.RoleId))
+        IQueryable<User> query = _db.Users.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(roleIds))
+        {
+            var ids = roleIds
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var v) ? (int?)v : null)
+                .Where(v => v.HasValue)
+                .Select(v => v!.Value)
+                .ToList();
+
+            if (ids.Count > 0)
+            {
+                query = query.Where(u => ids.Contains(u.RoleId));
+            }
+        }
+        else
+        {
+            query = query.Where(u => AllowedRoleIds.Contains(u.RoleId));
+        }
+
+        var list = await query
             .OrderBy(u => u.UserId)
             .Select(u => new
             {
@@ -50,7 +69,7 @@ public class UsersController : ControllerBase
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.UserId == id);
 
-        if (row is null || !AllowedRoleIds.Contains(row.RoleId))
+        if (row is null)
             return NotFound(new { message = $"User {id} not found." });
 
         return Ok(new
@@ -81,8 +100,8 @@ public class UsersController : ControllerBase
             return BadRequest(new { message = "Full name is required." });
         if (string.IsNullOrWhiteSpace(req.Email))
             return BadRequest(new { message = "Email is required." });
-        if (!AllowedRoleIds.Contains(req.RoleId))
-            return BadRequest(new { message = "Role must be Manager or Service Staff." });
+        if (req.RoleId <= 0)
+            return BadRequest(new { message = "Valid Role is required." });
         if (string.IsNullOrWhiteSpace(req.Password))
             return BadRequest(new { message = "Password is required." });
 
@@ -154,15 +173,15 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> Update(int id, [FromBody] UserUpdateRequest req)
     {
         var existing = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id);
-        if (existing is null || !AllowedRoleIds.Contains(existing.RoleId))
+        if (existing is null)
             return NotFound(new { message = $"User {id} not found." });
 
         if (string.IsNullOrWhiteSpace(req.FullName))
             return BadRequest(new { message = "Full name is required." });
         if (string.IsNullOrWhiteSpace(req.Email))
             return BadRequest(new { message = "Email is required." });
-        if (!AllowedRoleIds.Contains(req.RoleId))
-            return BadRequest(new { message = "Role must be Manager or Service Staff." });
+        if (req.RoleId <= 0)
+            return BadRequest(new { message = "Valid Role is required." });
 
         var email = req.Email.Trim().ToLowerInvariant();
         var dupe = await _db.Users.AnyAsync(u => u.UserId != id && u.Email.ToLower() == email);
@@ -212,7 +231,7 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> Delete(int id)
     {
         var row = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id);
-        if (row is null || !AllowedRoleIds.Contains(row.RoleId))
+        if (row is null)
             return NotFound(new { message = $"User {id} not found." });
 
         _db.Users.Remove(row);
