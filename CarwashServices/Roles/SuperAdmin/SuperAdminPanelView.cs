@@ -92,7 +92,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             _headerTitle = new Label
             {
-                Text = "SUPER ADMIN",
+                Text = SuperAdminLabels.SuperAdminRoleTitle,
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI Semibold", 13.5f),
                 AutoSize = true,
@@ -156,7 +156,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             var brandTitle = new Label
             {
-                Text = "AQUASHINE",
+                Text = SuperAdminLabels.BrandTitle,
                 ForeColor = Color.FromArgb(0x9A, 0xA8, 0xC0),
                 Font = new Font("Segoe UI Semibold", 8.5f),
                 Location = new Point(72, y + 2),
@@ -166,7 +166,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             var brandSubtitle = new Label
             {
-                Text = "CRM System",
+                Text = SuperAdminLabels.BrandSubtitle,
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI Semibold", 12f),
                 Location = new Point(70, y + 16),
@@ -228,7 +228,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // ============================================================
             var groupLbl = new Label
             {
-                Text = "SUPER ADMIN MODULES",
+                Text = SuperAdminLabels.SuperAdminModulesHeader,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI Semibold", 8f),
                 Location = new Point(28, y),
@@ -384,7 +384,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 {
                     view.Dock = DockStyle.Fill;
                     _contentPanel.Controls.Add(view);
-                    _headerTitle.Text = key.ToUpperInvariant();
+                    _headerTitle.Text = key;
                 }
             }
             finally
@@ -411,7 +411,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 });
                 deniedView.Dock = DockStyle.Fill;
                 _contentPanel.Controls.Add(deniedView);
-                _headerTitle.Text = "403 — ACCESS DENIED";
+                _headerTitle.Text = SuperAdminLabels.AccessDeniedHeader;
             }
             finally
             {

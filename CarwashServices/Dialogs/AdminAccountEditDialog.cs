@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using CarwashServices.Dtos;
+using CarwashServices.Roles.SuperAdmin;
 using CarwashServices.Shell;
 
 namespace CarwashServices.Dialogs
@@ -98,7 +99,7 @@ namespace CarwashServices.Dialogs
 
         private void InitializeForm()
         {
-            Text = _isEdit ? $"Edit Admin Account — #{_existing!.UserId}" : "New Admin Account";
+            Text = _isEdit ? $"{SuperAdminLabels.DialogEditAdminTitle} — #{_existing!.UserId}" : SuperAdminLabels.DialogNewAdminTitle;
             ClientSize = new Size(640, 580);
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
@@ -125,7 +126,7 @@ namespace CarwashServices.Dialogs
 
             var titleLbl = new Label
             {
-                Text = _isEdit ? "Edit Admin Account" : "Create New Admin Account",
+                Text = _isEdit ? SuperAdminLabels.DialogEditAdminTitle : SuperAdminLabels.DialogNewAdminTitle,
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 15f),
                 Location = new Point(32, 14),
@@ -136,7 +137,7 @@ namespace CarwashServices.Dialogs
 
             var subtitleLbl = new Label
             {
-                Text = "Manage credentials, system role assignment, and account status",
+                Text = SuperAdminLabels.DialogAdminSubtitle,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
                 Location = new Point(32, 42),
@@ -242,8 +243,8 @@ namespace CarwashServices.Dialogs
             int y = 16;
 
             // Row 1: Full Name & Email
-            body.Controls.Add(Caption("FULL NAME *", leftColX, y));
-            body.Controls.Add(Caption("EMAIL ADDRESS *", rightColX, y));
+            body.Controls.Add(Caption(SuperAdminLabels.FieldFullName, leftColX, y));
+            body.Controls.Add(Caption(SuperAdminLabels.FieldEmailAddress, rightColX, y));
             y += 22;
 
             _fullNameTxt = CreateTextBox(leftColX, y, colW);
@@ -254,8 +255,8 @@ namespace CarwashServices.Dialogs
             y += 50;
 
             // Row 2: Role & Status
-            body.Controls.Add(Caption("ROLE *", leftColX, y));
-            body.Controls.Add(Caption("STATUS *", rightColX, y));
+            body.Controls.Add(Caption(SuperAdminLabels.FieldRole, leftColX, y));
+            body.Controls.Add(Caption(SuperAdminLabels.FieldStatus, rightColX, y));
             y += 22;
 
             _roleCombo = new ComboBox
@@ -300,7 +301,7 @@ namespace CarwashServices.Dialogs
             // Row 3: Security & Credentials
             var secLbl = new Label
             {
-                Text = "SECURITY CREDENTIALS",
+                Text = SuperAdminLabels.HeaderSecurityCredentials,
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 9f),
                 Location = new Point(leftColX, y),
@@ -310,7 +311,7 @@ namespace CarwashServices.Dialogs
 
             _passwordHintLbl = new Label
             {
-                Text = _isEdit ? "(Leave blank to keep existing password)" : "(Required for new accounts)",
+                Text = _isEdit ? SuperAdminLabels.HintPasswordOptional : SuperAdminLabels.HintPasswordRequired,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 8.5f),
                 Location = new Point(leftColX + secLbl.PreferredWidth + 10, y + 1),
@@ -320,8 +321,8 @@ namespace CarwashServices.Dialogs
             y += 28;
 
             // Row 4: Password & Confirm
-            body.Controls.Add(Caption(_isEdit ? "NEW PASSWORD" : "PASSWORD *", leftColX, y));
-            body.Controls.Add(Caption(_isEdit ? "CONFIRM NEW PASSWORD" : "CONFIRM PASSWORD *", rightColX, y));
+            body.Controls.Add(Caption(_isEdit ? SuperAdminLabels.FieldPasswordOptional : SuperAdminLabels.FieldPasswordRequired, leftColX, y));
+            body.Controls.Add(Caption(_isEdit ? SuperAdminLabels.FieldConfirmPasswordOptional : SuperAdminLabels.FieldConfirmPasswordRequired, rightColX, y));
             y += 22;
 
             _passwordTxt = CreateTextBox(leftColX, y, colW);

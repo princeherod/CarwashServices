@@ -6,6 +6,7 @@ using System.Windows.Forms;
 using CarwashServices.Auth;
 using CarwashServices.Roles;
 using CarwashServices.Roles.Admin;
+using CarwashServices.Roles.SuperAdmin;
 
 namespace CarwashServices.Shell
 {
@@ -352,24 +353,24 @@ namespace CarwashServices.Shell
 
                     case "Manage Admin Accounts":
                         view = new Roles.SuperAdmin.ManageAdminAccountsView();
-                        headerText = "MANAGE ADMIN ACCOUNTS";
+                        headerText = SuperAdminLabels.NavManageAdminAccounts;
                         break;
 
                     case "Backup & Restore Data":
                         view = new Roles.SuperAdmin.BackupRestoreDataView();
-                        headerText = "BACKUP & RESTORE DATA";
+                        headerText = SuperAdminLabels.NavBackupRestoreData;
                         break;
 
                     case "Manage Subscription / Billing":
                     case "Manage Subscription/Billing":
                         view = new Roles.SuperAdmin.ManageSubscriptionBillingView();
-                        headerText = "MANAGE SUBSCRIPTION / BILLING";
+                        headerText = SuperAdminLabels.NavManageSubscriptionBilling;
                         break;
 
                     case "Terms & Conditions":
                         bool isReadOnly = SessionUser.RoleId != 4;
                         view = new Roles.SuperAdmin.TermsAndConditionsView(isReadOnly);
-                        headerText = "TERMS & CONDITIONS";
+                        headerText = SuperAdminLabels.NavTermsAndConditions;
                         break;
 
                     default:

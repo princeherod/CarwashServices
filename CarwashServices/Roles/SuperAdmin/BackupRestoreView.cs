@@ -135,7 +135,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // ---- Subtitle ----
             _scrollContainer.Controls.Add(new Label
             {
-                Text = "DATABASE MAINTENANCE — snapshot database state, create on-demand manual archives, and perform system rollbacks",
+                Text = SuperAdminLabels.BackupRestoreDataSubtitle,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
                 Location = new Point(36, 80),
@@ -206,7 +206,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // Card Title
             var titleLbl = new Label
             {
-                Text = "Create Manual Backup",
+                Text = SuperAdminLabels.CardCreateBackupTitle,
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 14f),
                 Location = new Point(24, 20),
@@ -217,7 +217,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             _leftDescLbl = new Label
             {
-                Text = "Executes an on-demand snapshot of MSME_MasterERP and registers the operation in BACKUP_LOGS.",
+                Text = SuperAdminLabels.CardCreateBackupDesc,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
                 Location = new Point(24, 50),
@@ -226,7 +226,7 @@ namespace CarwashServices.Roles.SuperAdmin
             };
             _leftCard.Controls.Add(_leftDescLbl);
 
-            // Code Preview Box Header
+            // Details Header
             _codeHeader = new Panel
             {
                 Location = new Point(24, 92),
@@ -242,8 +242,8 @@ namespace CarwashServices.Roles.SuperAdmin
             };
             _codeHeader.Controls.Add(new Label
             {
-                Text = "SQL PREVIEW  ·  INSERT STATEMENT & DISK BACKUP",
-                Font = new Font("Segoe UI Semibold", 8f),
+                Text = SuperAdminLabels.BackupDetailsHeader,
+                Font = new Font("Segoe UI Semibold", 8.5f),
                 ForeColor = Color.FromArgb(0x94, 0xA3, 0xB8),
                 Location = new Point(14, 8),
                 AutoSize = true,
@@ -251,7 +251,7 @@ namespace CarwashServices.Roles.SuperAdmin
             });
             _leftCard.Controls.Add(_codeHeader);
 
-            // Monospace SQL Code Preview Box
+            // Details Overview Box
             _sqlText = new TextBox
             {
                 Multiline = true,
@@ -259,37 +259,26 @@ namespace CarwashServices.Roles.SuperAdmin
                 ScrollBars = ScrollBars.Vertical,
                 BackColor = CodeBg,
                 ForeColor = Color.FromArgb(0x38, 0xBD, 0xF8),
-                Font = new Font("Consolas", 9.2f),
+                Font = new Font("Segoe UI", 9.2f),
                 BorderStyle = BorderStyle.None,
                 Location = new Point(24, 124),
                 Size = new Size(Math.Max(100, _leftCard.Width - 48), 240),
                 Text = string.Join("\r\n", new[]
                 {
-                    "-- 1. Insert into BACKUP_LOGS with status 'In Progress'",
-                    "INSERT INTO [MSME_MasterERP].[dbo].[BackupLogs] (",
-                    "    PerformedBy,",
-                    "    Type,",
-                    "    BackupDate,",
-                    "    FileLocation,",
-                    "    Status",
-                    ")",
-                    "VALUES (",
-                    "    @CurrentUserId,       -- Current authenticated user",
-                    "    'Manual',             -- Manual on-demand snapshot",
-                    "    GETUTCDATE(),",
-                    "    @TargetFilePath,      -- %USERPROFILE%\\CarwashBackups\\*.bak",
-                    "    'In Progress'         -- Transitioned upon write",
-                    ");",
+                    "BACKUP CONFIGURATION & SPECIFICATION",
                     "",
-                    "-- 2. Actually write database snapshot to disk",
-                    "BACKUP DATABASE [MSME_MasterERP]",
-                    "TO DISK = @TargetFilePath",
-                    "WITH INIT, STATS = 10;",
+                    "Database Target:      MSME_MasterERP",
+                    "Backup Mechanism:     On-demand snapshot to local storage",
+                    "Archive File Type:    SQL Server Database Backup (.bak)",
+                    "Compression:          Full verification enabled",
                     "",
-                    "-- 3. On disk completion, commit status 'Success'",
-                    "UPDATE [MSME_MasterERP].[dbo].[BackupLogs]",
-                    "SET Status = 'Success'",
-                    "WHERE BackupId = @NewBackupId;"
+                    "DESTINATION DIRECTORY",
+                    "%USERPROFILE%\\CarwashBackups",
+                    "",
+                    "EXECUTION PROCEDURE",
+                    "1. Initialize manual snapshot request",
+                    "2. Write complete database state to timestamped archive",
+                    "3. Verify archive integrity and record in Backup History"
                 })
             };
             _leftCard.Controls.Add(_sqlText);
@@ -297,7 +286,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // Storage Target Note
             _targetInfo = new Label
             {
-                Text = "Output Directory: %USERPROFILE%\\CarwashBackups  ·  Database: MSME_MasterERP",
+                Text = SuperAdminLabels.DestinationDirectoryLabel,
                 Font = new Font("Segoe UI", 8.5f),
                 ForeColor = Muted,
                 Location = new Point(24, _leftCard.Height - 118),
@@ -321,7 +310,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // "Create Manual Backup" Button
             _createBackupBtn = new Button
             {
-                Text = "Create Manual Backup",
+                Text = SuperAdminLabels.ButtonCreateManualBackup,
                 Font = new Font("Segoe UI Semibold", 10f),
                 Size = new Size(Math.Max(100, _leftCard.Width - 48), 44),
                 Location = new Point(24, _leftCard.Height - 68),
@@ -364,7 +353,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // Card Title
             var titleLbl = new Label
             {
-                Text = "Restore from Backup",
+                Text = SuperAdminLabels.CardRestoreTitle,
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 14f),
                 Location = new Point(24, 20),
@@ -375,7 +364,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             _rightDescLbl = new Label
             {
-                Text = "Select a verified snapshot from BACKUP_LOGS to roll back the system database.",
+                Text = SuperAdminLabels.CardRestoreDesc,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
                 Location = new Point(24, 50),
@@ -416,7 +405,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             var warnText = new Label
             {
-                Text = "CAUTION: Restoring a backup overwrites all current database tables and data. Active user connections will be disconnected during restore.",
+                Text = SuperAdminLabels.RestoreWarningCaution,
                 Font = new Font("Segoe UI", 8.5f),
                 ForeColor = Amber,
                 Location = new Point(40, 10),
@@ -457,7 +446,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // "Restore Selected Backup" Button
             _restoreBtn = new Button
             {
-                Text = "Restore Selected Backup",
+                Text = SuperAdminLabels.ButtonRestoreSelectedBackup,
                 Font = new Font("Segoe UI Semibold", 10f),
                 Size = new Size(Math.Max(100, _rightCard.Width - 48), 44),
                 Location = new Point(24, _rightCard.Height - 68),
@@ -499,7 +488,7 @@ namespace CarwashServices.Roles.SuperAdmin
             try
             {
                 Cursor = Cursors.WaitCursor;
-                _restoreStatusLbl.Text = "Loading backups from BACKUP_LOGS...";
+                _restoreStatusLbl.Text = SuperAdminLabels.StatusLoadingBackups;
                 _restoreStatusLbl.ForeColor = Muted;
 
                 var backups = await _http.GetFromJsonAsync<List<BackupItemDto>>("api/backups?status=Success")
@@ -532,7 +521,7 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 var emptyLbl = new Label
                 {
-                    Text = "No successful backups found in BACKUP_LOGS.\nClick 'Create Manual Backup' to create your first snapshot.",
+                    Text = SuperAdminLabels.StatusNoBackupsFound,
                     ForeColor = Muted,
                     Font = new Font("Segoe UI", 9.5f),
                     TextAlign = ContentAlignment.MiddleCenter,
@@ -591,7 +580,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             // Pill: Auto / Manual
             bool isAuto = string.Equals(item.Type, "Auto", StringComparison.OrdinalIgnoreCase);
-            var pillText = isAuto ? "Auto" : "Manual";
+            var pillText = isAuto ? SuperAdminLabels.BackupTypeAuto : SuperAdminLabels.BackupTypeManual;
             var pillBg = isAuto ? BlueSoft : PurpleSoft;
             var pillFg = isAuto ? Blue : Purple;
 
@@ -630,7 +619,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // Subtitle: Date & Size & User
             var infoLbl = new Label
             {
-                Text = $"{item.BackupDate:yyyy-MM-dd HH:mm:ss} UTC  ·  {item.FileSizeFormatted}  ·  By: {item.PerformedByName}",
+                Text = $"Date Created: {item.BackupDate:yyyy-MM-dd HH:mm:ss} UTC  ·  {item.FileSizeFormatted}  ·  Performed By: {item.PerformedByName}",
                 Font = new Font("Segoe UI", 8.5f),
                 ForeColor = Muted,
                 Location = new Point(42, 40),

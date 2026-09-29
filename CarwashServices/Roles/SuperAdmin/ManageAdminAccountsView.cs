@@ -131,7 +131,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // Subtitle
             _contentPanel.Controls.Add(new Label
             {
-                Text = "ADMINISTRATOR ACCOUNTS — User ID · Full Name · Email · Role ID · Status · Created At",
+                Text = SuperAdminLabels.ManageAdminAccountsSubtitle,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
                 Location = new Point(PadX, 80),
@@ -142,7 +142,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // "+ New Admin" Button
             _newAdminBtn = new Button
             {
-                Text = "+  New Admin",
+                Text = SuperAdminLabels.ButtonNewAdmin,
                 Font = new Font("Segoe UI Semibold", 10f),
                 Size = new Size(160, 44),
                 Cursor = Cursors.Hand,
@@ -176,7 +176,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             _rolesCard.Controls.Add(new Label
             {
-                Text = "ADMINISTRATOR ROLES REFERENCE",
+                Text = SuperAdminLabels.RolesReferenceTitle,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI Semibold", 8.5f),
                 Location = new Point(20, 14),
@@ -185,10 +185,10 @@ namespace CarwashServices.Roles.SuperAdmin
             });
 
             // Role chips: Super Admin (purple) and Admin (blue)
-            var chipSuper = CreateRoleChip("id:4  Super Admin", PurpleSoft, Purple, 20, 44);
+            var chipSuper = CreateRoleChip(SuperAdminLabels.ChipSuperAdmin, PurpleSoft, Purple, 20, 44);
             _rolesCard.Controls.Add(chipSuper);
 
-            var chipAdmin = CreateRoleChip("id:1  Admin", BlueSoft, Blue, chipSuper.Right + 16, 44);
+            var chipAdmin = CreateRoleChip(SuperAdminLabels.ChipAdmin, BlueSoft, Blue, chipSuper.Right + 16, 44);
             _rolesCard.Controls.Add(chipAdmin);
 
             // DataGridView Table
@@ -236,19 +236,19 @@ namespace CarwashServices.Roles.SuperAdmin
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal
             };
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "UserId", HeaderText = "User ID", Width = 95 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "UserId", HeaderText = SuperAdminLabels.ColUserId, Width = 95 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Name",
-                HeaderText = "Full Name / Email",
+                HeaderText = SuperAdminLabels.ColNameEmail,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 220,
                 FillWeight = 100
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Role", HeaderText = "Role ID", Width = 150 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", Width = 120 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Created", HeaderText = "Created At", Width = 170 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Actions", HeaderText = "Actions", Width = 110 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Role", HeaderText = SuperAdminLabels.ColRole, Width = 150 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = SuperAdminLabels.ColStatus, Width = 120 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Created", HeaderText = SuperAdminLabels.ColDateCreated, Width = 170 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Actions", HeaderText = SuperAdminLabels.ColActions, Width = 110 });
 
             _grid.CellPainting += Grid_CellPainting;
             _grid.CellMouseClick += Grid_CellMouseClick;
@@ -343,8 +343,8 @@ namespace CarwashServices.Roles.SuperAdmin
                 if (!string.IsNullOrWhiteSpace(u.Email))
                     nameCell += "\n" + u.Email;
 
-                string roleName = u.RoleId == 4 ? "Super Admin" : "Admin";
-                string roleCell = $"{roleName}\nid: {u.RoleId}";
+                string roleName = u.RoleId == 4 ? SuperAdminLabels.ChipSuperAdmin : SuperAdminLabels.ChipAdmin;
+                string roleCell = roleName;
 
                 _grid.Rows.Add(
                     u.UserId,
@@ -352,7 +352,7 @@ namespace CarwashServices.Roles.SuperAdmin
                     roleCell,
                     u.Status,
                     u.CreatedAt.ToString("yyyy-MM-dd HH:mm"),
-                    "Edit");
+                    SuperAdminLabels.ActionEdit);
             }
 
             _grid.ClearSelection();
@@ -462,14 +462,9 @@ namespace CarwashServices.Roles.SuperAdmin
                                   DataGridViewPaintParts.Border |
                                   DataGridViewPaintParts.SelectionBackground);
 
-            var raw = Convert.ToString(e.Value) ?? "";
-            var parts = raw.Split('\n');
-            var roleName = parts[0];
-            var idLine = parts.Length > 1 ? parts[1] : "";
-
+            var roleName = Convert.ToString(e.Value) ?? "";
             var b = e.CellBounds;
             int x = b.X + 16;
-            int y = b.Y + 14;
 
             bool isSuper = roleName.Contains("Super Admin", StringComparison.OrdinalIgnoreCase);
             Color pillBg = isSuper ? PurpleSoft : BlueSoft;
@@ -483,6 +478,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
                 int pillW = size.Width + 22;
                 int pillH = size.Height + 8;
+                int y = b.Y + (b.Height - pillH) / 2;
                 var pill = new Rectangle(x, y, pillW, pillH);
 
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -494,10 +490,6 @@ namespace CarwashServices.Roles.SuperAdmin
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
                     TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
             }
-
-            TextRenderer.DrawText(e.Graphics, idLine, FontIdSub,
-                new Rectangle(x, y + 26, b.Width - 24, 18), Muted,
-                TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
 
             e.Handled = true;
         }

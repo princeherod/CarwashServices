@@ -150,7 +150,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // ---- Subtitle ----
             _contentPanel.Controls.Add(new Label
             {
-                Text = "COMMERCIAL TIERS & INVOICING — subscription plans, recurring billing cycles, tenant subscriptions, and ledger transactions",
+                Text = SuperAdminLabels.ManageSubscriptionBillingSubtitle,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
                 Location = new Point(padX, 80),
@@ -159,9 +159,9 @@ namespace CarwashServices.Roles.SuperAdmin
             });
 
             // ---- 3 Summary Tiles ----
-            _tileTotalPaid = CreateTile("Total Paid", "✓ Collected", Green, GreenSoft, out _lblTotalPaidVal);
-            _tileOutstanding = CreateTile("Outstanding", "⚠ Pending", Red, RedSoft, out _lblOutstandingVal);
-            _tileActiveSubs = CreateTile("Active Subscriptions", "● Enrolled", Blue, BlueSoft, out _lblActiveSubsVal);
+            _tileTotalPaid = CreateTile(SuperAdminLabels.TileTotalPaid, SuperAdminLabels.BadgeCollected, Green, GreenSoft, out _lblTotalPaidVal);
+            _tileOutstanding = CreateTile(SuperAdminLabels.TileOutstanding, SuperAdminLabels.BadgePending, Red, RedSoft, out _lblOutstandingVal);
+            _tileActiveSubs = CreateTile(SuperAdminLabels.TileActiveSubscriptions, SuperAdminLabels.BadgeEnrolled, Blue, BlueSoft, out _lblActiveSubsVal);
 
             _contentPanel.Controls.Add(_tileTotalPaid);
             _contentPanel.Controls.Add(_tileOutstanding);
@@ -183,9 +183,9 @@ namespace CarwashServices.Roles.SuperAdmin
             };
             _contentPanel.Controls.Add(_tabBarPanel);
 
-            _tabPlansBtn = CreateTabButton("Subscription Plans", 4, 190);
-            _tabSubsBtn = CreateTabButton("Customer Subscriptions", 198, 210);
-            _tabTxsBtn = CreateTabButton("Billing Transactions", 412, 200);
+            _tabPlansBtn = CreateTabButton(SuperAdminLabels.TabSubscriptionPlans, 4, 190);
+            _tabSubsBtn = CreateTabButton(SuperAdminLabels.TabCustomerSubscriptions, 198, 210);
+            _tabTxsBtn = CreateTabButton(SuperAdminLabels.TabBillingTransactions, 412, 200);
 
             _tabPlansBtn.Click += async (s, e) => await SwitchTabAsync(TabMode.Plans);
             _tabSubsBtn.Click += async (s, e) => await SwitchTabAsync(TabMode.CustomerSubscriptions);
@@ -432,20 +432,20 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.Columns.Clear();
             _grid.Rows.Clear();
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "PlanId", HeaderText = "Plan ID", Width = 90 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "PlanId", HeaderText = SuperAdminLabels.ColPlanId, Width = 90 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "PlanName",
-                HeaderText = "Plan Name & Details",
+                HeaderText = SuperAdminLabels.ColPlanDetails,
                 Width = 240
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Price", HeaderText = "Price", Width = 130 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "BillingCycle", HeaderText = "Billing Cycle", Width = 150 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ActiveMembers", HeaderText = "Enrolled Tenants", Width = 160 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Price", HeaderText = SuperAdminLabels.ColPrice, Width = 130 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "BillingCycle", HeaderText = SuperAdminLabels.ColBillingCycle, Width = 150 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ActiveMembers", HeaderText = SuperAdminLabels.ColEnrolledTenants, Width = 160 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Description",
-                HeaderText = "Description",
+                HeaderText = SuperAdminLabels.ColDescription,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 200
             });
@@ -474,27 +474,27 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.Columns.Clear();
             _grid.Rows.Clear();
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "SubId", HeaderText = "Sub ID", Width = 80 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "SubId", HeaderText = SuperAdminLabels.ColSubscriptionId, Width = 110 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Company",
-                HeaderText = "Tenant Company",
+                HeaderText = SuperAdminLabels.ColTenantCompany,
                 Width = 200
             });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Admin",
-                HeaderText = "Admin User",
+                HeaderText = SuperAdminLabels.ColAdminUser,
                 Width = 190
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Plan", HeaderText = "Subscription", Width = 145 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "BillingCycle", HeaderText = "Billing Cycle", Width = 115 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "StartDate", HeaderText = "Start Date", Width = 100 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "EndDate", HeaderText = "Renewal Date", Width = 105 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Plan", HeaderText = SuperAdminLabels.ColSubscriptionPlan, Width = 145 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "BillingCycle", HeaderText = SuperAdminLabels.ColBillingCycle, Width = 115 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "StartDate", HeaderText = SuperAdminLabels.ColStartDate, Width = 100 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "EndDate", HeaderText = SuperAdminLabels.ColRenewalDate, Width = 105 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Status",
-                HeaderText = "Status",
+                HeaderText = SuperAdminLabels.ColStatus,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 90
             });
@@ -529,21 +529,21 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.Columns.Clear();
             _grid.Rows.Clear();
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "TxnId", HeaderText = "Txn ID", Width = 80 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "TxnId", HeaderText = SuperAdminLabels.ColTransactionId, Width = 135 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Company",
-                HeaderText = "Tenant Company",
-                Width = 210
+                HeaderText = SuperAdminLabels.ColTenantCompany,
+                Width = 200
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Plan", HeaderText = "Subscription", Width = 150 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Reference", HeaderText = "Reference Number", Width = 150 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Amount", HeaderText = "Amount", Width = 100 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Date", HeaderText = "Transaction Date", Width = 135 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Plan", HeaderText = SuperAdminLabels.ColSubscriptionPlan, Width = 150 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Reference", HeaderText = SuperAdminLabels.ColReferenceNumber, Width = 160 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Amount", HeaderText = SuperAdminLabels.ColAmount, Width = 100 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Date", HeaderText = SuperAdminLabels.ColTransactionDate, Width = 145 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "PaymentStatus",
-                HeaderText = "Payment Status",
+                HeaderText = SuperAdminLabels.ColPaymentStatus,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 110
             });

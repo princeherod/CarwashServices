@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
@@ -197,25 +197,25 @@ namespace CarwashServices.Dialogs
 
             int y = 18;
 
-            // ============ USERS FIELDS ============
-            body.Controls.Add(SectionDivider("USERS FIELDS", y));
+            // ============ USER DETAILS ============
+            body.Controls.Add(SectionDivider("User Details", y));
             y += 40;
 
-            body.Controls.Add(MakeLabel("FULL_NAME *", PadX, y));
+            body.Controls.Add(MakeLabel("Full Name *", PadX, y));
             _fullNameTxt = MakeTextBox(PadX, y + 22, ContentW);
             _fullNameTxt.PlaceholderText = "Full Name";
             _fullNameTxt.TextChanged += (s, e) => ClearError();
             body.Controls.Add(_fullNameTxt);
             y += 76;
 
-            body.Controls.Add(MakeLabel("EMAIL *", PadX, y));
+            body.Controls.Add(MakeLabel("Email Address *", PadX, y));
             _emailTxt = MakeTextBox(PadX, y + 22, ContentW);
             _emailTxt.PlaceholderText = "user@carwash.com";
             _emailTxt.TextChanged += (s, e) => ClearError();
             body.Controls.Add(_emailTxt);
             y += 76;
 
-            body.Controls.Add(MakeLabel("ROLE_ID (FK → ROLES) *", PadX, y));
+            body.Controls.Add(MakeLabel("Role *", PadX, y));
             _roleCombo = new ComboBox
             {
                 Location = new Point(PadX, y + 22),
@@ -229,7 +229,7 @@ namespace CarwashServices.Dialogs
             _roleCombo.SelectedIndex = 0;
             body.Controls.Add(_roleCombo);
 
-            body.Controls.Add(MakeLabel("STATUS", X2b, y));
+            body.Controls.Add(MakeLabel("Status", X2b, y));
             _statusCombo = new ComboBox
             {
                 Location = new Point(X2b, y + 22),
@@ -243,18 +243,18 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(_statusCombo);
             y += 88;
 
-            // ============ PASSWORD_HASH ============
-            body.Controls.Add(SectionDivider("PASSWORD_HASH", y));
+            // ============ PASSWORD & SECURITY ============
+            body.Controls.Add(SectionDivider("Password & Security", y));
             y += 40;
 
-            body.Controls.Add(MakeLabel("PASSWORD", PadX, y));
+            body.Controls.Add(MakeLabel("Password", PadX, y));
             _passwordTxt = MakeTextBox(PadX, y + 22, W2);
             _passwordTxt.PlaceholderText = _isEdit ? "Leave blank to keep current" : "••••••••";
             _passwordTxt.UseSystemPasswordChar = true;
             _passwordTxt.TextChanged += (s, e) => ClearError();
             body.Controls.Add(_passwordTxt);
 
-            body.Controls.Add(MakeLabel("CONFIRM", X2b, y));
+            body.Controls.Add(MakeLabel("Confirm Password", X2b, y));
             _confirmTxt = MakeTextBox(X2b, y + 22, W2);
             _confirmTxt.PlaceholderText = "••••••••";
             _confirmTxt.UseSystemPasswordChar = true;

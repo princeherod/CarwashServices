@@ -175,8 +175,8 @@ namespace CarwashServices.Roles.SuperAdmin
             _scrollContainer.Controls.Add(new Label
             {
                 Text = _isReadOnly
-                    ? "LEGAL & COMPLIANCE — Browse platform terms of service and inspect version revisions (Read-only)"
-                    : "LEGAL & COMPLIANCE — Manage platform terms of service, track version revisions, and publish updated legal agreements",
+                    ? SuperAdminLabels.TermsAndConditionsAdminSubtitle
+                    : SuperAdminLabels.TermsAndConditionsSubtitle,
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9f),
                 Location = new Point(36, 80),
@@ -340,7 +340,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             _metaTermsId = new Label
             {
-                Text = "terms_id: --",
+                Text = $"{SuperAdminLabels.MetaTermsId}--",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 8.8f),
                 Location = new Point(14, 9),
@@ -351,7 +351,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             _metaEffective = new Label
             {
-                Text = "effective_date: --",
+                Text = $"{SuperAdminLabels.MetaEffectiveDate}--",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 8.8f),
                 Location = new Point(130, 9),
@@ -362,7 +362,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             _metaCreatedBy = new Label
             {
-                Text = "created_by: --",
+                Text = $"{SuperAdminLabels.MetaCreatedBy}--",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 8.8f),
                 Location = new Point(320, 9),
@@ -414,7 +414,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             _previewBtn = new Button
             {
-                Text = "👁  Preview",
+                Text = SuperAdminLabels.ButtonPreview,
                 Font = new Font("Segoe UI Semibold", 9.2f),
                 ForeColor = Navy,
                 BackColor = Color.White,
@@ -430,7 +430,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
             _publishBtn = new Button
             {
-                Text = "+ Publish New Version",
+                Text = SuperAdminLabels.ButtonPublishNewVersion,
                 Font = new Font("Segoe UI Semibold", 9.2f),
                 ForeColor = Color.White,
                 BackColor = Purple,
@@ -663,7 +663,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // Effective Date line
             var dateLbl = new Label
             {
-                Text = $"Effective: {item.EffectiveDateFormatted}",
+                Text = $"{SuperAdminLabels.PrefixEffectiveDate}{item.EffectiveDateFormatted}",
                 Font = new Font("Segoe UI", 8.8f),
                 ForeColor = Muted,
                 Location = new Point(14, 34),
@@ -676,7 +676,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // Author line
             var authorLbl = new Label
             {
-                Text = $"By: {item.CreatedByName}",
+                Text = $"{SuperAdminLabels.PrefixCreatedBy}{item.CreatedByName}",
                 Font = new Font("Segoe UI", 8.2f),
                 ForeColor = Color.FromArgb(0x94, 0xA3, 0xB8),
                 Location = new Point(14, 52),
@@ -725,9 +725,9 @@ namespace CarwashServices.Roles.SuperAdmin
 
             // Update Right Card
             _docTitleLbl.Text = $"Terms & Conditions — {item.Version}";
-            _metaTermsId.Text = $"terms_id: #{item.TermsId}";
-            _metaEffective.Text = $"effective_date: {item.EffectiveDateFormatted}";
-            _metaCreatedBy.Text = $"created_by: {item.CreatedByName} (#{item.CreatedBy})";
+            _metaTermsId.Text = $"{SuperAdminLabels.MetaTermsId}#{item.TermsId}";
+            _metaEffective.Text = $"{SuperAdminLabels.MetaEffectiveDate}{item.EffectiveDateFormatted}";
+            _metaCreatedBy.Text = $"{SuperAdminLabels.MetaCreatedBy}{item.CreatedByName}";
 
             // Position metadata items
             _metaEffective.Location = new Point(_metaTermsId.Right + 18, 9);
@@ -1041,19 +1041,19 @@ namespace CarwashServices.Roles.SuperAdmin
             };
 
             // Version Field
-            var verLbl = new Label { Text = "NEW VERSION", Font = new Font("Segoe UI Semibold", 8f), ForeColor = Muted, Location = new Point(24, 10), AutoSize = true, UseMnemonic = false };
+            var verLbl = new Label { Text = SuperAdminLabels.FieldNewVersion, Font = new Font("Segoe UI Semibold", 8f), ForeColor = Muted, Location = new Point(24, 10), AutoSize = true, UseMnemonic = false };
             _versionTxt = new TextBox { Text = defaultVersion, Location = new Point(24, 30), Width = 110, Font = new Font("Segoe UI Semibold", 9.5f), ForeColor = Purple };
             metaBar.Controls.Add(verLbl);
             metaBar.Controls.Add(_versionTxt);
 
             // Effective Date Field
-            var dateLbl = new Label { Text = "EFFECTIVE DATE", Font = new Font("Segoe UI Semibold", 8f), ForeColor = Muted, Location = new Point(160, 10), AutoSize = true, UseMnemonic = false };
+            var dateLbl = new Label { Text = SuperAdminLabels.FieldEffectiveDate, Font = new Font("Segoe UI Semibold", 8f), ForeColor = Muted, Location = new Point(160, 10), AutoSize = true, UseMnemonic = false };
             _effectiveTxt = new TextBox { Text = DateTime.UtcNow.ToString("yyyy-MM-dd"), ReadOnly = true, Location = new Point(160, 30), Width = 120, BackColor = Color.White };
             metaBar.Controls.Add(dateLbl);
             metaBar.Controls.Add(_effectiveTxt);
 
             // Publisher Field
-            var authLbl = new Label { Text = "PUBLISHER", Font = new Font("Segoe UI Semibold", 8f), ForeColor = Muted, Location = new Point(306, 10), AutoSize = true, UseMnemonic = false };
+            var authLbl = new Label { Text = SuperAdminLabels.FieldPublisher, Font = new Font("Segoe UI Semibold", 8f), ForeColor = Muted, Location = new Point(306, 10), AutoSize = true, UseMnemonic = false };
             _authorTxt = new TextBox
             {
                 Text = string.IsNullOrWhiteSpace(SessionUser.FullName) ? "Super Admin" : SessionUser.FullName,
