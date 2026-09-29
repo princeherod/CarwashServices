@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace CRM.domain.Entities
@@ -6,10 +6,16 @@ namespace CRM.domain.Entities
     public class Customer
     {
         public int CustomerId { get; set; }
-        public string FullName { get; set; }
+        public string FirstName { get; set; } = string.Empty;
+        public string LastName { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
         public string Phone { get; set; }
         public string Email { get; set; }
-        public string Address { get; set; }
+        public string? AddressLine { get; set; }
+        public string? City { get; set; }
+        public string? State { get; set; }
+        public string? PostalCode { get; set; }
+        public string Address { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
 
         public ICollection<ServiceRequest> ServiceRequests { get; set; } = new List<ServiceRequest>();

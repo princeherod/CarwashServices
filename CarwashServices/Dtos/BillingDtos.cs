@@ -20,6 +20,11 @@ namespace CarwashServices.Dtos
         public string BillingCycle { get; set; } = "Monthly";
         public string Description { get; set; } = string.Empty;
         public int ActiveSubscribers { get; set; }
+        public int MaxUsers { get; set; } = 5;
+        public int MaxCustomers { get; set; } = 500;
+        public bool IsActive { get; set; } = true;
+        public bool MultiBranchEnabled { get; set; } = false;
+        public bool IsArchived { get; set; } = false;
     }
 
     public class CustomerSubscriptionItemDto

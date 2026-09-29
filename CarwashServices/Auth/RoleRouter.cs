@@ -13,9 +13,10 @@ namespace CarwashServices.Auth
         {
             UserRole.SuperAdmin => new[]
             {
+                "Manage Businesses",
                 "Manage Admin Accounts",
-                "Backup & Restore Data",
                 "Manage Subscription / Billing",
+                "Backup & Restore Data",
                 "Terms & Conditions"
             },
 

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
 namespace CRM.Infrastructure.Data;
@@ -10,7 +10,7 @@ public class TenantErpDbContextFactory
     {
         var optionsBuilder = new DbContextOptionsBuilder<TenantErpDbContext>();
         optionsBuilder.UseSqlServer(
-             "Server=(localdb)\\MSSQLLocalDB;Database=TenantErpDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True;");
+             "Server=(localdb)\\MSSQLLocalDB;Database=TenantCrmDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True;");
 
         return new TenantErpDbContext(optionsBuilder.Options);
     }

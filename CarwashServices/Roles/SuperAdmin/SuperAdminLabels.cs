@@ -60,6 +60,8 @@ namespace CarwashServices.Roles.SuperAdmin
         public const string DialogNewAdminTitle = "Create New Admin Account";
         public const string DialogEditAdminTitle = "Edit Admin Account";
         public const string DialogAdminSubtitle = "Manage credentials, system role assignment, and account status";
+        public const string FieldFirstName = "First Name *";
+        public const string FieldLastName = "Last Name *";
         public const string FieldFullName = "Full Name *";
         public const string FieldEmailAddress = "Email Address *";
         public const string FieldRole = "Role *";
@@ -78,7 +80,7 @@ namespace CarwashServices.Roles.SuperAdmin
         public const string CardCreateBackupTitle = "Create Manual Backup";
         public const string CardCreateBackupDesc = "Creates a manual backup of the current data.";
         public const string BackupDetailsHeader = "Backup Details";
-        public const string DestinationDirectoryLabel = "Destination: %USERPROFILE%\\CarwashBackups  ·  Database: MSME_MasterERP";
+        public const string DestinationDirectoryLabel = "Destination: %USERPROFILE%\\CarwashBackups  ·  Database: MSME_MasterCrm";
         public const string ButtonCreateManualBackup = "Create Manual Backup";
 
         public const string CardRestoreTitle = "Restore from Backup";

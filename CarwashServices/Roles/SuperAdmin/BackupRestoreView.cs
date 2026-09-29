@@ -267,7 +267,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 {
                     "BACKUP CONFIGURATION & SPECIFICATION",
                     "",
-                    "Database Target:      MSME_MasterERP",
+                    "Database Target:      MSME_MasterCrm",
                     "Backup Mechanism:     On-demand snapshot to local storage",
                     "Archive File Type:    SQL Server Database Backup (.bak)",
                     "Compression:          Full verification enabled",
@@ -714,7 +714,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 $"Are you sure you want to restore the database from backup:\n\n" +
                 $"File: {_selectedBackup.FileName}\n" +
                 $"Date: {_selectedBackup.BackupDate:yyyy-MM-dd HH:mm:ss} UTC\n\n" +
-                "WARNING: This will overwrite all existing data in MSME_MasterERP!",
+                "WARNING: This will overwrite all existing data in MSME_MasterCrm!",
                 "Confirm Database Restore",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning,
@@ -742,7 +742,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 _restoreStatusLbl.Text = $"✓ Database successfully restored from {_selectedBackup.FileName}!";
 
                 MessageBox.Show(
-                    $"Database 'MSME_MasterERP' has been successfully restored to snapshot:\n\n{_selectedBackup.FileName}",
+                    $"Database 'MSME_MasterCrm' has been successfully restored to snapshot:\n\n{_selectedBackup.FileName}",
                     "Restore Completed",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);

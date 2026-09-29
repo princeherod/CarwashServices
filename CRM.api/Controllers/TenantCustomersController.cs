@@ -1,4 +1,4 @@
-﻿using CRM.Domain.Entities;
+using CRM.Domain.Entities;
 using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -61,6 +61,45 @@ public class TenantCustomersController : ControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
+        if (string.IsNullOrWhiteSpace(customer.FirstName) || string.IsNullOrWhiteSpace(customer.LastName))
+        {
+            if (!string.IsNullOrWhiteSpace(customer.CustomerName))
+            {
+                var full = customer.CustomerName.Trim();
+                var idx = full.IndexOf(' ');
+                if (idx > 0)
+                {
+                    if (string.IsNullOrWhiteSpace(customer.FirstName)) customer.FirstName = full.Substring(0, idx).Trim();
+                    if (string.IsNullOrWhiteSpace(customer.LastName)) customer.LastName = full.Substring(idx + 1).Trim();
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(customer.FirstName)) customer.FirstName = full;
+                    if (string.IsNullOrWhiteSpace(customer.LastName)) customer.LastName = "-";
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(customer.Street) && string.IsNullOrWhiteSpace(customer.City) && !string.IsNullOrWhiteSpace(customer.Address))
+        {
+            var parts = customer.Address.Split(',');
+            if (parts.Length >= 3)
+            {
+                customer.Street = parts[0].Trim();
+                customer.City = parts[1].Trim();
+                customer.Province = string.Join(", ", parts.Skip(2)).Trim();
+            }
+            else if (parts.Length == 2)
+            {
+                customer.Street = parts[0].Trim();
+                customer.City = parts[1].Trim();
+            }
+            else
+            {
+                customer.Street = customer.Address.Trim();
+            }
+        }
+
         await using var tenantDb = await _tenantFactory.CreateAsync(companyId);
 
         var exists = await tenantDb.TenantCustomers.AnyAsync(c => c.CustomerCode == customer.CustomerCode);
@@ -88,11 +127,53 @@ public class TenantCustomersController : ControllerBase
         if (existing is null)
             return NotFound(new { message = $"TenantCustomer {tenantCustomerId} not found." });
 
+        if (string.IsNullOrWhiteSpace(customer.FirstName) || string.IsNullOrWhiteSpace(customer.LastName))
+        {
+            if (!string.IsNullOrWhiteSpace(customer.CustomerName))
+            {
+                var full = customer.CustomerName.Trim();
+                var idx = full.IndexOf(' ');
+                if (idx > 0)
+                {
+                    if (string.IsNullOrWhiteSpace(customer.FirstName)) customer.FirstName = full.Substring(0, idx).Trim();
+                    if (string.IsNullOrWhiteSpace(customer.LastName)) customer.LastName = full.Substring(idx + 1).Trim();
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(customer.FirstName)) customer.FirstName = full;
+                    if (string.IsNullOrWhiteSpace(customer.LastName)) customer.LastName = "-";
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(customer.Street) && string.IsNullOrWhiteSpace(customer.City) && !string.IsNullOrWhiteSpace(customer.Address))
+        {
+            var parts = customer.Address.Split(',');
+            if (parts.Length >= 3)
+            {
+                customer.Street = parts[0].Trim();
+                customer.City = parts[1].Trim();
+                customer.Province = string.Join(", ", parts.Skip(2)).Trim();
+            }
+            else if (parts.Length == 2)
+            {
+                customer.Street = parts[0].Trim();
+                customer.City = parts[1].Trim();
+            }
+            else
+            {
+                customer.Street = customer.Address.Trim();
+            }
+        }
+
         existing.CustomerCode = customer.CustomerCode;
-        existing.CustomerName = customer.CustomerName;
+        existing.FirstName = customer.FirstName;
+        existing.LastName = customer.LastName;
+        existing.Street = customer.Street;
+        existing.City = customer.City;
+        existing.Province = customer.Province;
         existing.ContactNumber = customer.ContactNumber;
         existing.EmailAddress = customer.EmailAddress;
-        existing.Address = customer.Address;
         existing.IsActive = customer.IsActive;
 
         existing.PlateNumber = customer.PlateNumber;

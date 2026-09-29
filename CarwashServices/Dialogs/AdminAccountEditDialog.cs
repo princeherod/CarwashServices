@@ -34,7 +34,8 @@ namespace CarwashServices.Dialogs
         private readonly bool _isEdit;
 
         // ---- Controls ----
-        private TextBox _fullNameTxt = null!;
+        private TextBox _firstNameTxt = null!;
+        private TextBox _lastNameTxt = null!;
         private TextBox _emailTxt = null!;
         private ComboBox _roleCombo = null!;
         private ComboBox _statusCombo = null!;
@@ -100,7 +101,7 @@ namespace CarwashServices.Dialogs
         private void InitializeForm()
         {
             Text = _isEdit ? $"{SuperAdminLabels.DialogEditAdminTitle} — #{_existing!.UserId}" : SuperAdminLabels.DialogNewAdminTitle;
-            ClientSize = new Size(640, 580);
+            ClientSize = new Size(640, 620);
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9.5f);
@@ -242,26 +243,29 @@ namespace CarwashServices.Dialogs
             int colW = 276;
             int y = 16;
 
-            // Row 1: Full Name & Email
-            body.Controls.Add(Caption(SuperAdminLabels.FieldFullName, leftColX, y));
-            body.Controls.Add(Caption(SuperAdminLabels.FieldEmailAddress, rightColX, y));
+            // Row 1: First Name & Last Name
+            body.Controls.Add(Caption(SuperAdminLabels.FieldFirstName, leftColX, y));
+            body.Controls.Add(Caption(SuperAdminLabels.FieldLastName, rightColX, y));
             y += 22;
 
-            _fullNameTxt = CreateTextBox(leftColX, y, colW);
-            body.Controls.Add(_fullNameTxt);
+            _firstNameTxt = CreateTextBox(leftColX, y, colW);
+            body.Controls.Add(_firstNameTxt);
 
-            _emailTxt = CreateTextBox(rightColX, y, colW);
-            body.Controls.Add(_emailTxt);
+            _lastNameTxt = CreateTextBox(rightColX, y, colW);
+            body.Controls.Add(_lastNameTxt);
             y += 50;
 
-            // Row 2: Role & Status
-            body.Controls.Add(Caption(SuperAdminLabels.FieldRole, leftColX, y));
-            body.Controls.Add(Caption(SuperAdminLabels.FieldStatus, rightColX, y));
+            // Row 2: Email & Role
+            body.Controls.Add(Caption(SuperAdminLabels.FieldEmailAddress, leftColX, y));
+            body.Controls.Add(Caption(SuperAdminLabels.FieldRole, rightColX, y));
             y += 22;
+
+            _emailTxt = CreateTextBox(leftColX, y, colW);
+            body.Controls.Add(_emailTxt);
 
             _roleCombo = new ComboBox
             {
-                Location = new Point(leftColX, y),
+                Location = new Point(rightColX, y),
                 Size = new Size(colW, 36),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Font = new Font("Segoe UI", 9.5f),
@@ -273,10 +277,15 @@ namespace CarwashServices.Dialogs
             }
             _roleCombo.SelectedIndex = 0;
             body.Controls.Add(_roleCombo);
+            y += 50;
+
+            // Row 3: Status
+            body.Controls.Add(Caption(SuperAdminLabels.FieldStatus, leftColX, y));
+            y += 22;
 
             _statusCombo = new ComboBox
             {
-                Location = new Point(rightColX, y),
+                Location = new Point(leftColX, y),
                 Size = new Size(colW, 36),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Font = new Font("Segoe UI", 9.5f),
@@ -351,7 +360,27 @@ namespace CarwashServices.Dialogs
         {
             if (_existing == null) return;
 
-            _fullNameTxt.Text = _existing.FullName;
+            if (!string.IsNullOrWhiteSpace(_existing.FirstName))
+            {
+                _firstNameTxt.Text = _existing.FirstName;
+                _lastNameTxt.Text = _existing.LastName;
+            }
+            else
+            {
+                var full = _existing.FullName ?? "";
+                int idx = full.IndexOf(' ');
+                if (idx > 0)
+                {
+                    _firstNameTxt.Text = full.Substring(0, idx).Trim();
+                    _lastNameTxt.Text = full.Substring(idx + 1).Trim();
+                }
+                else
+                {
+                    _firstNameTxt.Text = full;
+                    _lastNameTxt.Text = "";
+                }
+            }
+
             _emailTxt.Text = _existing.Email;
 
             for (int i = 0; i < _roleCombo.Items.Count; i++)
@@ -371,15 +400,23 @@ namespace CarwashServices.Dialogs
         {
             _errorLbl.Text = "";
 
-            var name = _fullNameTxt.Text.Trim();
+            var first = _firstNameTxt.Text.Trim();
+            var last = _lastNameTxt.Text.Trim();
             var email = _emailTxt.Text.Trim();
             var pwd = _passwordTxt.Text;
             var confirm = _confirmTxt.Text;
 
-            if (string.IsNullOrWhiteSpace(name))
+            if (string.IsNullOrWhiteSpace(first))
             {
-                _errorLbl.Text = "Full name is required.";
-                _fullNameTxt.Focus();
+                _errorLbl.Text = "First name is required.";
+                _firstNameTxt.Focus();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(last))
+            {
+                _errorLbl.Text = "Last name is required.";
+                _lastNameTxt.Focus();
                 return;
             }
 
@@ -416,7 +453,9 @@ namespace CarwashServices.Dialogs
                 {
                     var payload = new
                     {
-                        fullName = name,
+                        firstName = first,
+                        lastName = last,
+                        fullName = $"{first} {last}".Trim(),
                         email = email,
                         roleId = roleId,
                         status = status,
@@ -435,7 +474,9 @@ namespace CarwashServices.Dialogs
                 {
                     var payload = new
                     {
-                        fullName = name,
+                        firstName = first,
+                        lastName = last,
+                        fullName = $"{first} {last}".Trim(),
                         email = email,
                         roleId = roleId,
                         status = status,
@@ -468,8 +509,12 @@ namespace CarwashServices.Dialogs
         {
             if (_existing == null) return;
 
+            var displayName = !string.IsNullOrWhiteSpace(_existing.FirstName)
+                ? $"{_existing.FirstName} {_existing.LastName}".Trim()
+                : _existing.FullName;
+
             var confirm = MessageBox.Show(
-                $"Are you sure you want to delete admin account '{_existing.FullName}' ({_existing.Email})?",
+                $"Are you sure you want to delete admin account '{displayName}' ({_existing.Email})?",
                 "Confirm Deletion",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning,

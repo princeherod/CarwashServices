@@ -1,10 +1,12 @@
-﻿namespace CRM.Domain.Entities;
+namespace CRM.Domain.Entities;
 
 public class Supplier
 {
     public int SupplierId { get; set; }
     public string SupplierCode { get; set; } = string.Empty;
     public string SupplierName { get; set; } = string.Empty;
+    public string? ContactFirstName { get; set; }
+    public string? ContactLastName { get; set; }
     public string? ContactPerson { get; set; }
     public string? ContactNumber { get; set; }
     public string? EmailAddress { get; set; }

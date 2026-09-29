@@ -43,7 +43,8 @@ namespace CarwashServices.Dialogs
         private UserDetailDto? _loaded;
 
         // ---- Controls ----
-        private TextBox _fullNameTxt = null!;
+        private TextBox _firstNameTxt = null!;
+        private TextBox _lastNameTxt = null!;
         private TextBox _emailTxt = null!;
         private ComboBox _roleCombo = null!;
         private ComboBox _statusCombo = null!;
@@ -201,11 +202,17 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(SectionDivider("User Details", y));
             y += 40;
 
-            body.Controls.Add(MakeLabel("Full Name *", PadX, y));
-            _fullNameTxt = MakeTextBox(PadX, y + 22, ContentW);
-            _fullNameTxt.PlaceholderText = "Full Name";
-            _fullNameTxt.TextChanged += (s, e) => ClearError();
-            body.Controls.Add(_fullNameTxt);
+            body.Controls.Add(MakeLabel("First Name *", PadX, y));
+            _firstNameTxt = MakeTextBox(PadX, y + 22, W2);
+            _firstNameTxt.PlaceholderText = "First Name";
+            _firstNameTxt.TextChanged += (s, e) => ClearError();
+            body.Controls.Add(_firstNameTxt);
+
+            body.Controls.Add(MakeLabel("Last Name *", X2b, y));
+            _lastNameTxt = MakeTextBox(X2b, y + 22, W2);
+            _lastNameTxt.PlaceholderText = "Last Name";
+            _lastNameTxt.TextChanged += (s, e) => ClearError();
+            body.Controls.Add(_lastNameTxt);
             y += 76;
 
             body.Controls.Add(MakeLabel("Email Address *", PadX, y));
@@ -333,7 +340,26 @@ namespace CarwashServices.Dialogs
                 if (u == null) return;
 
                 _loaded = u;
-                _fullNameTxt.Text = u.FullName;
+                if (!string.IsNullOrWhiteSpace(u.FirstName))
+                {
+                    _firstNameTxt.Text = u.FirstName;
+                    _lastNameTxt.Text = u.LastName;
+                }
+                else
+                {
+                    var full = u.FullName ?? "";
+                    int idx = full.IndexOf(' ');
+                    if (idx > 0)
+                    {
+                        _firstNameTxt.Text = full.Substring(0, idx).Trim();
+                        _lastNameTxt.Text = full.Substring(idx + 1).Trim();
+                    }
+                    else
+                    {
+                        _firstNameTxt.Text = full;
+                        _lastNameTxt.Text = "";
+                    }
+                }
                 _emailTxt.Text = u.Email;
 
                 for (int i = 0; i < _roleCombo.Items.Count; i++)
@@ -363,8 +389,11 @@ namespace CarwashServices.Dialogs
         {
             error = "";
 
-            if (string.IsNullOrWhiteSpace(_fullNameTxt.Text))
-            { error = "Full name is required."; _fullNameTxt.Focus(); return false; }
+            if (string.IsNullOrWhiteSpace(_firstNameTxt.Text))
+            { error = "First name is required."; _firstNameTxt.Focus(); return false; }
+
+            if (string.IsNullOrWhiteSpace(_lastNameTxt.Text))
+            { error = "Last name is required."; _lastNameTxt.Focus(); return false; }
 
             if (string.IsNullOrWhiteSpace(_emailTxt.Text))
             { error = "Email is required."; _emailTxt.Focus(); return false; }
@@ -406,6 +435,10 @@ namespace CarwashServices.Dialogs
             var status = _statusCombo.SelectedItem?.ToString() ?? "Active";
             var password = _passwordTxt.Text;
 
+            var first = _firstNameTxt.Text.Trim();
+            var last = _lastNameTxt.Text.Trim();
+            var full = $"{first} {last}".Trim();
+
             try
             {
                 HttpResponseMessage resp;
@@ -415,14 +448,18 @@ namespace CarwashServices.Dialogs
                     object body = string.IsNullOrEmpty(password)
                         ? new
                         {
-                            fullName = _fullNameTxt.Text.Trim(),
+                            firstName = first,
+                            lastName = last,
+                            fullName = full,
                             email = _emailTxt.Text.Trim(),
                             roleId = role.Id,
                             status
                         }
                         : new
                         {
-                            fullName = _fullNameTxt.Text.Trim(),
+                            firstName = first,
+                            lastName = last,
+                            fullName = full,
                             email = _emailTxt.Text.Trim(),
                             roleId = role.Id,
                             status,
@@ -435,7 +472,9 @@ namespace CarwashServices.Dialogs
                 {
                     var body = new
                     {
-                        fullName = _fullNameTxt.Text.Trim(),
+                        firstName = first,
+                        lastName = last,
+                        fullName = full,
                         email = _emailTxt.Text.Trim(),
                         roleId = role.Id,
                         status,
@@ -473,8 +512,11 @@ namespace CarwashServices.Dialogs
         {
             if (!_isEdit) return;
 
+            var dispName = $"{_firstNameTxt.Text.Trim()} {_lastNameTxt.Text.Trim()}".Trim();
+            if (string.IsNullOrEmpty(dispName)) dispName = _loaded?.FullName ?? "User";
+
             var answer = MessageBox.Show(
-                $"Delete this user?\n\n{_fullNameTxt.Text.Trim()}\n\nThis cannot be undone.",
+                $"Delete this user?\n\n{dispName}\n\nThis cannot be undone.",
                 "Delete User",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning,

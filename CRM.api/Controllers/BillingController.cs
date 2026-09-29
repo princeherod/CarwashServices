@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using CRM.Domain.Entities;
+using CRM.domain.Entities;
 using CRM.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -22,20 +23,20 @@ namespace CRM.api.Controllers
 
         // =====================================================================
         // GET /api/billing/summary
-        // Returns ONLY tenant CRM subscription metrics (excludes retail carwash jobs)
+        // Returns SaaS subscription metrics for Tenant Businesses
         // =====================================================================
         [HttpGet("summary")]
         public async Task<IActionResult> GetSummary()
         {
-            var paidTotal = await _db.BillingTransactions
-                .Where(t => t.CustomerSubscriptionId != null && t.PaymentStatus == "Paid")
+            var paidTotal = await _db.TenantBillingTransactions
+                .Where(t => t.PaymentStatus == "Paid")
                 .SumAsync(t => (decimal?)t.Amount) ?? 0m;
 
-            var outstandingTotal = await _db.BillingTransactions
-                .Where(t => t.CustomerSubscriptionId != null && t.PaymentStatus != "Paid")
+            var outstandingTotal = await _db.TenantBillingTransactions
+                .Where(t => t.PaymentStatus != "Paid")
                 .SumAsync(t => (decimal?)t.Amount) ?? 0m;
 
-            var activeSubs = await _db.CustomerSubscriptions
+            var activeSubs = await _db.TenantSubscriptions
                 .Where(s => s.Status == "Active")
                 .CountAsync();
 
@@ -53,10 +54,21 @@ namespace CRM.api.Controllers
         // GET /api/billing/plans
         // =====================================================================
         [HttpGet("plans")]
-        public async Task<IActionResult> GetPlans()
+        public async Task<IActionResult> GetPlans([FromQuery] bool? activeOnly = null, [FromQuery] bool includeArchived = false)
         {
-            var plans = await _db.SubscriptionPlans
-                .AsNoTracking()
+            IQueryable<TenantSubscriptionPlan> query = _db.TenantSubscriptionPlans.AsNoTracking();
+
+            if (!includeArchived)
+            {
+                query = query.Where(p => !p.IsArchived);
+            }
+
+            if (activeOnly.HasValue && activeOnly.Value)
+            {
+                query = query.Where(p => p.IsActive);
+            }
+
+            var plans = await query
                 .OrderBy(p => p.PlanId)
                 .Select(p => new
                 {
@@ -65,12 +77,214 @@ namespace CRM.api.Controllers
                     price = p.Price,
                     priceFormatted = $"₱{p.Price:N2}",
                     billingCycle = p.BillingCycle,
-                    description = p.Description,
-                    activeSubscribers = _db.CustomerSubscriptions.Count(s => s.PlanId == p.PlanId && s.Status == "Active")
+                    description = p.Description ?? string.Empty,
+                    maxUsers = p.MaxUsers,
+                    maxCustomers = p.MaxCustomers,
+                    multiBranchEnabled = p.MultiBranchEnabled,
+                    isActive = p.IsActive,
+                    isArchived = p.IsArchived,
+                    archivedAt = p.ArchivedAt,
+                    activeSubscribers = _db.TenantSubscriptions.Count(s => s.PlanId == p.PlanId && s.Status == "Active")
                 })
                 .ToListAsync();
 
             return Ok(plans);
+        }
+
+        public class SavePlanRequest
+        {
+            public string PlanName { get; set; } = string.Empty;
+            public string? Description { get; set; }
+            public decimal Price { get; set; }
+            public string BillingCycle { get; set; } = "Monthly";
+            public int MaxUsers { get; set; } = 5;
+            public int MaxCustomers { get; set; } = 500;
+            public bool MultiBranchEnabled { get; set; } = false;
+            public bool IsActive { get; set; } = true;
+        }
+
+        // =====================================================================
+        // POST /api/billing/plans
+        // =====================================================================
+        [HttpPost("plans")]
+        public async Task<IActionResult> CreatePlan([FromBody] SavePlanRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.PlanName))
+            {
+                return BadRequest("Plan name is required.");
+            }
+
+            if (req.Price < 0)
+            {
+                return BadRequest("Price cannot be negative.");
+            }
+
+            var plan = new TenantSubscriptionPlan
+            {
+                PlanName = req.PlanName.Trim(),
+                Description = req.Description?.Trim(),
+                Price = req.Price,
+                BillingCycle = string.IsNullOrWhiteSpace(req.BillingCycle) ? "Monthly" : req.BillingCycle.Trim(),
+                MaxUsers = Math.Max(1, req.MaxUsers),
+                MaxCustomers = Math.Max(1, req.MaxCustomers),
+                MultiBranchEnabled = req.MultiBranchEnabled,
+                IsActive = req.IsActive,
+                IsArchived = false,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _db.TenantSubscriptionPlans.Add(plan);
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                planId = plan.PlanId,
+                planName = plan.PlanName,
+                price = plan.Price,
+                priceFormatted = $"₱{plan.Price:N2}",
+                billingCycle = plan.BillingCycle,
+                description = plan.Description ?? "",
+                maxUsers = plan.MaxUsers,
+                maxCustomers = plan.MaxCustomers,
+                multiBranchEnabled = plan.MultiBranchEnabled,
+                isActive = plan.IsActive,
+                isArchived = plan.IsArchived
+            });
+        }
+
+        // =====================================================================
+        // PUT /api/billing/plans/{id}
+        // =====================================================================
+        [HttpPut("plans/{id:int}")]
+        public async Task<IActionResult> UpdatePlan(int id, [FromBody] SavePlanRequest req)
+        {
+            var plan = await _db.TenantSubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == id);
+            if (plan == null)
+            {
+                return NotFound($"Plan {id} not found.");
+            }
+
+            if (string.IsNullOrWhiteSpace(req.PlanName))
+            {
+                return BadRequest("Plan name is required.");
+            }
+
+            if (req.Price < 0)
+            {
+                return BadRequest("Price cannot be negative.");
+            }
+
+            plan.PlanName = req.PlanName.Trim();
+            plan.Description = req.Description?.Trim();
+            plan.Price = req.Price;
+            plan.BillingCycle = string.IsNullOrWhiteSpace(req.BillingCycle) ? "Monthly" : req.BillingCycle.Trim();
+            plan.MaxUsers = Math.Max(1, req.MaxUsers);
+            plan.MaxCustomers = Math.Max(1, req.MaxCustomers);
+            plan.MultiBranchEnabled = req.MultiBranchEnabled;
+            plan.IsActive = req.IsActive;
+
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                planId = plan.PlanId,
+                planName = plan.PlanName,
+                price = plan.Price,
+                priceFormatted = $"₱{plan.Price:N2}",
+                billingCycle = plan.BillingCycle,
+                description = plan.Description ?? "",
+                maxUsers = plan.MaxUsers,
+                maxCustomers = plan.MaxCustomers,
+                multiBranchEnabled = plan.MultiBranchEnabled,
+                isActive = plan.IsActive,
+                isArchived = plan.IsArchived
+            });
+        }
+
+        // =====================================================================
+        // PUT /api/billing/plans/{id}/status
+        // =====================================================================
+        public class PlanStatusRequest
+        {
+            public bool? IsActive { get; set; }
+        }
+
+        [HttpPut("plans/{id:int}/status")]
+        public async Task<IActionResult> TogglePlanStatus(int id, [FromBody] PlanStatusRequest? req)
+        {
+            var plan = await _db.TenantSubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == id);
+            if (plan == null)
+            {
+                return NotFound($"Plan {id} not found.");
+            }
+
+            plan.IsActive = req?.IsActive ?? !plan.IsActive;
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                planId = plan.PlanId,
+                isActive = plan.IsActive,
+                message = plan.IsActive ? "Plan activated." : "Plan deactivated."
+            });
+        }
+
+        // =====================================================================
+        // PUT /api/billing/plans/{id}/archive
+        // =====================================================================
+        [HttpPut("plans/{id:int}/archive")]
+        public async Task<IActionResult> ToggleArchivePlan(int id)
+        {
+            var plan = await _db.TenantSubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == id);
+            if (plan == null)
+            {
+                return NotFound($"Plan {id} not found.");
+            }
+
+            plan.IsArchived = !plan.IsArchived;
+            plan.ArchivedAt = plan.IsArchived ? DateTime.UtcNow : null;
+            if (plan.IsArchived)
+            {
+                plan.IsActive = false;
+            }
+
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                planId = plan.PlanId,
+                isArchived = plan.IsArchived,
+                isActive = plan.IsActive,
+                message = plan.IsArchived ? "Plan archived successfully." : "Plan unarchived successfully."
+            });
+        }
+
+        // =====================================================================
+        // DELETE /api/billing/plans/{id}
+        // =====================================================================
+        [HttpDelete("plans/{id:int}")]
+        public async Task<IActionResult> DeletePlan(int id)
+        {
+            var plan = await _db.TenantSubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == id);
+            if (plan == null)
+            {
+                return NotFound($"Plan {id} not found.");
+            }
+
+            var hasSubs = await _db.TenantSubscriptions.AnyAsync(s => s.PlanId == id);
+            if (hasSubs)
+            {
+                // Soft archive
+                plan.IsArchived = true;
+                plan.IsActive = false;
+                plan.ArchivedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+                return Ok(new { message = "Plan has active subscribers so it was archived instead of deleted." });
+            }
+
+            _db.TenantSubscriptionPlans.Remove(plan);
+            await _db.SaveChangesAsync();
+            return NoContent();
         }
 
         // =====================================================================
@@ -80,50 +294,42 @@ namespace CRM.api.Controllers
         [HttpGet("customer-subscriptions")]
         public async Task<IActionResult> GetCustomerSubscriptions()
         {
-            var companies = await _db.Companies
+            var subs = await _db.TenantSubscriptions
                 .AsNoTracking()
-                .OrderBy(c => c.CompanyId)
-                .ToListAsync();
-
-            var adminUsers = await _db.Users
-                .AsNoTracking()
-                .Where(u => u.RoleId == 1)
-                .ToListAsync();
-
-            var defaultAdmin = adminUsers.FirstOrDefault() ??
-                await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.RoleId == 4) ??
-                new CRM.domain.Entities.User { FullName = "System Administrator", Email = "admin@aquashine.com" };
-
-            var subs = await _db.CustomerSubscriptions
-                .AsNoTracking()
+                .Include(s => s.Company)
                 .Include(s => s.Plan)
-                .Include(s => s.ManagedByUser)
-                .OrderByDescending(s => s.SubscriptionId)
+                .OrderByDescending(s => s.TenantSubscriptionId)
+                .ToListAsync();
+
+            var companyIds = subs.Select(s => s.CompanyId).Distinct().ToList();
+            var admins = await _db.Users
+                .AsNoTracking()
+                .Where(u => u.CompanyId != null && companyIds.Contains(u.CompanyId.Value) && (u.RoleId == 1 || u.RoleId == 2))
+                .OrderBy(u => u.RoleId)
                 .ToListAsync();
 
             var result = subs.Select(s =>
             {
-                var comp = ResolveCompany(companies, s.CustomerId, s.SubscriptionId);
-                var compName = ResolveCompanyName(comp);
-                var admin = ResolveAdmin(adminUsers, comp.CompanyId, defaultAdmin);
+                var comp = s.Company;
+                var admin = admins.FirstOrDefault(a => a.CompanyId == s.CompanyId);
 
                 return new
                 {
-                    subscriptionId = s.SubscriptionId,
-                    companyId = comp.CompanyId,
-                    companyCode = comp.CompanyCode,
-                    tenantCompany = compName,
-                    adminUser = admin.FullName,
-                    adminEmail = admin.Email,
-                    planId = s.PlanId,
-                    planName = s.Plan != null ? s.Plan.PlanName : "Plan #" + s.PlanId,
+                    subscriptionId = s.TenantSubscriptionId,
+                    companyId = s.CompanyId,
+                    companyCode = comp?.CompanyCode ?? $"COMP{s.CompanyId:D3}",
+                    tenantCompany = comp?.CompanyName ?? $"Company #{s.CompanyId}",
+                    adminUser = admin?.FullName ?? "Unassigned",
+                    adminEmail = admin?.Email ?? "",
+                    planId = s.PlanId ?? 0,
+                    planName = s.Plan != null ? s.Plan.PlanName : "No Plan Assigned",
                     billingCycle = s.Plan != null ? s.Plan.BillingCycle : "Monthly",
                     price = s.Plan != null ? s.Plan.Price : 0m,
                     priceFormatted = $"₱{(s.Plan != null ? s.Plan.Price : 0m):N2}",
-                    managedBy = s.ManagedBy,
-                    managedByName = s.ManagedByUser != null ? s.ManagedByUser.FullName : admin.FullName,
-                    startDate = s.StartDate,
-                    endDate = s.EndDate,
+                    managedBy = 1,
+                    managedByName = "Super Admin",
+                    startDate = s.StartDate ?? s.CreatedAt,
+                    endDate = s.RenewalDate,
                     status = s.Status
                 };
             }).ToList();
@@ -131,46 +337,125 @@ namespace CRM.api.Controllers
             return Ok(result);
         }
 
+        public class AssignPlanRequest
+        {
+            public int CompanyId { get; set; }
+            public int PlanId { get; set; }
+            public string Status { get; set; } = "Active";
+            public DateTime? StartDate { get; set; }
+            public DateTime? RenewalDate { get; set; }
+            public bool AutoRenew { get; set; } = true;
+        }
+
+        // =====================================================================
+        // POST /api/billing/assign-plan
+        // =====================================================================
+        [HttpPost("assign-plan")]
+        public async Task<IActionResult> AssignPlan([FromBody] AssignPlanRequest req)
+        {
+            var comp = await _db.Companies.FirstOrDefaultAsync(c => c.CompanyId == req.CompanyId);
+            if (comp == null)
+            {
+                return NotFound($"Company {req.CompanyId} not found.");
+            }
+
+            var plan = await _db.TenantSubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == req.PlanId);
+            if (plan == null)
+            {
+                return NotFound($"Subscription plan {req.PlanId} not found.");
+            }
+
+            var sub = await _db.TenantSubscriptions
+                .FirstOrDefaultAsync(s => s.CompanyId == req.CompanyId);
+
+            DateTime start = req.StartDate ?? DateTime.UtcNow;
+            DateTime renewal = req.RenewalDate ?? start.AddMonths(1);
+
+            if (sub == null)
+            {
+                sub = new TenantSubscription
+                {
+                    CompanyId = req.CompanyId,
+                    PlanId = req.PlanId,
+                    Status = req.Status,
+                    StartDate = start,
+                    RenewalDate = renewal,
+                    AutoRenew = req.AutoRenew,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _db.TenantSubscriptions.Add(sub);
+            }
+            else
+            {
+                sub.PlanId = req.PlanId;
+                sub.Status = req.Status;
+                sub.StartDate = start;
+                sub.RenewalDate = renewal;
+                sub.AutoRenew = req.AutoRenew;
+            }
+
+            await _db.SaveChangesAsync();
+
+            // Create pending or completed transaction entry for billing record
+            var txn = new TenantBillingTransaction
+            {
+                TenantSubscriptionId = sub.TenantSubscriptionId,
+                CompanyId = req.CompanyId,
+                Amount = plan.Price,
+                PaymentStatus = "Pending",
+                TransactionDate = DateTime.UtcNow,
+                ReferenceNumber = $"INV-{DateTime.UtcNow:yyyyMMdd}-{sub.TenantSubscriptionId:D4}"
+            };
+            _db.TenantBillingTransactions.Add(txn);
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                subscriptionId = sub.TenantSubscriptionId,
+                companyId = sub.CompanyId,
+                planId = sub.PlanId,
+                status = sub.Status,
+                startDate = sub.StartDate,
+                renewalDate = sub.RenewalDate
+            });
+        }
+
         // =====================================================================
         // GET /api/billing/transactions
-        // Returns ONLY SaaS subscription billing transactions (excludes carwash service jobs)
         // =====================================================================
         [HttpGet("transactions")]
         public async Task<IActionResult> GetTransactions()
         {
-            var companies = await _db.Companies
+            var rawTxs = await _db.TenantBillingTransactions
                 .AsNoTracking()
-                .OrderBy(c => c.CompanyId)
-                .ToListAsync();
-
-            var rawTxs = await _db.BillingTransactions
-                .AsNoTracking()
-                .Include(t => t.CustomerSubscription)
-                    .ThenInclude(cs => cs.Plan)
-                .Where(t => t.CustomerSubscriptionId != null)
+                .Include(t => t.Company)
+                .Include(t => t.TenantSubscription)
+                    .ThenInclude(ts => ts!.Plan)
                 .OrderByDescending(t => t.TransactionDate)
                 .ThenByDescending(t => t.TransactionId)
                 .ToListAsync();
 
             var result = rawTxs.Select(t =>
             {
-                var sub = t.CustomerSubscription;
-                var comp = ResolveCompany(companies, sub?.CustomerId ?? 1, sub?.SubscriptionId ?? 1);
-                var compName = ResolveCompanyName(comp);
-                var planName = sub?.Plan?.PlanName ?? "Subscription Plan";
-                var refCode = $"SUB-INV-{t.TransactionDate:yyyyMM}-{t.TransactionId:D4}";
+                var comp = t.Company;
+                var plan = t.TenantSubscription?.Plan;
+                var planName = plan?.PlanName ?? "Subscription Plan";
+                var refCode = !string.IsNullOrWhiteSpace(t.ReferenceNumber)
+                    ? t.ReferenceNumber
+                    : $"SUB-INV-{t.TransactionDate:yyyyMM}-{t.TransactionId:D4}";
 
                 return new
                 {
                     transactionId = t.TransactionId,
-                    subscriptionId = t.CustomerSubscriptionId,
-                    tenantCompany = compName,
-                    tenantCompanyCode = comp.CompanyCode,
+                    subscriptionId = t.TenantSubscriptionId,
+                    tenantCompany = comp?.CompanyName ?? $"Company #{t.CompanyId}",
+                    tenantCompanyCode = comp?.CompanyCode ?? $"COMP{t.CompanyId:D3}",
                     planName = planName,
                     referenceNumber = refCode,
                     amount = t.Amount,
                     amountFormatted = $"₱{t.Amount:N2}",
                     paymentStatus = t.PaymentStatus,
+                    paymentMethod = t.PaymentMethod ?? "—",
                     transactionDate = t.TransactionDate
                 };
             }).ToList();
@@ -178,37 +463,42 @@ namespace CRM.api.Controllers
             return Ok(result);
         }
 
-        // =====================================================================
-        // Helpers for multi-tenant resolution
-        // =====================================================================
-        private static Company ResolveCompany(List<Company> companies, int customerId, int subscriptionId)
+        public class MarkPaidRequest
         {
-            if (companies == null || companies.Count == 0)
-            {
-                return new Company { CompanyId = 1, CompanyCode = "COMP001", CompanyName = "AquaShine Car Wash" };
-            }
-
-            var match = companies.FirstOrDefault(c => c.CompanyId == customerId);
-            if (match != null) return match;
-
-            int index = Math.Abs((subscriptionId - 1) % companies.Count);
-            return companies[index];
+            public int TransactionId { get; set; }
+            public string? PaymentMethod { get; set; }
+            public string? ReferenceNumber { get; set; }
         }
 
-        private static string ResolveCompanyName(Company comp)
+        // =====================================================================
+        // POST /api/billing/mark-paid
+        // =====================================================================
+        [HttpPost("mark-paid")]
+        public async Task<IActionResult> MarkPaid([FromBody] MarkPaidRequest req)
         {
-            if (comp.CompanyCode == "COMP001" || comp.CompanyName.Equals("My First Company", StringComparison.OrdinalIgnoreCase))
+            var txn = await _db.TenantBillingTransactions.FirstOrDefaultAsync(t => t.TransactionId == req.TransactionId);
+            if (txn == null)
             {
-                return "AquaShine Car Wash";
+                return NotFound($"Transaction {req.TransactionId} not found.");
             }
-            return string.IsNullOrWhiteSpace(comp.CompanyName) ? $"Company {comp.CompanyCode}" : comp.CompanyName;
-        }
 
-        private static CRM.domain.Entities.User ResolveAdmin(List<CRM.domain.Entities.User> adminUsers, int companyId, CRM.domain.Entities.User defaultAdmin)
-        {
-            if (adminUsers == null || adminUsers.Count == 0) return defaultAdmin;
-            int index = Math.Abs((companyId - 1) % adminUsers.Count);
-            return adminUsers[index];
+            txn.PaymentStatus = "Paid";
+            txn.PaymentMethod = string.IsNullOrWhiteSpace(req.PaymentMethod) ? "Cash / Manual" : req.PaymentMethod.Trim();
+            if (!string.IsNullOrWhiteSpace(req.ReferenceNumber))
+            {
+                txn.ReferenceNumber = req.ReferenceNumber.Trim();
+            }
+            txn.TransactionDate = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                transactionId = txn.TransactionId,
+                paymentStatus = txn.PaymentStatus,
+                paymentMethod = txn.PaymentMethod,
+                referenceNumber = txn.ReferenceNumber
+            });
         }
     }
 }

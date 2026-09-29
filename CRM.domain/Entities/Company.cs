@@ -1,4 +1,4 @@
-﻿namespace CRM.Domain.Entities;
+namespace CRM.Domain.Entities;
 
 public class Company
 {
@@ -8,5 +8,16 @@ public class Company
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    public string? ContactPhone { get; set; }
+    public string? ContactEmail { get; set; }
+    public string? AddressLine { get; set; }
+    public string? City { get; set; }
+    public string? Province { get; set; }
+    public string? State { get; set; }
+    public string? PostalCode { get; set; }
+    public string? Country { get; set; }
+
     public ICollection<Device> Devices { get; set; } = new List<Device>();
+    public ICollection<CompanyDatabase> Databases { get; set; } = new List<CompanyDatabase>();
+    public ICollection<TenantSubscription> Subscriptions { get; set; } = new List<TenantSubscription>();
 }

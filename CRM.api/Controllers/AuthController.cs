@@ -1,4 +1,4 @@
-﻿using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -55,6 +55,8 @@ public class AuthController : ControllerBase
         return Ok(new
         {
             userId = user.UserId,
+            firstName = user.FirstName,
+            lastName = user.LastName,
             fullName = user.FullName,
             email = user.Email,
             roleId = user.RoleId

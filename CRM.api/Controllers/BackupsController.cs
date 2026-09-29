@@ -122,7 +122,7 @@ namespace CRM.api.Controllers
             }
 
             string timeStamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-            string fileName = $"MSME_MasterERP_{backupType.ToLower()}_{timeStamp}.bak";
+            string fileName = $"MSME_MasterCrm_{backupType.ToLower()}_{timeStamp}.bak";
             string filePath = Path.Combine(backupFolder, fileName);
 
             // 1. Insert into BACKUP_LOGS with status 'In Progress'
@@ -152,7 +152,7 @@ namespace CRM.api.Controllers
                     await conn.OpenAsync();
                     using var cmd = conn.CreateCommand();
                     cmd.CommandTimeout = 180;
-                    cmd.CommandText = "BACKUP DATABASE [MSME_MasterERP] TO DISK = @filePath WITH INIT, STATS = 10;";
+                    cmd.CommandText = "BACKUP DATABASE [MSME_MasterCrm] TO DISK = @filePath WITH INIT, STATS = 10;";
                     cmd.Parameters.Add(new SqlParameter("@filePath", SqlDbType.NVarChar, -1) { Value = filePath });
                     await cmd.ExecuteNonQueryAsync();
                 }
@@ -222,11 +222,11 @@ namespace CRM.api.Controllers
                     using var cmd = conn.CreateCommand();
                     cmd.CommandTimeout = 300;
                     cmd.CommandText = @"
-                        ALTER DATABASE [MSME_MasterERP] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-                        RESTORE DATABASE [MSME_MasterERP] FROM DISK = @filePath WITH REPLACE;
-                        ALTER DATABASE [MSME_MasterERP] SET MULTI_USER;
+                        ALTER DATABASE [MSME_MasterCrm] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+                        RESTORE DATABASE [MSME_MasterCrm] FROM DISK = @filePath WITH REPLACE;
+                        ALTER DATABASE [MSME_MasterCrm] SET MULTI_USER;
                     ";
-                    cmd.Parameters.Add(new SqlParameter("@filePath", SqlDbType.NVarChar, -1) { Value = log.FileLocation });
+                    cmd.Parameters.Add(new SqlParameter("@filePath", SqlDbType.NChar, -1) { Value = log.FileLocation });
                     await cmd.ExecuteNonQueryAsync();
                 }
 
@@ -267,7 +267,7 @@ namespace CRM.api.Controllers
                     using var conn = new SqlConnection(masterConnStr);
                     await conn.OpenAsync();
                     using var cmd = conn.CreateCommand();
-                    cmd.CommandText = "ALTER DATABASE [MSME_MasterERP] SET MULTI_USER;";
+                    cmd.CommandText = "ALTER DATABASE [MSME_MasterCrm] SET MULTI_USER;";
                     await cmd.ExecuteNonQueryAsync();
                 }
                 catch { }

@@ -1,0 +1,742 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using CarwashServices.Auth;
+using CarwashServices.Dialogs;
+using CarwashServices.Dtos;
+using CarwashServices.Shell;
+
+namespace CarwashServices.Roles.SuperAdmin
+{
+    /// <summary>
+    /// Super Admin Module: Manage Businesses (Tenants).
+    /// Lists tenant companies with visible ID, Code, Name, Contact, Location, Associated Admin,
+    /// Status, Created Date, and actions: View, Edit, and Activate/Deactivate.
+    /// </summary>
+    public class ManageBusinessesView : UserControl
+    {
+        // Palette
+        private static readonly Color Navy = Color.FromArgb(0x0A, 0x16, 0x33);
+        private static readonly Color Muted = Color.FromArgb(0x6B, 0x7A, 0x9A);
+        private static readonly Color PageBg = Color.FromArgb(0xF0, 0xF4, 0xFA);
+        private static readonly Color CardBorder = Color.FromArgb(0xE1, 0xE7, 0xF0);
+        private static readonly Color HeaderBg = Color.FromArgb(0xF7, 0xFA, 0xFD);
+        private static readonly Color Blue = Color.FromArgb(0x1E, 0x88, 0xE5);
+        private static readonly Color BlueSoft = Color.FromArgb(0xE3, 0xF1, 0xFD);
+        private static readonly Color Green = Color.FromArgb(0x1E, 0x7A, 0x34);
+        private static readonly Color GreenSoft = Color.FromArgb(0xE4, 0xF5, 0xE8);
+        private static readonly Color Red = Color.FromArgb(0xC6, 0x28, 0x28);
+        private static readonly Color RedSoft = Color.FromArgb(0xFD, 0xE7, 0xE6);
+        private static readonly Color BorderSoft = Color.FromArgb(0xE1, 0xE7, 0xF0);
+
+        // Fonts
+        private static readonly Font FontTitle = new("Segoe UI Semibold", 13.5f);
+        private static readonly Font FontSubtitle = new("Segoe UI", 9f);
+        private static readonly Font FontKpiNum = new("Segoe UI Semibold", 20f);
+        private static readonly Font FontKpiLbl = new("Segoe UI", 8.5f);
+        private static readonly Font FontCell = new("Segoe UI", 9.5f);
+        private static readonly Font FontTag = new("Segoe UI Semibold", 8.5f);
+
+        private readonly HttpClient _http = new()
+        {
+            BaseAddress = new Uri("http://localhost:5180/"),
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+
+        private List<CompanyListItemDto> _companies = new();
+        private Panel _contentPanel = null!;
+        private DataGridView _grid = null!;
+        private TextBox _searchTxt = null!;
+        private ComboBox _statusFilterCombo = null!;
+        private Button _registerBtn = null!;
+
+        // KPI labels
+        private Label _kpiTotalNum = null!;
+        private Label _kpiActiveNum = null!;
+        private Label _kpiInactiveNum = null!;
+
+        public ManageBusinessesView()
+        {
+            Dock = DockStyle.Fill;
+            BackColor = PageBg;
+            Font = new Font("Segoe UI", 9.5f);
+            DoubleBuffered = true;
+
+            if (SessionUser.RoleId != 4 && SessionUser.Role != UserRole.SuperAdmin)
+            {
+                Controls.Add(new AccessDeniedView("Manage Businesses", "Super Admin (Role 4)"));
+                return;
+            }
+
+            InitializeUI();
+            Sidebar.EnableDoubleBuffering(this);
+            Load += async (s, e) => await LoadCompaniesAsync();
+        }
+
+        private static GraphicsPath RoundedRect(Rectangle r, int radius)
+        {
+            int d = radius * 2;
+            var path = new GraphicsPath();
+            path.AddArc(r.X, r.Y, d, d, 180, 90);
+            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        private void InitializeUI()
+        {
+            SuspendLayout();
+
+            _contentPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = PageBg,
+                AutoScroll = true,
+                Padding = new Padding(36, 24, 36, 24)
+            };
+            Controls.Add(_contentPanel);
+
+            // ---- Top Header Row ----
+            var titleLbl = new Label
+            {
+                Text = "Tenant Businesses",
+                Font = FontTitle,
+                ForeColor = Navy,
+                Location = new Point(36, 20),
+                AutoSize = true
+            };
+            var subtitleLbl = new Label
+            {
+                Text = "Onboard new businesses, configure tenant details, and manage platform access.",
+                Font = FontSubtitle,
+                ForeColor = Muted,
+                Location = new Point(36, 48),
+                AutoSize = true
+            };
+            _contentPanel.Controls.Add(titleLbl);
+            _contentPanel.Controls.Add(subtitleLbl);
+
+            _registerBtn = new Button
+            {
+                Text = "+ Register New Business",
+                Font = new Font("Segoe UI Semibold", 9.5f),
+                ForeColor = Color.White,
+                BackColor = Blue,
+                Size = new Size(195, 38),
+                Location = new Point(_contentPanel.Width - 195 - 36, 26),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            _registerBtn.FlatAppearance.BorderSize = 0;
+            using (var p = RoundedRect(new Rectangle(0, 0, _registerBtn.Width, _registerBtn.Height), 6))
+                _registerBtn.Region = new Region(p);
+
+            _registerBtn.Click += (s, e) => OpenRegisterDialog();
+            _contentPanel.Controls.Add(_registerBtn);
+
+            // ---- KPI Cards Row ----
+            int kpiY = 82;
+            int cardW = 210;
+            int cardH = 80;
+
+            var totalCard = CreateKpiCard("TOTAL BUSINESSES", out _kpiTotalNum, 36, kpiY, cardW, cardH, Navy);
+            var activeCard = CreateKpiCard("ACTIVE TENANTS", out _kpiActiveNum, 36 + cardW + 16, kpiY, cardW, cardH, Green);
+            var inactiveCard = CreateKpiCard("INACTIVE TENANTS", out _kpiInactiveNum, 36 + (cardW + 16) * 2, kpiY, cardW, cardH, Red);
+
+            _contentPanel.Controls.Add(totalCard);
+            _contentPanel.Controls.Add(activeCard);
+            _contentPanel.Controls.Add(inactiveCard);
+
+            // ---- Filter & Search Bar ----
+            int barY = 176;
+            var filterBar = new Panel
+            {
+                Location = new Point(36, barY),
+                Size = new Size(_contentPanel.Width - 72, 44),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                BackColor = Color.White
+            };
+            filterBar.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder, 1);
+                using var p = RoundedRect(new Rectangle(0, 0, filterBar.Width - 1, filterBar.Height - 1), 8);
+                e.Graphics.DrawPath(pen, p);
+            };
+
+            var searchIcon = new Label
+            {
+                Text = "🔍",
+                Font = new Font("Segoe UI", 9f),
+                Location = new Point(12, 12),
+                AutoSize = true,
+                ForeColor = Muted
+            };
+            filterBar.Controls.Add(searchIcon);
+
+            _searchTxt = new TextBox
+            {
+                Location = new Point(36, 11),
+                Size = new Size(260, 26),
+                Font = new Font("Segoe UI", 9.5f),
+                BorderStyle = BorderStyle.None,
+                ForeColor = Navy
+            };
+            _searchTxt.TextChanged += (s, e) => ApplyFilter();
+            filterBar.Controls.Add(_searchTxt);
+
+            var filterLbl = new Label
+            {
+                Text = "Status:",
+                Font = new Font("Segoe UI Semibold", 9f),
+                ForeColor = Muted,
+                Location = new Point(320, 12),
+                AutoSize = true
+            };
+            filterBar.Controls.Add(filterLbl);
+
+            _statusFilterCombo = new ComboBox
+            {
+                Location = new Point(370, 8),
+                Size = new Size(130, 26),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 9f)
+            };
+            _statusFilterCombo.Items.AddRange(new object[] { "All Statuses", "Active", "Inactive" });
+            _statusFilterCombo.SelectedIndex = 0;
+            _statusFilterCombo.SelectedIndexChanged += (s, e) => ApplyFilter();
+            filterBar.Controls.Add(_statusFilterCombo);
+
+            var refreshBtn = new Button
+            {
+                Text = "Refresh",
+                Font = new Font("Segoe UI Semibold", 8.5f),
+                ForeColor = Navy,
+                BackColor = Color.FromArgb(0xF1, 0xF5, 0xF9),
+                Size = new Size(76, 28),
+                Location = new Point(filterBar.Width - 88, 8),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            refreshBtn.FlatAppearance.BorderColor = CardBorder;
+            refreshBtn.Click += async (s, e) => await LoadCompaniesAsync();
+            filterBar.Controls.Add(refreshBtn);
+
+            _contentPanel.Controls.Add(filterBar);
+
+            // ---- DataGridView ----
+            int gridY = 232;
+            _grid = new DataGridView
+            {
+                Location = new Point(36, gridY),
+                Size = new Size(_contentPanel.Width - 72, _contentPanel.Height - gridY - 24),
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+                BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                GridColor = CardBorder,
+                RowHeadersVisible = false,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = false,
+                ReadOnly = true,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+                RowTemplate = { Height = 52 },
+                EnableHeadersVisualStyles = false
+            };
+
+            _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = HeaderBg,
+                ForeColor = Muted,
+                Font = new Font("Segoe UI Semibold", 8.5f),
+                Alignment = DataGridViewContentAlignment.MiddleLeft,
+                Padding = new Padding(12, 0, 0, 0)
+            };
+            _grid.ColumnHeadersHeight = 40;
+            _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+
+            _grid.DefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = Color.White,
+                ForeColor = Navy,
+                Font = FontCell,
+                SelectionBackColor = BlueSoft,
+                SelectionForeColor = Navy,
+                Padding = new Padding(12, 0, 0, 0)
+            };
+
+            _grid.ScrollBars = ScrollBars.Both;
+
+            // Columns (ID, Code, Name, Contact, Location, Associated Admin, Status, Registered, Actions)
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "CompanyId", HeaderText = "ID", Width = 65 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "CompanyCode", HeaderText = "CODE", Width = 90 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "CompanyName",
+                HeaderText = "BUSINESS NAME",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = 150
+            });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Contact", HeaderText = "CONTACT", Width = 145 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Location", HeaderText = "LOCATION", Width = 125 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "AssociatedAdmin", HeaderText = "ASSOCIATED ADMIN", Width = 175 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "STATUS", Width = 85 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "CreatedAt", HeaderText = "REGISTERED", Width = 95 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Actions",
+                HeaderText = "ACTIONS",
+                Width = 195
+            });
+
+            _grid.CellPainting += Grid_CellPainting;
+            _grid.CellMouseClick += Grid_CellMouseClick;
+            _grid.CellDoubleClick += (s, e) =>
+            {
+                if (e.RowIndex >= 0 && e.RowIndex < _companies.Count)
+                {
+                    var idText = _grid.Rows[e.RowIndex].Cells["CompanyId"].Value?.ToString() ?? "";
+                    if (int.TryParse(idText, out var id))
+                    {
+                        var comp = _companies.FirstOrDefault(c => c.CompanyId == id);
+                        if (comp != null) OpenEditDialog(comp);
+                    }
+                }
+            };
+
+            _contentPanel.Controls.Add(_grid);
+
+            ResumeLayout(true);
+        }
+
+        private static Panel CreateKpiCard(string title, out Label numLbl, int x, int y, int w, int h, Color numColor)
+        {
+            var p = new Panel
+            {
+                Location = new Point(x, y),
+                Size = new Size(w, h),
+                BackColor = Color.White
+            };
+            p.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder, 1);
+                using var path = RoundedRect(new Rectangle(0, 0, p.Width - 1, p.Height - 1), 8);
+                e.Graphics.DrawPath(pen, path);
+            };
+
+            var titleL = new Label
+            {
+                Text = title,
+                Font = FontKpiLbl,
+                ForeColor = Muted,
+                Location = new Point(16, 12),
+                AutoSize = true
+            };
+            numLbl = new Label
+            {
+                Text = "—",
+                Font = FontKpiNum,
+                ForeColor = numColor,
+                Location = new Point(14, 30),
+                AutoSize = true
+            };
+
+            p.Controls.Add(titleL);
+            p.Controls.Add(numLbl);
+            return p;
+        }
+
+        private async Task LoadCompaniesAsync()
+        {
+            try
+            {
+                var list = await _http.GetFromJsonAsync<List<CompanyListItemDto>>("api/companies");
+                _companies = list ?? new();
+                UpdateKpis();
+                ApplyFilter();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to load companies: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void UpdateKpis()
+        {
+            int total = _companies.Count;
+            int active = _companies.Count(c => c.IsActive);
+            int inactive = total - active;
+
+            _kpiTotalNum.Text = total.ToString();
+            _kpiActiveNum.Text = active.ToString();
+            _kpiInactiveNum.Text = inactive.ToString();
+        }
+
+        private void ApplyFilter()
+        {
+            _grid.Rows.Clear();
+
+            var search = _searchTxt.Text.Trim().ToLowerInvariant();
+            var filter = _statusFilterCombo.SelectedItem?.ToString() ?? "All Statuses";
+
+            var rows = _companies.AsEnumerable();
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                rows = rows.Where(c =>
+                    c.CompanyName.ToLowerInvariant().Contains(search) ||
+                    c.CompanyCode.ToLowerInvariant().Contains(search) ||
+                    (c.ContactEmail != null && c.ContactEmail.ToLowerInvariant().Contains(search)) ||
+                    (c.City != null && c.City.ToLowerInvariant().Contains(search)) ||
+                    (c.AdminUser != null && c.AdminUser.ToLowerInvariant().Contains(search)));
+            }
+
+            if (filter == "Active")
+                rows = rows.Where(c => c.IsActive);
+            else if (filter == "Inactive")
+                rows = rows.Where(c => !c.IsActive);
+
+            foreach (var c in rows)
+            {
+                string contact = !string.IsNullOrWhiteSpace(c.ContactEmail)
+                    ? c.ContactEmail
+                    : (!string.IsNullOrWhiteSpace(c.ContactPhone) ? c.ContactPhone : "—");
+
+                string loc = !string.IsNullOrWhiteSpace(c.City)
+                    ? (!string.IsNullOrWhiteSpace(c.Province) ? $"{c.City}, {c.Province}" : c.City)
+                    : (!string.IsNullOrWhiteSpace(c.Country) ? c.Country : "—");
+
+                string adminDisplay = string.IsNullOrWhiteSpace(c.AdminUser) || c.AdminUser.Equals("Unassigned", StringComparison.OrdinalIgnoreCase)
+                    ? "Unassigned"
+                    : (string.IsNullOrWhiteSpace(c.AdminEmail) ? c.AdminUser : $"{c.AdminUser}\n{c.AdminEmail}");
+
+                string status = c.IsActive ? "Active" : "Inactive";
+
+                _grid.Rows.Add(
+                    c.CompanyId,
+                    c.CompanyCode,
+                    c.CompanyName,
+                    contact,
+                    loc,
+                    adminDisplay,
+                    status,
+                    c.CreatedAt.ToString("yyyy-MM-dd"),
+                    "Actions");
+            }
+
+            _grid.ClearSelection();
+        }
+
+        private struct BusinessActionRects
+        {
+            public Rectangle ViewRect;
+            public Rectangle EditRect;
+            public Rectangle ToggleRect;
+        }
+
+        private static BusinessActionRects GetActionRelativeRects(int cellHeight, bool isActive)
+        {
+            int h = 26;
+            int y = (cellHeight - h) / 2;
+            int x = 8;
+            int gap = 6;
+
+            int viewW = 50;
+            int editW = 50;
+            int toggleW = isActive ? 82 : 72;
+
+            return new BusinessActionRects
+            {
+                ViewRect = new Rectangle(x, y, viewW, h),
+                EditRect = new Rectangle(x + viewW + gap, y, editW, h),
+                ToggleRect = new Rectangle(x + viewW + gap + editW + gap, y, toggleW, h)
+            };
+        }
+
+        private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+
+            string col = _grid.Columns[e.ColumnIndex].Name;
+
+            // Associated Admin Cell
+            if (col == "AssociatedAdmin")
+            {
+                PaintAssociatedAdminCell(e);
+            }
+            // Status Pill
+            else if (col == "Status")
+            {
+                e.Handled = true;
+                e.PaintBackground(e.ClipBounds, true);
+
+                var status = Convert.ToString(e.Value) ?? "Active";
+                bool isActive = status == "Active";
+
+                var pillBg = isActive ? GreenSoft : RedSoft;
+                var pillFg = isActive ? Green : Red;
+
+                int pillW = 76;
+                int pillH = 24;
+                var r = new Rectangle(
+                    e.CellBounds.X + 10,
+                    e.CellBounds.Y + (e.CellBounds.Height - pillH) / 2,
+                    pillW,
+                    pillH);
+
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using var bgBrush = new SolidBrush(pillBg);
+                using var path = RoundedRect(r, 12);
+                e.Graphics.FillPath(bgBrush, path);
+
+                var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                            TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+                TextRenderer.DrawText(e.Graphics, status, FontTag, r, pillFg, flags);
+            }
+            // Actions: View, Edit, Deactivate/Activate
+            else if (col == "Actions")
+            {
+                e.Handled = true;
+                e.PaintBackground(e.ClipBounds, true);
+
+                var idText = _grid.Rows[e.RowIndex].Cells["CompanyId"].Value?.ToString() ?? "";
+                if (!int.TryParse(idText, out var id)) return;
+                var comp = _companies.FirstOrDefault(c => c.CompanyId == id);
+                if (comp == null) return;
+
+                var rel = GetActionRelativeRects(e.CellBounds.Height, comp.IsActive);
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+                // 1. "View" button (Slate / Navy)
+                var viewRect = new Rectangle(e.CellBounds.X + rel.ViewRect.X, e.CellBounds.Y + rel.ViewRect.Y, rel.ViewRect.Width, rel.ViewRect.Height);
+                using (var p = RoundedRect(viewRect, 5))
+                using (var brush = new SolidBrush(Color.FromArgb(0xEA, 0xEE, 0xF5)))
+                using (var pen = new Pen(BorderSoft, 1f))
+                {
+                    e.Graphics.FillPath(brush, p);
+                    e.Graphics.DrawPath(pen, p);
+                }
+                var centerFlags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix;
+                TextRenderer.DrawText(e.Graphics, "View", FontTag, viewRect, Navy, centerFlags);
+
+                // 2. "Edit" button (Blue)
+                var editRect = new Rectangle(e.CellBounds.X + rel.EditRect.X, e.CellBounds.Y + rel.EditRect.Y, rel.EditRect.Width, rel.EditRect.Height);
+                using (var p = RoundedRect(editRect, 5))
+                using (var brush = new SolidBrush(BlueSoft))
+                using (var pen = new Pen(Color.FromArgb(0xBA, 0xDB, 0xF9), 1f))
+                {
+                    e.Graphics.FillPath(brush, p);
+                    e.Graphics.DrawPath(pen, p);
+                }
+                TextRenderer.DrawText(e.Graphics, "Edit", FontTag, editRect, Blue, centerFlags);
+
+                // 3. "Deactivate" / "Activate" button
+                string actText = comp.IsActive ? "Deactivate" : "Activate";
+                Color actBg = comp.IsActive ? RedSoft : GreenSoft;
+                Color actFg = comp.IsActive ? Red : Green;
+                Color actBorder = comp.IsActive ? Color.FromArgb(0xFA, 0xCD, 0xCC) : Color.FromArgb(0xC4, 0xEB, 0xCD);
+
+                var actRect = new Rectangle(e.CellBounds.X + rel.ToggleRect.X, e.CellBounds.Y + rel.ToggleRect.Y, rel.ToggleRect.Width, rel.ToggleRect.Height);
+                using (var p = RoundedRect(actRect, 5))
+                using (var brush = new SolidBrush(actBg))
+                using (var pen = new Pen(actBorder, 1f))
+                {
+                    e.Graphics.FillPath(brush, p);
+                    e.Graphics.DrawPath(pen, p);
+                }
+                TextRenderer.DrawText(e.Graphics, actText, FontTag, actRect, actFg, centerFlags);
+            }
+        }
+
+        private void PaintAssociatedAdminCell(DataGridViewCellPaintingEventArgs e)
+        {
+            e.Handled = true;
+            e.PaintBackground(e.ClipBounds, true);
+
+            var raw = Convert.ToString(e.Value) ?? "";
+            var parts = raw.Split('\n');
+            var name = parts[0];
+            var email = parts.Length > 1 ? parts[1] : "";
+
+            var b = e.CellBounds;
+            if (b.Width <= 4 || b.Height <= 4) return;
+
+            int avatarSize = Math.Min(30, Math.Max(16, b.Height - 14));
+            int ax = b.X + 10;
+            int ay = b.Y + (b.Height - avatarSize) / 2;
+
+            bool isUnassigned = string.IsNullOrWhiteSpace(name) || name == "—" || name.Equals("Unassigned", StringComparison.OrdinalIgnoreCase);
+            Color avatarColor = isUnassigned ? Color.FromArgb(0x94, 0xA3, 0xB8) : Navy;
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var bg = new SolidBrush(avatarColor))
+                e.Graphics.FillEllipse(bg, ax, ay, avatarSize, avatarSize);
+
+            string initials = isUnassigned ? "—" : Initials(name);
+            var avatarRect = new Rectangle(ax, ay, avatarSize, avatarSize);
+
+            using var fontAvatar = new Font("Segoe UI Semibold", 8f);
+            TextRenderer.DrawText(
+                e.Graphics,
+                initials,
+                fontAvatar,
+                avatarRect,
+                Color.White,
+                TextFormatFlags.HorizontalCenter |
+                TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPrefix |
+                TextFormatFlags.NoPadding |
+                TextFormatFlags.SingleLine);
+
+            int tx = ax + avatarSize + 10;
+            int tw = Math.Max(10, b.Right - tx - 8);
+
+            var flags = TextFormatFlags.Left | TextFormatFlags.EndEllipsis |
+                        TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
+                        TextFormatFlags.SingleLine;
+
+            using var fontName = new Font("Segoe UI Semibold", 9f);
+            using var fontSub = new Font("Segoe UI", 8f);
+
+            int h1 = fontName.Height;
+            int h2 = fontSub.Height;
+            int gap = 1;
+            int top = b.Y + (b.Height - (h1 + (string.IsNullOrEmpty(email) ? 0 : h2 + gap))) / 2;
+
+            TextRenderer.DrawText(e.Graphics, isUnassigned ? "Unassigned" : name, fontName,
+                new Rectangle(tx, top, tw, h1), isUnassigned ? Muted : Navy, flags);
+
+            if (!string.IsNullOrEmpty(email))
+            {
+                TextRenderer.DrawText(e.Graphics, email, fontSub,
+                    new Rectangle(tx, top + h1 + gap, tw, h2), Muted, flags);
+            }
+        }
+
+        private async void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (_grid.Columns[e.ColumnIndex].Name != "Actions") return;
+
+            var idText = _grid.Rows[e.RowIndex].Cells["CompanyId"].Value?.ToString() ?? "";
+            if (!int.TryParse(idText, out var id)) return;
+
+            var company = _companies.FirstOrDefault(c => c.CompanyId == id);
+            if (company == null) return;
+
+            var rel = GetActionRelativeRects(_grid.Rows[e.RowIndex].Height, company.IsActive);
+
+            if (rel.ViewRect.Contains(e.Location))
+            {
+                OpenViewDialog(company);
+            }
+            else if (rel.EditRect.Contains(e.Location))
+            {
+                OpenEditDialog(company);
+            }
+            else if (rel.ToggleRect.Contains(e.Location))
+            {
+                await ToggleStatusAsync(company);
+            }
+        }
+
+        private void OpenRegisterDialog()
+        {
+            using var dlg = new RegisterBusinessDialog();
+            if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+            {
+                MessageBox.Show(
+                    $"Business '{dlg.CreatedCompanyName}' ({dlg.CreatedCompanyCode}) and its initial administrator have been registered successfully!",
+                    "Registration Complete",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                _ = LoadCompaniesAsync();
+            }
+        }
+
+        private void OpenViewDialog(CompanyListItemDto company)
+        {
+            using var dlg = new BusinessViewDialog(company);
+            if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+            {
+                _ = LoadCompaniesAsync();
+            }
+        }
+
+        private void OpenEditDialog(CompanyListItemDto company)
+        {
+            using var dlg = new BusinessEditDialog(company);
+            if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+            {
+                _ = LoadCompaniesAsync();
+            }
+        }
+
+        private async Task ToggleStatusAsync(CompanyListItemDto company)
+        {
+            if (company.IsActive)
+            {
+                var confirm = MessageBox.Show(
+                    $"Are you sure you want to deactivate '{company.CompanyName}' ({company.CompanyCode})?\n\n" +
+                    "Administrators and staff belonging to this company will not be able to perform business operations while inactive.\n" +
+                    "All existing business records, subscriptions, and transactions will remain safe and preserved.",
+                    "Deactivate Business",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+
+                if (confirm != DialogResult.Yes) return;
+            }
+            else
+            {
+                var confirm = MessageBox.Show(
+                    $"Reactivate '{company.CompanyName}' ({company.CompanyCode})?\n\n" +
+                    "This will restore full access for administrators and users linked to this company.",
+                    "Reactivate Business",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (confirm != DialogResult.Yes) return;
+            }
+
+            try
+            {
+                var payload = new { isActive = !company.IsActive };
+                using var resp = await _http.PutAsJsonAsync($"api/companies/{company.CompanyId}/status", payload);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var err = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Failed to update status: {err}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                await LoadCompaniesAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Network error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private static string Initials(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name) || name == "—") return "?";
+            var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return "?";
+            if (parts.Length == 1)
+                return parts[0].Length >= 2 ? parts[0].Substring(0, 2).ToUpper() : parts[0].ToUpper();
+            return (parts[0][0].ToString() + parts[parts.Length - 1][0].ToString()).ToUpper();
+        }
+    }
+}

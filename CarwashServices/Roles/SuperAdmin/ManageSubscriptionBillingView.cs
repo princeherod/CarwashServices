@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using CarwashServices.Auth;
+using CarwashServices.Dialogs;
 using CarwashServices.Dtos;
 using CarwashServices.Shell;
 
@@ -19,8 +20,9 @@ namespace CarwashServices.Roles.SuperAdmin
     /// Features:
     /// - 3 summary tiles (Total Paid green, Outstanding red, Active Subscriptions blue) via GET /api/billing/summary
     /// - Segmented Tab Control: SUBSCRIPTION_PLANS / CUSTOMER_SUBSCRIPTIONS / BILLING_TRANSACTIONS
-    /// - Each tab backed by its own GET endpoint and rendered in the existing grid style
-    /// - Custom pills for billing_cycle and status/payment_status columns
+    /// - SaaS multi-tenant plan management: Create, Edit, Activate/Deactivate, Archive/Restore
+    /// - Tenant plan assignment and payment settlement dialog integrations
+    /// - Custom pills for billing cycle and status/payment status columns
     /// </summary>
     public class ManageSubscriptionBillingView : UserControl
     {
@@ -52,6 +54,7 @@ namespace CarwashServices.Roles.SuperAdmin
         private static readonly Font FontSub = new("Segoe UI", 8.5f);
         private static readonly Font FontPill = new("Segoe UI Semibold", 8.5f);
         private static readonly Font FontCell = new("Segoe UI", 9.5f);
+        private static readonly Font FontAction = new("Segoe UI Semibold", 8.5f);
 
         // ================================================================
         //  HTTP
@@ -77,6 +80,7 @@ namespace CarwashServices.Roles.SuperAdmin
         private Button _tabPlansBtn = null!;
         private Button _tabSubsBtn = null!;
         private Button _tabTxsBtn = null!;
+        private Button _actionBtn = null!;
 
         private DataGridView _grid = null!;
 
@@ -183,9 +187,9 @@ namespace CarwashServices.Roles.SuperAdmin
             };
             _contentPanel.Controls.Add(_tabBarPanel);
 
-            _tabPlansBtn = CreateTabButton(SuperAdminLabels.TabSubscriptionPlans, 4, 190);
-            _tabSubsBtn = CreateTabButton(SuperAdminLabels.TabCustomerSubscriptions, 198, 210);
-            _tabTxsBtn = CreateTabButton(SuperAdminLabels.TabBillingTransactions, 412, 200);
+            _tabPlansBtn = CreateTabButton(SuperAdminLabels.TabSubscriptionPlans, 4, 180);
+            _tabSubsBtn = CreateTabButton(SuperAdminLabels.TabCustomerSubscriptions, 188, 200);
+            _tabTxsBtn = CreateTabButton(SuperAdminLabels.TabBillingTransactions, 392, 190);
 
             _tabPlansBtn.Click += async (s, e) => await SwitchTabAsync(TabMode.Plans);
             _tabSubsBtn.Click += async (s, e) => await SwitchTabAsync(TabMode.CustomerSubscriptions);
@@ -194,6 +198,30 @@ namespace CarwashServices.Roles.SuperAdmin
             _tabBarPanel.Controls.Add(_tabPlansBtn);
             _tabBarPanel.Controls.Add(_tabSubsBtn);
             _tabBarPanel.Controls.Add(_tabTxsBtn);
+
+            // Action button anchored to top-right of tab bar
+            _actionBtn = new Button
+            {
+                Text = "+ Create Subscription Plan",
+                Font = new Font("Segoe UI Semibold", 9f),
+                Size = new Size(220, 34),
+                Location = new Point(_tabBarPanel.Width - 226, 5),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                BackColor = Navy,
+                ForeColor = Color.White
+            };
+            _actionBtn.FlatAppearance.BorderSize = 0;
+            void RoundActionBtn()
+            {
+                using var path = RoundedRect(new Rectangle(0, 0, _actionBtn.Width, _actionBtn.Height), 6);
+                _actionBtn.Region = new Region(path);
+            }
+            _actionBtn.SizeChanged += (s, e) => RoundActionBtn();
+            RoundActionBtn();
+            _actionBtn.Click += async (s, e) => await HandleTopActionAsync();
+            _tabBarPanel.Controls.Add(_actionBtn);
 
             // ---- DataGridView Grid ----
             _grid = new DataGridView
@@ -240,6 +268,8 @@ namespace CarwashServices.Roles.SuperAdmin
             };
 
             _grid.CellPainting += Grid_CellPainting;
+            _grid.CellMouseClick += Grid_CellMouseClick;
+            _grid.CellDoubleClick += Grid_CellDoubleClick;
             _contentPanel.Controls.Add(_grid);
 
             _contentPanel.Resize += (s, e) => Relayout();
@@ -341,6 +371,10 @@ namespace CarwashServices.Roles.SuperAdmin
             _tileActiveSubs.SetBounds(padX + (tileW + gap) * 2, 114, tileW, 96);
 
             _tabBarPanel.SetBounds(padX, 224, totalW, 44);
+            if (_actionBtn != null)
+            {
+                _actionBtn.Location = new Point(_tabBarPanel.Width - _actionBtn.Width - 6, 5);
+            }
 
             int gridTop = 280;
             int gridH = Math.Max(200, _contentPanel.ClientSize.Height - gridTop - 24);
@@ -379,6 +413,27 @@ namespace CarwashServices.Roles.SuperAdmin
             SetTabBtnState(_tabPlansBtn, tab == TabMode.Plans);
             SetTabBtnState(_tabSubsBtn, tab == TabMode.CustomerSubscriptions);
             SetTabBtnState(_tabTxsBtn, tab == TabMode.Transactions);
+
+            // Update top action button
+            switch (tab)
+            {
+                case TabMode.Plans:
+                    _actionBtn.Text = "+ Create Subscription Plan";
+                    _actionBtn.Width = 220;
+                    _actionBtn.Visible = true;
+                    break;
+                case TabMode.CustomerSubscriptions:
+                    _actionBtn.Text = "+ Assign / Update Plan";
+                    _actionBtn.Width = 200;
+                    _actionBtn.Visible = true;
+                    break;
+                case TabMode.Transactions:
+                    _actionBtn.Text = "+ Record Payment";
+                    _actionBtn.Width = 180;
+                    _actionBtn.Visible = true;
+                    break;
+            }
+            _actionBtn.Location = new Point(_tabBarPanel.Width - _actionBtn.Width - 6, 5);
 
             Cursor = Cursors.WaitCursor;
             try
@@ -432,33 +487,41 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.Columns.Clear();
             _grid.Rows.Clear();
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "PlanId", HeaderText = SuperAdminLabels.ColPlanId, Width = 90 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "PlanId", HeaderText = "ID", Width = 55 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "PlanName",
-                HeaderText = SuperAdminLabels.ColPlanDetails,
-                Width = 240
+                HeaderText = "PLAN NAME & DETAILS",
+                Width = 220
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Price", HeaderText = SuperAdminLabels.ColPrice, Width = 130 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "BillingCycle", HeaderText = SuperAdminLabels.ColBillingCycle, Width = 150 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ActiveMembers", HeaderText = SuperAdminLabels.ColEnrolledTenants, Width = 160 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Price", HeaderText = "PRICE (PHP)", Width = 115 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "BillingCycle", HeaderText = "BILLING CYCLE", Width = 130 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Limits", HeaderText = "LIMITS & BRANCHES", Width = 210 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "STATUS", Width = 95 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ActiveMembers", HeaderText = "ENROLLED", Width = 100 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                Name = "Description",
-                HeaderText = SuperAdminLabels.ColDescription,
+                Name = "Actions",
+                HeaderText = "ACTIONS",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 200
+                MinimumWidth = 240
             });
 
             foreach (var p in _plans)
             {
+                var planDetails = $"{p.PlanName}\n{(string.IsNullOrWhiteSpace(p.Description) ? "Standard SaaS Tenant Plan" : p.Description)}";
+                var limits = $"{p.MaxUsers} Users • {(p.MultiBranchEnabled ? "Multi-Branch" : "Single Branch")}\nMax {p.MaxCustomers:N0} Customers";
+                var status = p.IsArchived ? "Archived" : (p.IsActive ? "Active" : "Inactive");
+
                 _grid.Rows.Add(
                     p.PlanId,
-                    p.PlanName,
+                    planDetails,
                     p.PriceFormatted,
                     p.BillingCycle,
+                    limits,
+                    status,
                     $"{p.ActiveSubscribers} active",
-                    p.Description);
+                    "");
             }
 
             _grid.ClearSelection();
@@ -474,29 +537,30 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.Columns.Clear();
             _grid.Rows.Clear();
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "SubId", HeaderText = SuperAdminLabels.ColSubscriptionId, Width = 110 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "SubId", HeaderText = "SUB ID", Width = 80 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Company",
-                HeaderText = SuperAdminLabels.ColTenantCompany,
-                Width = 200
+                HeaderText = "TENANT BUSINESS",
+                Width = 210
             });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Admin",
-                HeaderText = SuperAdminLabels.ColAdminUser,
+                HeaderText = "ADMIN CONTACT",
                 Width = 190
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Plan", HeaderText = SuperAdminLabels.ColSubscriptionPlan, Width = 145 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "BillingCycle", HeaderText = SuperAdminLabels.ColBillingCycle, Width = 115 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "StartDate", HeaderText = SuperAdminLabels.ColStartDate, Width = 100 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "EndDate", HeaderText = SuperAdminLabels.ColRenewalDate, Width = 105 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Plan", HeaderText = "CURRENT PLAN", Width = 150 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "BillingCycle", HeaderText = "CYCLE", Width = 110 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "StartDate", HeaderText = "START DATE", Width = 100 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "EndDate", HeaderText = "RENEWAL DATE", Width = 105 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "STATUS", Width = 95 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                Name = "Status",
-                HeaderText = SuperAdminLabels.ColStatus,
+                Name = "Actions",
+                HeaderText = "ACTIONS",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 90
+                MinimumWidth = 140
             });
 
             foreach (var s in _customerSubs)
@@ -513,7 +577,8 @@ namespace CarwashServices.Roles.SuperAdmin
                     s.BillingCycle,
                     s.StartDate.ToString("yyyy-MM-dd"),
                     s.EndDate.HasValue ? s.EndDate.Value.ToString("yyyy-MM-dd") : "—",
-                    s.Status);
+                    s.Status,
+                    "");
             }
 
             _grid.ClearSelection();
@@ -529,23 +594,24 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.Columns.Clear();
             _grid.Rows.Clear();
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "TxnId", HeaderText = SuperAdminLabels.ColTransactionId, Width = 135 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "TxnId", HeaderText = "TXN ID", Width = 80 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Company",
-                HeaderText = SuperAdminLabels.ColTenantCompany,
-                Width = 200
+                HeaderText = "TENANT BUSINESS",
+                Width = 210
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Plan", HeaderText = SuperAdminLabels.ColSubscriptionPlan, Width = 150 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Reference", HeaderText = SuperAdminLabels.ColReferenceNumber, Width = 160 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Amount", HeaderText = SuperAdminLabels.ColAmount, Width = 100 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Date", HeaderText = SuperAdminLabels.ColTransactionDate, Width = 145 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Plan", HeaderText = "PLAN", Width = 140 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Reference", HeaderText = "REFERENCE #", Width = 150 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Amount", HeaderText = "AMOUNT", Width = 110 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Date", HeaderText = "DATE", Width = 135 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "PaymentStatus", HeaderText = "STATUS", Width = 100 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                Name = "PaymentStatus",
-                HeaderText = SuperAdminLabels.ColPaymentStatus,
+                Name = "Actions",
+                HeaderText = "ACTIONS",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 110
+                MinimumWidth = 130
             });
 
             foreach (var t in _transactions)
@@ -559,7 +625,8 @@ namespace CarwashServices.Roles.SuperAdmin
                     t.ReferenceNumber,
                     t.AmountFormatted,
                     t.TransactionDate.ToString("yyyy-MM-dd HH:mm"),
-                    t.PaymentStatus);
+                    t.PaymentStatus,
+                    "");
             }
 
             _grid.ClearSelection();
@@ -567,7 +634,305 @@ namespace CarwashServices.Roles.SuperAdmin
         }
 
         // ================================================================
-        //  CELL PAINTING (Pills & Avatars)
+        //  TOP ACTION & ROW CLICKS
+        // ================================================================
+        private async Task HandleTopActionAsync()
+        {
+            switch (_currentTab)
+            {
+                case TabMode.Plans:
+                    OpenCreatePlanDialog();
+                    break;
+                case TabMode.CustomerSubscriptions:
+                    OpenAssignPlanDialog();
+                    break;
+                case TabMode.Transactions:
+                    OpenRecordPaymentDialog();
+                    break;
+            }
+            await Task.CompletedTask;
+        }
+
+        private void OpenCreatePlanDialog()
+        {
+            using var dlg = new CreateTenantPlanDialog();
+            if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+            {
+                _ = LoadSummaryAsync();
+                _ = LoadPlansAsync();
+            }
+        }
+
+        private void OpenAssignPlanDialog(CustomerSubscriptionItemDto? specificItem = null)
+        {
+            CustomerSubscriptionItemDto? target = specificItem;
+            if (target == null && _grid.CurrentRow != null && _grid.CurrentRow.Index >= 0)
+            {
+                var idVal = _grid.CurrentRow.Cells["SubId"]?.Value?.ToString();
+                if (int.TryParse(idVal, out var subId))
+                {
+                    target = _customerSubs.FirstOrDefault(s => s.SubscriptionId == subId);
+                }
+            }
+
+            if (target == null && _customerSubs.Count > 0)
+            {
+                target = _customerSubs[0];
+            }
+
+            if (target == null)
+            {
+                MessageBox.Show("No tenant companies found to assign a plan to.", "Information", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using var dlg = new AssignTenantPlanDialog(target);
+            if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+            {
+                _ = LoadSummaryAsync();
+                _ = LoadCustomerSubscriptionsAsync();
+            }
+        }
+
+        private void OpenRecordPaymentDialog(BillingTransactionItemDto? specificTx = null)
+        {
+            BillingTransactionItemDto? targetTx = specificTx;
+            if (targetTx == null && _grid.CurrentRow != null && _grid.CurrentRow.Index >= 0)
+            {
+                var txVal = _grid.CurrentRow.Cells["TxnId"]?.Value?.ToString();
+                if (int.TryParse(txVal, out var txId))
+                {
+                    targetTx = _transactions.FirstOrDefault(t => t.TransactionId == txId);
+                }
+            }
+
+            if (targetTx == null && _transactions.Count > 0)
+            {
+                targetTx = _transactions.FirstOrDefault(t => !t.PaymentStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+                           ?? _transactions[0];
+            }
+
+            if (targetTx == null)
+            {
+                MessageBox.Show("No billing transactions found.", "Information", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (targetTx.PaymentStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show($"Transaction #{targetTx.TransactionId} is already settled as Paid.", "Already Settled", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using var dlg = new MarkPaidDialog(targetTx);
+            if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+            {
+                _ = LoadSummaryAsync();
+                _ = LoadTransactionsAsync();
+            }
+        }
+
+        private async void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (_grid.Columns[e.ColumnIndex].Name != "Actions") return;
+
+            int rowH = _grid.Rows[e.RowIndex].Height;
+
+            if (_currentTab == TabMode.Plans)
+            {
+                var idVal = _grid.Rows[e.RowIndex].Cells["PlanId"].Value?.ToString();
+                if (!int.TryParse(idVal, out var planId)) return;
+                var plan = _plans.FirstOrDefault(p => p.PlanId == planId);
+                if (plan == null) return;
+
+                int h = 26;
+                int y = (rowH - h) / 2;
+                int x = 8;
+                int gap = 6;
+                int editW = 50;
+                int toggleW = plan.IsActive ? 84 : 74;
+                int archW = plan.IsArchived ? 70 : 66;
+
+                var editRect = new Rectangle(x, y, editW, h);
+                var toggleRect = new Rectangle(x + editW + gap, y, toggleW, h);
+                var archRect = new Rectangle(x + editW + gap + toggleW + gap, y, archW, h);
+
+                if (editRect.Contains(e.Location))
+                {
+                    using var dlg = new CreateTenantPlanDialog(plan);
+                    if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+                    {
+                        await LoadSummaryAsync();
+                        await LoadPlansAsync();
+                    }
+                }
+                else if (toggleRect.Contains(e.Location))
+                {
+                    await TogglePlanStatusAsync(plan);
+                }
+                else if (archRect.Contains(e.Location))
+                {
+                    await TogglePlanArchiveAsync(plan);
+                }
+            }
+            else if (_currentTab == TabMode.CustomerSubscriptions)
+            {
+                var idVal = _grid.Rows[e.RowIndex].Cells["SubId"].Value?.ToString();
+                if (!int.TryParse(idVal, out var subId)) return;
+                var sub = _customerSubs.FirstOrDefault(s => s.SubscriptionId == subId);
+                if (sub == null) return;
+
+                int h = 26;
+                int y = (rowH - h) / 2;
+                var changeRect = new Rectangle(8, y, 96, h);
+
+                if (changeRect.Contains(e.Location))
+                {
+                    OpenAssignPlanDialog(sub);
+                }
+            }
+            else if (_currentTab == TabMode.Transactions)
+            {
+                var idVal = _grid.Rows[e.RowIndex].Cells["TxnId"].Value?.ToString();
+                if (!int.TryParse(idVal, out var txId)) return;
+                var tx = _transactions.FirstOrDefault(t => t.TransactionId == txId);
+                if (tx == null) return;
+
+                if (tx.PaymentStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                int h = 26;
+                int y = (rowH - h) / 2;
+                var payRect = new Rectangle(8, y, 92, h);
+
+                if (payRect.Contains(e.Location))
+                {
+                    OpenRecordPaymentDialog(tx);
+                }
+            }
+        }
+
+        private void Grid_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+
+            if (_currentTab == TabMode.Plans)
+            {
+                var idVal = _grid.Rows[e.RowIndex].Cells["PlanId"].Value?.ToString();
+                if (int.TryParse(idVal, out var planId))
+                {
+                    var plan = _plans.FirstOrDefault(p => p.PlanId == planId);
+                    if (plan != null)
+                    {
+                        using var dlg = new CreateTenantPlanDialog(plan);
+                        if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+                        {
+                            _ = LoadSummaryAsync();
+                            _ = LoadPlansAsync();
+                        }
+                    }
+                }
+            }
+            else if (_currentTab == TabMode.CustomerSubscriptions)
+            {
+                var idVal = _grid.Rows[e.RowIndex].Cells["SubId"].Value?.ToString();
+                if (int.TryParse(idVal, out var subId))
+                {
+                    var sub = _customerSubs.FirstOrDefault(s => s.SubscriptionId == subId);
+                    if (sub != null) OpenAssignPlanDialog(sub);
+                }
+            }
+            else if (_currentTab == TabMode.Transactions)
+            {
+                var idVal = _grid.Rows[e.RowIndex].Cells["TxnId"].Value?.ToString();
+                if (int.TryParse(idVal, out var txId))
+                {
+                    var tx = _transactions.FirstOrDefault(t => t.TransactionId == txId);
+                    if (tx != null && !tx.PaymentStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+                    {
+                        OpenRecordPaymentDialog(tx);
+                    }
+                }
+            }
+        }
+
+        private async Task TogglePlanStatusAsync(SubscriptionPlanItemDto plan)
+        {
+            if (plan.IsArchived)
+            {
+                MessageBox.Show("Archived plans cannot be toggled. Please restore the plan first.", "Notice", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string action = plan.IsActive ? "deactivate" : "activate";
+            var confirm = MessageBox.Show(
+                $"Are you sure you want to {action} the plan '{plan.PlanName}'?\n\n" +
+                (plan.IsActive
+                    ? "New businesses will not be able to choose this plan while it is inactive."
+                    : "This plan will become immediately available for new and existing tenants."),
+                $"{char.ToUpper(action[0]) + action.Substring(1)} Plan",
+                MessageBoxButtons.YesNo,
+                plan.IsActive ? MessageBoxIcon.Warning : MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes) return;
+
+            try
+            {
+                var res = await _http.PutAsJsonAsync($"api/billing/plans/{plan.PlanId}/status", new { isActive = !plan.IsActive });
+                if (res.IsSuccessStatusCode)
+                {
+                    await LoadSummaryAsync();
+                    await LoadPlansAsync();
+                }
+                else
+                {
+                    var err = await res.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Failed to update plan status: {err}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Network error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private async Task TogglePlanArchiveAsync(SubscriptionPlanItemDto plan)
+        {
+            string action = plan.IsArchived ? "restore" : "archive";
+            var confirm = MessageBox.Show(
+                $"Are you sure you want to {action} the plan '{plan.PlanName}'?\n\n" +
+                (plan.IsArchived
+                    ? "This will unarchive the plan so it can be managed and activated."
+                    : "Archived plans are retired and automatically deactivated. Existing subscriptions remain intact."),
+                $"{char.ToUpper(action[0]) + action.Substring(1)} Plan",
+                MessageBoxButtons.YesNo,
+                plan.IsArchived ? MessageBoxIcon.Question : MessageBoxIcon.Warning);
+
+            if (confirm != DialogResult.Yes) return;
+
+            try
+            {
+                var res = await _http.PutAsync($"api/billing/plans/{plan.PlanId}/archive", null);
+                if (res.IsSuccessStatusCode)
+                {
+                    await LoadSummaryAsync();
+                    await LoadPlansAsync();
+                }
+                else
+                {
+                    var err = await res.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Failed to update archive status: {err}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Network error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // ================================================================
+        //  CELL PAINTING (Pills, Avatars, Actions & Limits)
         // ================================================================
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
@@ -591,12 +956,19 @@ namespace CarwashServices.Roles.SuperAdmin
                     PaintAdminCell(e);
                     break;
                 case "Plan":
+                case "PlanName":
                     PaintPlanCell(e);
+                    break;
+                case "Limits":
+                    PaintLimitsCell(e);
+                    break;
+                case "Actions":
+                    PaintActionsCell(e);
                     break;
             }
         }
 
-        private void PaintPlanCell(DataGridViewCellPaintingEventArgs e)
+        private void PaintLimitsCell(DataGridViewCellPaintingEventArgs e)
         {
             e.Paint(e.CellBounds, DataGridViewPaintParts.Background |
                                   DataGridViewPaintParts.Border |
@@ -604,8 +976,8 @@ namespace CarwashServices.Roles.SuperAdmin
 
             var raw = Convert.ToString(e.Value) ?? "";
             var parts = raw.Split('\n');
-            var name = parts[0];
-            var price = parts.Length > 1 ? parts[1] : "";
+            var line1 = parts[0];
+            var line2 = parts.Length > 1 ? parts[1] : "";
 
             var b = e.CellBounds;
             if (b.Width <= 4 || b.Height <= 4)
@@ -624,14 +996,178 @@ namespace CarwashServices.Roles.SuperAdmin
             int h1 = FontName.Height;
             int h2 = FontSub.Height;
             int gap = 2;
-            int top = b.Y + (b.Height - (h1 + (string.IsNullOrEmpty(price) ? 0 : h2 + gap))) / 2;
+            int top = b.Y + (b.Height - (h1 + (string.IsNullOrEmpty(line2) ? 0 : h2 + gap))) / 2;
+
+            TextRenderer.DrawText(e.Graphics, line1, FontName,
+                new Rectangle(x, top, tw, h1), Navy, flags);
+
+            if (!string.IsNullOrEmpty(line2))
+            {
+                TextRenderer.DrawText(e.Graphics, line2, FontSub,
+                    new Rectangle(x, top + h1 + gap, tw, h2), Muted, flags);
+            }
+
+            e.Handled = true;
+        }
+
+        private void PaintActionsCell(DataGridViewCellPaintingEventArgs e)
+        {
+            e.Handled = true;
+            e.PaintBackground(e.ClipBounds, true);
+
+            var centerFlags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            if (_currentTab == TabMode.Plans)
+            {
+                var idVal = _grid.Rows[e.RowIndex].Cells["PlanId"].Value?.ToString();
+                if (!int.TryParse(idVal, out var planId)) return;
+                var plan = _plans.FirstOrDefault(p => p.PlanId == planId);
+                if (plan == null) return;
+
+                int h = 26;
+                int y = e.CellBounds.Y + (e.CellBounds.Height - h) / 2;
+                int x = e.CellBounds.X + 8;
+                int gap = 6;
+                int editW = 50;
+                int toggleW = plan.IsActive ? 84 : 74;
+                int archW = plan.IsArchived ? 70 : 66;
+
+                // 1. Edit
+                var editRect = new Rectangle(x, y, editW, h);
+                using (var p = RoundedRect(editRect, 5))
+                using (var brush = new SolidBrush(BlueSoft))
+                using (var pen = new Pen(Color.FromArgb(0xBA, 0xDB, 0xF9), 1f))
+                {
+                    e.Graphics.FillPath(brush, p);
+                    e.Graphics.DrawPath(pen, p);
+                }
+                TextRenderer.DrawText(e.Graphics, "Edit", FontAction, editRect, Blue, centerFlags);
+
+                // 2. Toggle Active
+                string togText = plan.IsActive ? "Deactivate" : "Activate";
+                Color togBg = plan.IsActive ? RedSoft : GreenSoft;
+                Color togFg = plan.IsActive ? Red : Green;
+                Color togBorder = plan.IsActive ? Color.FromArgb(0xFA, 0xCD, 0xCC) : Color.FromArgb(0xC4, 0xEB, 0xCD);
+
+                var toggleRect = new Rectangle(x + editW + gap, y, toggleW, h);
+                using (var p = RoundedRect(toggleRect, 5))
+                using (var brush = new SolidBrush(togBg))
+                using (var pen = new Pen(togBorder, 1f))
+                {
+                    e.Graphics.FillPath(brush, p);
+                    e.Graphics.DrawPath(pen, p);
+                }
+                TextRenderer.DrawText(e.Graphics, togText, FontAction, toggleRect, togFg, centerFlags);
+
+                // 3. Archive / Restore
+                string archText = plan.IsArchived ? "Restore" : "Archive";
+                Color archBg = plan.IsArchived ? AmberSoft : Color.FromArgb(0xF1, 0xF5, 0xF9);
+                Color archFg = plan.IsArchived ? Amber : Muted;
+                Color archBorder = plan.IsArchived ? Color.FromArgb(0xFC, 0xDF, 0x9D) : CardBorder;
+
+                var archRect = new Rectangle(x + editW + gap + toggleW + gap, y, archW, h);
+                using (var p = RoundedRect(archRect, 5))
+                using (var brush = new SolidBrush(archBg))
+                using (var pen = new Pen(archBorder, 1f))
+                {
+                    e.Graphics.FillPath(brush, p);
+                    e.Graphics.DrawPath(pen, p);
+                }
+                TextRenderer.DrawText(e.Graphics, archText, FontAction, archRect, archFg, centerFlags);
+            }
+            else if (_currentTab == TabMode.CustomerSubscriptions)
+            {
+                int h = 26;
+                int y = e.CellBounds.Y + (e.CellBounds.Height - h) / 2;
+                int x = e.CellBounds.X + 8;
+                int w = 96;
+
+                var changeRect = new Rectangle(x, y, w, h);
+                using (var p = RoundedRect(changeRect, 5))
+                using (var brush = new SolidBrush(BlueSoft))
+                using (var pen = new Pen(Color.FromArgb(0xBA, 0xDB, 0xF9), 1f))
+                {
+                    e.Graphics.FillPath(brush, p);
+                    e.Graphics.DrawPath(pen, p);
+                }
+                TextRenderer.DrawText(e.Graphics, "Change Plan", FontAction, changeRect, Blue, centerFlags);
+            }
+            else if (_currentTab == TabMode.Transactions)
+            {
+                var idVal = _grid.Rows[e.RowIndex].Cells["TxnId"].Value?.ToString();
+                if (!int.TryParse(idVal, out var txId)) return;
+                var tx = _transactions.FirstOrDefault(t => t.TransactionId == txId);
+                if (tx == null) return;
+
+                int h = 26;
+                int y = e.CellBounds.Y + (e.CellBounds.Height - h) / 2;
+                int x = e.CellBounds.X + 8;
+                int w = 92;
+
+                var payRect = new Rectangle(x, y, w, h);
+
+                if (!tx.PaymentStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+                {
+                    using (var p = RoundedRect(payRect, 5))
+                    using (var brush = new SolidBrush(GreenSoft))
+                    using (var pen = new Pen(Color.FromArgb(0xC4, 0xEB, 0xCD), 1f))
+                    {
+                        e.Graphics.FillPath(brush, p);
+                        e.Graphics.DrawPath(pen, p);
+                    }
+                    TextRenderer.DrawText(e.Graphics, "Record Pay", FontAction, payRect, Green, centerFlags);
+                }
+                else
+                {
+                    using (var p = RoundedRect(payRect, 5))
+                    using (var brush = new SolidBrush(Color.FromArgb(0xF8, 0xFA, 0xFC)))
+                    using (var pen = new Pen(CardBorder, 1f))
+                    {
+                        e.Graphics.FillPath(brush, p);
+                        e.Graphics.DrawPath(pen, p);
+                    }
+                    TextRenderer.DrawText(e.Graphics, "Settled ✓", FontAction, payRect, Muted, centerFlags);
+                }
+            }
+        }
+
+        private void PaintPlanCell(DataGridViewCellPaintingEventArgs e)
+        {
+            e.Paint(e.CellBounds, DataGridViewPaintParts.Background |
+                                  DataGridViewPaintParts.Border |
+                                  DataGridViewPaintParts.SelectionBackground);
+
+            var raw = Convert.ToString(e.Value) ?? "";
+            var parts = raw.Split('\n');
+            var name = parts[0];
+            var priceOrDesc = parts.Length > 1 ? parts[1] : "";
+
+            var b = e.CellBounds;
+            if (b.Width <= 4 || b.Height <= 4)
+            {
+                e.Handled = true;
+                return;
+            }
+
+            int x = b.X + 12;
+            int tw = Math.Max(10, b.Right - x - 8);
+
+            var flags = TextFormatFlags.Left | TextFormatFlags.EndEllipsis |
+                        TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
+                        TextFormatFlags.SingleLine;
+
+            int h1 = FontName.Height;
+            int h2 = FontSub.Height;
+            int gap = 2;
+            int top = b.Y + (b.Height - (h1 + (string.IsNullOrEmpty(priceOrDesc) ? 0 : h2 + gap))) / 2;
 
             TextRenderer.DrawText(e.Graphics, name, FontName,
                 new Rectangle(x, top, tw, h1), Navy, flags);
 
-            if (!string.IsNullOrEmpty(price))
+            if (!string.IsNullOrEmpty(priceOrDesc))
             {
-                TextRenderer.DrawText(e.Graphics, price, FontSub,
+                TextRenderer.DrawText(e.Graphics, priceOrDesc, FontSub,
                     new Rectangle(x, top + h1 + gap, tw, h2), Muted, flags);
             }
 
@@ -705,7 +1241,8 @@ namespace CarwashServices.Roles.SuperAdmin
                 bg = GreenSoft;
                 fg = Green;
             }
-            else if (string.Equals(text, "Pending", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(text, "Pending", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(text, "Archived", StringComparison.OrdinalIgnoreCase))
             {
                 bg = AmberSoft;
                 fg = Amber;

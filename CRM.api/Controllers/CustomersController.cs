@@ -1,4 +1,4 @@
-﻿using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,9 +25,15 @@ public class CustomersController : ControllerBase
             .Select(c => new
             {
                 c.CustomerId,
+                c.FirstName,
+                c.LastName,
                 c.FullName,
                 c.Phone,
                 c.Email,
+                c.AddressLine,
+                c.City,
+                c.State,
+                c.PostalCode,
                 c.Address,
                 c.CreatedAt
             })

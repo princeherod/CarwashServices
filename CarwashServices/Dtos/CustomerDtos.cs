@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using CarwashServices.Dtos;
 namespace CarwashServices.Dtos
 {
@@ -14,9 +14,14 @@ namespace CarwashServices.Dtos
     {
         public int TenantCustomerId { get; set; }
         public string CustomerCode { get; set; } = "";
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
         public string CustomerName { get; set; } = "";
         public string? ContactNumber { get; set; }
         public string? EmailAddress { get; set; }
+        public string? Street { get; set; }
+        public string? City { get; set; }
+        public string? Province { get; set; }
         public string? Address { get; set; }
         public bool IsActive { get; set; }
         public DateTime CreatedAt { get; set; }
@@ -38,9 +43,15 @@ namespace CarwashServices.Dtos
     public class CustomerDto
     {
         public int CustomerId { get; set; }
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
         public string FullName { get; set; } = "";
         public string? Phone { get; set; }
         public string? Email { get; set; }
+        public string? AddressLine { get; set; }
+        public string? City { get; set; }
+        public string? State { get; set; }
+        public string? PostalCode { get; set; }
         public string? Address { get; set; }
     }
 

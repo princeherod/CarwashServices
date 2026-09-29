@@ -1,4 +1,4 @@
-﻿using CRM.Domain.Entities;
+using CRM.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace CRM.Infrastructure.Data;
@@ -44,10 +44,21 @@ public class TenantErpDbContext : DbContext
         {
             entity.HasKey(x => x.TenantCustomerId);
             entity.Property(x => x.CustomerCode).HasMaxLength(50).IsRequired();
-            entity.Property(x => x.CustomerName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.FirstName).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.LastName).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Street).HasMaxLength(200);
+            entity.Property(x => x.City).HasMaxLength(100);
+            entity.Property(x => x.Province).HasMaxLength(100);
+            entity.Property(x => x.CustomerName)
+                .HasMaxLength(200)
+                .HasComputedColumnSql("(ltrim(rtrim(concat([FirstName],' ',[LastName]))))", stored: false)
+                .ValueGeneratedOnAddOrUpdate();
+            entity.Property(x => x.Address)
+                .HasMaxLength(500)
+                .HasComputedColumnSql("(case when [Street] IS NOT NULL AND [City] IS NOT NULL then concat([Street],', ',[City],case when [Province] IS NOT NULL then concat(', ',[Province]) else '' end) when [Street] IS NOT NULL then [Street] when [City] IS NOT NULL then [City]  end)", stored: false)
+                .ValueGeneratedOnAddOrUpdate();
             entity.Property(x => x.ContactNumber).HasMaxLength(50);
             entity.Property(x => x.EmailAddress).HasMaxLength(200);
-            entity.Property(x => x.Address).HasMaxLength(500);
 
             entity.Property(x => x.PlateNumber).HasMaxLength(50);
             entity.Property(x => x.VehicleMake).HasMaxLength(100);
@@ -75,8 +86,16 @@ public class TenantErpDbContext : DbContext
                 .HasMaxLength(200)
                 .IsRequired();
 
+            entity.Property(x => x.ContactFirstName)
+                .HasMaxLength(100);
+
+            entity.Property(x => x.ContactLastName)
+                .HasMaxLength(100);
+
             entity.Property(x => x.ContactPerson)
-                .HasMaxLength(200);
+                .HasMaxLength(200)
+                .HasComputedColumnSql("(ltrim(rtrim(concat(isnull([ContactFirstName],''),' ',isnull([ContactLastName],'')))))", stored: false)
+                .ValueGeneratedOnAddOrUpdate();
 
             entity.Property(x => x.ContactNumber)
                 .HasMaxLength(50);

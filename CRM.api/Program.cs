@@ -22,6 +22,7 @@ builder.Services.AddDbContext<MasterErpDbContext>(options =>
 // -----------------------------------------------------------------
 builder.Services.AddScoped<ITenantDatabaseResolver, TenantDatabaseResolver>();
 builder.Services.AddScoped<ITenantDbContextFactory, TenantDbContextFactory>();
+builder.Services.AddScoped<ITenantDatabaseProvisioner, TenantDatabaseProvisioner>();
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
 builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 
@@ -44,6 +45,21 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
+
+// Ensure all tenant databases are physically provisioned on SQL Server
+using (var scope = app.Services.CreateScope())
+{
+    var provisioner = scope.ServiceProvider.GetRequiredService<ITenantDatabaseProvisioner>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    try
+    {
+        await provisioner.EnsureAllDatabasesProvisionedAsync();
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to provision tenant databases during startup.");
+    }
+}
 
 // =================================================================
 // Dev helper — seed a Company + CompanyDatabase (keep during dev only)
@@ -75,7 +91,7 @@ app.MapPost("/seed/company-with-database", async (MasterErpDbContext db) =>
         {
             CompanyId = company.CompanyId,
             ServerName = "(localdb)\\MSSQLLocalDB",
-            DatabaseName = "TenantErpDb",
+            DatabaseName = "TenantCrmDb",
             IsActive = true,
             CredentialKey = "TenantA"
         };

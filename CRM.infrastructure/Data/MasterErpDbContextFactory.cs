@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
 namespace CRM.Infrastructure.Data;
@@ -9,7 +9,7 @@ public class MasterErpDbContextFactory : IDesignTimeDbContextFactory<MasterErpDb
     {
         var optionsBuilder = new DbContextOptionsBuilder<MasterErpDbContext>();
         optionsBuilder.UseSqlServer(
-            "Server=(localdb)\\MSSQLLocalDB;Database=MSME_MasterERP;Trusted_Connection=True;TrustServerCertificate=True;");
+            "Server=(localdb)\\MSSQLLocalDB;Database=MSME_MasterCrm;Trusted_Connection=True;TrustServerCertificate=True;");
 
         return new MasterErpDbContext(optionsBuilder.Options);
     }

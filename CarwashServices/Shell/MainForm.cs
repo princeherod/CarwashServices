@@ -351,6 +351,11 @@ namespace CarwashServices.Shell
                         }
                         break;
 
+                    case "Manage Businesses":
+                        view = new Roles.SuperAdmin.ManageBusinessesView();
+                        headerText = "MANAGE BUSINESSES";
+                        break;
+
                     case "Manage Admin Accounts":
                         view = new Roles.SuperAdmin.ManageAdminAccountsView();
                         headerText = SuperAdminLabels.NavManageAdminAccounts;

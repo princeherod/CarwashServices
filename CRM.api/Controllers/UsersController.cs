@@ -50,6 +50,8 @@ public class UsersController : ControllerBase
             .Select(u => new
             {
                 u.UserId,
+                u.FirstName,
+                u.LastName,
                 u.FullName,
                 u.RoleId,
                 u.Email,
@@ -75,6 +77,8 @@ public class UsersController : ControllerBase
         return Ok(new
         {
             row.UserId,
+            row.FirstName,
+            row.LastName,
             row.FullName,
             row.RoleId,
             row.Email,
@@ -85,7 +89,9 @@ public class UsersController : ControllerBase
 
     public class UserCreateRequest
     {
-        public string FullName { get; set; } = "";
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
+        public string? FullName { get; set; }
         public string Email { get; set; } = "";
         public int RoleId { get; set; }
         public string Status { get; set; } = "Active";
@@ -96,8 +102,32 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] UserCreateRequest req)
     {
-        if (string.IsNullOrWhiteSpace(req.FullName))
-            return BadRequest(new { message = "Full name is required." });
+        var first = req.FirstName?.Trim();
+        var last = req.LastName?.Trim();
+
+        if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(last))
+        {
+            if (!string.IsNullOrWhiteSpace(req.FullName))
+            {
+                var full = req.FullName.Trim();
+                var idx = full.IndexOf(' ');
+                if (idx > 0)
+                {
+                    if (string.IsNullOrWhiteSpace(first)) first = full.Substring(0, idx).Trim();
+                    if (string.IsNullOrWhiteSpace(last)) last = full.Substring(idx + 1).Trim();
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(first)) first = full;
+                    if (string.IsNullOrWhiteSpace(last)) last = "-";
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(first))
+            return BadRequest(new { message = "First name is required." });
+        if (string.IsNullOrWhiteSpace(last))
+            return BadRequest(new { message = "Last name is required." });
         if (string.IsNullOrWhiteSpace(req.Email))
             return BadRequest(new { message = "Email is required." });
         if (req.RoleId <= 0)
@@ -113,7 +143,8 @@ public class UsersController : ControllerBase
 
         var user = new User
         {
-            FullName = req.FullName.Trim(),
+            FirstName = first,
+            LastName = last,
             Email = req.Email.Trim(),
             RoleId = req.RoleId,
             Status = string.IsNullOrWhiteSpace(req.Status) ? "Active" : req.Status,
@@ -151,6 +182,8 @@ public class UsersController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = user.UserId }, new
         {
             user.UserId,
+            user.FirstName,
+            user.LastName,
             user.FullName,
             user.RoleId,
             user.Email,
@@ -161,7 +194,9 @@ public class UsersController : ControllerBase
 
     public class UserUpdateRequest
     {
-        public string FullName { get; set; } = "";
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
+        public string? FullName { get; set; }
         public string Email { get; set; } = "";
         public int RoleId { get; set; }
         public string Status { get; set; } = "Active";
@@ -176,8 +211,32 @@ public class UsersController : ControllerBase
         if (existing is null)
             return NotFound(new { message = $"User {id} not found." });
 
-        if (string.IsNullOrWhiteSpace(req.FullName))
-            return BadRequest(new { message = "Full name is required." });
+        var first = req.FirstName?.Trim();
+        var last = req.LastName?.Trim();
+
+        if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(last))
+        {
+            if (!string.IsNullOrWhiteSpace(req.FullName))
+            {
+                var full = req.FullName.Trim();
+                var idx = full.IndexOf(' ');
+                if (idx > 0)
+                {
+                    if (string.IsNullOrWhiteSpace(first)) first = full.Substring(0, idx).Trim();
+                    if (string.IsNullOrWhiteSpace(last)) last = full.Substring(idx + 1).Trim();
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(first)) first = full;
+                    if (string.IsNullOrWhiteSpace(last)) last = "-";
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(first))
+            return BadRequest(new { message = "First name is required." });
+        if (string.IsNullOrWhiteSpace(last))
+            return BadRequest(new { message = "Last name is required." });
         if (string.IsNullOrWhiteSpace(req.Email))
             return BadRequest(new { message = "Email is required." });
         if (req.RoleId <= 0)
@@ -188,7 +247,8 @@ public class UsersController : ControllerBase
         if (dupe)
             return Conflict(new { message = $"Another user already uses email '{req.Email}'." });
 
-        existing.FullName = req.FullName.Trim();
+        existing.FirstName = first;
+        existing.LastName = last;
         existing.Email = req.Email.Trim();
         existing.RoleId = req.RoleId;
         existing.Status = string.IsNullOrWhiteSpace(req.Status) ? "Active" : req.Status;
@@ -218,6 +278,8 @@ public class UsersController : ControllerBase
         return Ok(new
         {
             existing.UserId,
+            existing.FirstName,
+            existing.LastName,
             existing.FullName,
             existing.RoleId,
             existing.Email,

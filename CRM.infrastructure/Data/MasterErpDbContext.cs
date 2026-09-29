@@ -1,4 +1,4 @@
-﻿using CRM.domain.Entities;
+using CRM.domain.Entities;
 using CRM.Domain.Entities;   // add this — Company, CompanyDatabase, Device live here
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +25,9 @@ public class MasterErpDbContext : IdentityDbContext
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<CustomerSubscription> CustomerSubscriptions => Set<CustomerSubscription>();
     public DbSet<BillingTransaction> BillingTransactions => Set<BillingTransaction>();
+    public DbSet<TenantSubscriptionPlan> TenantSubscriptionPlans => Set<TenantSubscriptionPlan>();
+    public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
+    public DbSet<TenantBillingTransaction> TenantBillingTransactions => Set<TenantBillingTransaction>();
     public DbSet<BackupLog> BackupLogs => Set<BackupLog>();
     public DbSet<TermsCondition> TermsConditions => Set<TermsCondition>();
 
@@ -46,6 +49,15 @@ public class MasterErpDbContext : IdentityDbContext
 
             entity.HasIndex(x => x.CompanyCode)
                 .IsUnique();
+
+            entity.Property(x => x.ContactPhone).HasMaxLength(50);
+            entity.Property(x => x.ContactEmail).HasMaxLength(200);
+            entity.Property(x => x.AddressLine).HasMaxLength(250);
+            entity.Property(x => x.City).HasMaxLength(100);
+            entity.Property(x => x.Province).HasMaxLength(100);
+            entity.Property(x => x.State).HasMaxLength(100);
+            entity.Property(x => x.PostalCode).HasMaxLength(20);
+            entity.Property(x => x.Country).HasMaxLength(100);
         });
 
         builder.Entity<CompanyDatabase>(entity =>
@@ -61,7 +73,7 @@ public class MasterErpDbContext : IdentityDbContext
                 .IsRequired();
 
             entity.HasOne(x => x.Company)
-                .WithMany()
+                .WithMany(c => c.Databases)
                 .HasForeignKey(x => x.CompanyId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
@@ -99,7 +111,12 @@ public class MasterErpDbContext : IdentityDbContext
         builder.Entity<User>(entity =>
         {
             entity.HasKey(x => x.UserId);
-            entity.Property(x => x.FullName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.FirstName).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.LastName).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.FullName)
+                .HasMaxLength(200)
+                .HasComputedColumnSql("(ltrim(rtrim(concat([FirstName],' ',[LastName]))))", stored: false)
+                .ValueGeneratedOnAddOrUpdate();
             entity.Property(x => x.Email).HasMaxLength(200).IsRequired();
             entity.HasIndex(x => x.Email).IsUnique();
 
@@ -107,12 +124,30 @@ public class MasterErpDbContext : IdentityDbContext
                 .WithMany(r => r.Users)
                 .HasForeignKey(x => x.RoleId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Company)
+                .WithMany()
+                .HasForeignKey(x => x.CompanyId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<Customer>(entity =>
         {
             entity.HasKey(x => x.CustomerId);
-            entity.Property(x => x.FullName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.FirstName).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.LastName).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.AddressLine).HasMaxLength(200);
+            entity.Property(x => x.City).HasMaxLength(100);
+            entity.Property(x => x.State).HasMaxLength(100);
+            entity.Property(x => x.PostalCode).HasMaxLength(20);
+            entity.Property(x => x.FullName)
+                .HasMaxLength(200)
+                .HasComputedColumnSql("(ltrim(rtrim(concat([FirstName],' ',[LastName]))))", stored: false)
+                .ValueGeneratedOnAddOrUpdate();
+            entity.Property(x => x.Address)
+                .HasMaxLength(500)
+                .HasComputedColumnSql("(ltrim(rtrim(concat([AddressLine],', ',[City],', ',[State]))))", stored: false)
+                .ValueGeneratedOnAddOrUpdate();
         });
 
         builder.Entity<Service>(entity =>
@@ -236,6 +271,50 @@ public class MasterErpDbContext : IdentityDbContext
             entity.HasOne(x => x.CreatedByUser)
                 .WithMany(u => u.TermsPublished)
                 .HasForeignKey(x => x.CreatedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<TenantSubscriptionPlan>(entity =>
+        {
+            entity.HasKey(x => x.PlanId);
+            entity.ToTable("TenantSubscriptionPlans");
+            entity.Property(x => x.PlanName).HasMaxLength(150).IsRequired();
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.Price).HasColumnType("decimal(10,2)");
+            entity.Property(x => x.BillingCycle).HasMaxLength(50).IsRequired();
+        });
+
+        builder.Entity<TenantSubscription>(entity =>
+        {
+            entity.HasKey(x => x.TenantSubscriptionId);
+            entity.ToTable("TenantSubscriptions");
+            entity.Property(x => x.Status).HasMaxLength(50).IsRequired();
+
+            entity.HasOne(x => x.Company)
+                .WithMany(c => c.Subscriptions)
+                .HasForeignKey(x => x.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Plan)
+                .WithMany(p => p.Subscriptions)
+                .HasForeignKey(x => x.PlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<TenantBillingTransaction>(entity =>
+        {
+            entity.HasKey(x => x.TransactionId);
+            entity.ToTable("TenantBillingTransactions");
+            entity.Property(x => x.Amount).HasColumnType("decimal(10,2)");
+
+            entity.HasOne(x => x.TenantSubscription)
+                .WithMany(s => s.Transactions)
+                .HasForeignKey(x => x.TenantSubscriptionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Company)
+                .WithMany()
+                .HasForeignKey(x => x.CompanyId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

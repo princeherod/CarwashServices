@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -609,38 +609,55 @@ namespace CarwashServices.Dialogs
                 _loaded = c;
                 _titleLbl.Text = TitleText(c.CustomerCode);
 
-                var full = c.CustomerName ?? "";
-                int firstSpace = full.IndexOf(' ');
-                if (firstSpace > 0)
+                if (!string.IsNullOrWhiteSpace(c.FirstName))
                 {
-                    _firstNameTxt.Text = full.Substring(0, firstSpace);
-                    _lastNameTxt.Text = full.Substring(firstSpace + 1).Trim();
+                    _firstNameTxt.Text = c.FirstName;
+                    _lastNameTxt.Text = c.LastName;
                 }
                 else
                 {
-                    _firstNameTxt.Text = full;
-                    _lastNameTxt.Text = "";
+                    var full = c.CustomerName ?? "";
+                    int firstSpace = full.IndexOf(' ');
+                    if (firstSpace > 0)
+                    {
+                        _firstNameTxt.Text = full.Substring(0, firstSpace);
+                        _lastNameTxt.Text = full.Substring(firstSpace + 1).Trim();
+                    }
+                    else
+                    {
+                        _firstNameTxt.Text = full;
+                        _lastNameTxt.Text = "";
+                    }
                 }
 
                 _phoneTxt.Text = c.ContactNumber ?? "";
                 _emailTxt.Text = c.EmailAddress ?? "";
 
-                var addr = c.Address ?? "";
-                var parts = addr.Split(',');
-                if (parts.Length >= 3)
+                if (!string.IsNullOrWhiteSpace(c.Street) || !string.IsNullOrWhiteSpace(c.City) || !string.IsNullOrWhiteSpace(c.Province))
                 {
-                    _streetTxt.Text = parts[0].Trim();
-                    _cityTxt.Text = parts[1].Trim();
-                    _provinceTxt.Text = string.Join(", ", parts, 2, parts.Length - 2).Trim();
-                }
-                else if (parts.Length == 2)
-                {
-                    _streetTxt.Text = parts[0].Trim();
-                    _cityTxt.Text = parts[1].Trim();
+                    _streetTxt.Text = c.Street ?? "";
+                    _cityTxt.Text = c.City ?? "";
+                    _provinceTxt.Text = c.Province ?? "";
                 }
                 else
                 {
-                    _streetTxt.Text = addr;
+                    var addr = c.Address ?? "";
+                    var parts = addr.Split(',');
+                    if (parts.Length >= 3)
+                    {
+                        _streetTxt.Text = parts[0].Trim();
+                        _cityTxt.Text = parts[1].Trim();
+                        _provinceTxt.Text = string.Join(", ", parts, 2, parts.Length - 2).Trim();
+                    }
+                    else if (parts.Length == 2)
+                    {
+                        _streetTxt.Text = parts[0].Trim();
+                        _cityTxt.Text = parts[1].Trim();
+                    }
+                    else
+                    {
+                        _streetTxt.Text = addr;
+                    }
                 }
 
                 _plateTxt.Text = c.PlateNumber ?? "";
@@ -918,9 +935,14 @@ namespace CarwashServices.Dialogs
             var dto = new
             {
                 customerCode,
+                firstName = _firstNameTxt.Text.Trim(),
+                lastName = _lastNameTxt.Text.Trim(),
                 customerName = $"{_firstNameTxt.Text.Trim()} {_lastNameTxt.Text.Trim()}".Trim(),
                 contactNumber = _phoneTxt.Text.Trim(),
                 emailAddress = _emailTxt.Text.Trim(),
+                street = _streetTxt.Text.Trim(),
+                city = _cityTxt.Text.Trim(),
+                province = _provinceTxt.Text.Trim(),
                 address = ResolveAddress(),
                 isActive = _isEdit
                     ? _statusCombo.SelectedItem?.ToString() != "Inactive"

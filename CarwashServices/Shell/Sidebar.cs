@@ -346,6 +346,7 @@ namespace CarwashServices.Shell
             "Manage Service Requests" => "requests",
             "Follow-Ups / Reminders" => "reminders",
             "Manage Admin Accounts" => "admin",
+            "Manage Businesses" => "customers",
             "Backup & Restore Data" => "database",
             "Manage Subscription / Billing" => "billing",
             "Terms & Conditions" => "terms",
