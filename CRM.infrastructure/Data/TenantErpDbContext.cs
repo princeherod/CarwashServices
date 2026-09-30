@@ -20,6 +20,10 @@ public class TenantErpDbContext : DbContext
     public DbSet<BillingTransaction> BillingTransactions => Set<BillingTransaction>();
     public DbSet<ServiceStatusLog> ServiceStatusLogs => Set<ServiceStatusLog>();
     public DbSet<FollowUp> FollowUps => Set<FollowUp>();
+    public DbSet<TenantBranch> Branches => Set<TenantBranch>();
+
+    public int CompanyId { get; set; }
+    public CRM.Infrastructure.Services.ICloudSyncService? CloudSyncService { get; set; }
 
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -204,6 +208,38 @@ public class TenantErpDbContext : DbContext
             entity.Property(x => x.PaymentStatus).IsRequired();
         });
 
+        builder.Entity<TenantBranch>(entity =>
+        {
+            entity.ToTable("Branches");
+            entity.HasKey(x => x.BranchId);
+            entity.Property(x => x.BranchCode).HasMaxLength(50).IsRequired();
+            entity.Property(x => x.BranchName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Address).HasMaxLength(500);
+            entity.Property(x => x.City).HasMaxLength(100);
+            entity.Property(x => x.Province).HasMaxLength(100);
+            entity.Property(x => x.ContactNumber).HasMaxLength(50);
+            entity.Property(x => x.Email).HasMaxLength(200);
+            entity.Property(x => x.ArchivedBy).HasMaxLength(200);
+            entity.HasIndex(x => x.IsArchived);
+            entity.HasIndex(x => x.BranchCode);
+        });
+
+        builder.Entity<ServiceRequest>(entity =>
+        {
+            entity.HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<TenantCustomer>(entity =>
+        {
+            entity.HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
         builder.Entity<FollowUp>(entity =>
         {
             entity.HasKey(x => x.FollowUpId);
@@ -217,6 +253,101 @@ public class TenantErpDbContext : DbContext
             entity.Property(x => x.ApprovalStatus).IsRequired();
             entity.HasIndex(x => x.CustomerId);
             entity.HasIndex(x => x.IsArchived);
+
+            entity.HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
+
+        builder.Entity<BillingTransaction>(entity =>
+        {
+            entity.HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+    }
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var pendingSyncs = new List<(string TableName, string Operation, object Entity, Func<string> GetKey)>();
+
+        if (CloudSyncService != null && CompanyId > 0)
+        {
+            foreach (var entry in ChangeTracker.Entries())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                {
+                    string op = entry.State switch
+                    {
+                        EntityState.Added => "INSERT",
+                        EntityState.Modified => "UPDATE",
+                        EntityState.Deleted => "DELETE",
+                        _ => "UPDATE"
+                    };
+
+                    switch (entry.Entity)
+                    {
+                        case TenantCustomer c:
+                            pendingSyncs.Add(("TenantCustomers", op, c, () => c.TenantCustomerId.ToString()));
+                            break;
+                        case Product p:
+                            pendingSyncs.Add(("Products", op, p, () => p.ProductId.ToString()));
+                            break;
+                        case Supplier s:
+                            pendingSyncs.Add(("Suppliers", op, s, () => s.SupplierId.ToString()));
+                            break;
+                        case Inventory inv:
+                            pendingSyncs.Add(("Inventories", op, inv, () => inv.InventoryId.ToString()));
+                            break;
+                        case CustomerInteraction ci:
+                            pendingSyncs.Add(("CustomerInteractions", op, ci, () => ci.InteractionId.ToString()));
+                            break;
+                        case ServiceRequest sr:
+                            pendingSyncs.Add(("ServiceRequests", op, sr, () => sr.RequestId.ToString()));
+                            break;
+                        case BillingTransaction bt:
+                            pendingSyncs.Add(("BillingTransactions", op, bt, () => bt.TransactionId.ToString()));
+                            break;
+                        case ServiceStatusLog sl:
+                            pendingSyncs.Add(("ServiceStatusLogs", op, sl, () => sl.LogId.ToString()));
+                            break;
+                        case FollowUp fu:
+                            pendingSyncs.Add(("FollowUps", op, fu, () => fu.FollowUpId.ToString()));
+                            break;
+                        case TenantBranch br:
+                            pendingSyncs.Add(("Branches", op, br, () => br.BranchId.ToString()));
+                            break;
+                    }
+                }
+            }
+        }
+
+        var result = await base.SaveChangesAsync(cancellationToken);
+
+        if (CloudSyncService != null && CompanyId > 0 && pendingSyncs.Count > 0)
+        {
+            foreach (var item in pendingSyncs)
+            {
+                try
+                {
+                    string key = item.GetKey();
+                    await CloudSyncService.QueueAndSyncRecordAsync(
+                        item.TableName,
+                        CompanyId,
+                        key,
+                        item.Operation,
+                        item.Entity,
+                        cancellationToken);
+                }
+                catch
+                {
+                    // Local save already succeeded; do not disrupt caller
+                }
+            }
+        }
+
+        return result;
     }
 }

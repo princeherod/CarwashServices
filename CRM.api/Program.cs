@@ -29,6 +29,8 @@ builder.Services.AddScoped<ITenantDbContextFactory, TenantDbContextFactory>();
 builder.Services.AddScoped<ITenantDatabaseProvisioner, TenantDatabaseProvisioner>();
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
 builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+builder.Services.AddSingleton<ICloudSyncService, CloudSyncService>();
+builder.Services.AddHostedService<CloudSyncBackgroundService>();
 
 // -----------------------------------------------------------------
 // MVC / OpenAPI

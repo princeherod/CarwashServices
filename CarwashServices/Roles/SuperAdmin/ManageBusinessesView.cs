@@ -29,15 +29,14 @@ namespace CarwashServices.Roles.SuperAdmin
         private static readonly Color HeaderBg = Color.FromArgb(0xF7, 0xFA, 0xFD);
         private static readonly Color Blue = Color.FromArgb(0x1E, 0x88, 0xE5);
         private static readonly Color BlueSoft = Color.FromArgb(0xE3, 0xF1, 0xFD);
-        private static readonly Color Green = Color.FromArgb(0x1E, 0x7A, 0x34);
-        private static readonly Color GreenSoft = Color.FromArgb(0xE4, 0xF5, 0xE8);
-        private static readonly Color Red = Color.FromArgb(0xC6, 0x28, 0x28);
-        private static readonly Color RedSoft = Color.FromArgb(0xFD, 0xE7, 0xE6);
+        private static readonly Color DeepNavy = Color.FromArgb(0x0C, 0x4A, 0x6E);
+        private static readonly Color SlateBlue = Color.FromArgb(0x47, 0x55, 0x69);
+        private static readonly Color SlateBlueSoft = Color.FromArgb(0xF1, 0xF5, 0xF9);
         private static readonly Color BorderSoft = Color.FromArgb(0xE1, 0xE7, 0xF0);
 
         // Fonts
-        private static readonly Font FontTitle = new("Segoe UI Semibold", 13.5f);
-        private static readonly Font FontSubtitle = new("Segoe UI", 9f);
+        private static readonly Font FontTitle = new("Segoe UI Semibold", 22f);
+        private static readonly Font FontSubtitle = new("Segoe UI", 9.5f);
         private static readonly Font FontKpiNum = new("Segoe UI Semibold", 20f);
         private static readonly Font FontKpiLbl = new("Segoe UI", 8.5f);
         private static readonly Font FontCell = new("Segoe UI", 9.5f);
@@ -74,11 +73,11 @@ namespace CarwashServices.Roles.SuperAdmin
         private Label _kpiInactiveNum = null!;
 
         private const int PadX = 36;
-        private const int KpiY = 82;
+        private const int KpiY = 106;
         private const int KpiH = 80;
-        private const int FilterY = 176;
+        private const int FilterY = 200;
         private const int FilterH = 44;
-        private const int GridY = 232;
+        private const int GridY = 256;
         private const int Gap = 16;
 
         public ManageBusinessesView()
@@ -126,7 +125,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // ---- Top Header Row ----
             var titleLbl = new Label
             {
-                Text = "Tenant Businesses",
+                Text = "Manage Businesses",
                 Font = FontTitle,
                 ForeColor = Navy,
                 Location = new Point(PadX, 20),
@@ -137,7 +136,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 Text = "Onboard new businesses, configure tenant details, and manage platform access.",
                 Font = FontSubtitle,
                 ForeColor = Muted,
-                Location = new Point(PadX, 48),
+                Location = new Point(PadX, 64),
                 AutoSize = true
             };
             _contentPanel.Controls.Add(titleLbl);
@@ -165,11 +164,11 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 _statusFilterCombo.SelectedIndex = 0;
             });
-            _activeCard = CreateKpiCard("ACTIVE TENANTS", out _kpiActiveNum, Green, () =>
+            _activeCard = CreateKpiCard("ACTIVE TENANTS", out _kpiActiveNum, DeepNavy, () =>
             {
                 _statusFilterCombo.SelectedItem = "Active";
             });
-            _inactiveCard = CreateKpiCard("INACTIVE TENANTS", out _kpiInactiveNum, Red, () =>
+            _inactiveCard = CreateKpiCard("INACTIVE TENANTS", out _kpiInactiveNum, SlateBlue, () =>
             {
                 _statusFilterCombo.SelectedItem = "Inactive";
             });
@@ -302,14 +301,14 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "CompanyCode",
-                HeaderText = "CODE",
+                HeaderText = "Code",
                 Width = 85,
                 MinimumWidth = 75
             });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "CompanyName",
-                HeaderText = "BUSINESS NAME",
+                HeaderText = "Business Name",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 150,
                 FillWeight = 120
@@ -317,42 +316,42 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Contact",
-                HeaderText = "CONTACT",
+                HeaderText = "Contact",
                 Width = 150,
                 MinimumWidth = 125
             });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Location",
-                HeaderText = "LOCATION",
+                HeaderText = "Location",
                 Width = 130,
                 MinimumWidth = 110
             });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "AssociatedAdmin",
-                HeaderText = "ASSOCIATED ADMIN",
+                HeaderText = "Associated Admin",
                 Width = 185,
                 MinimumWidth = 160
             });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Status",
-                HeaderText = "STATUS",
+                HeaderText = "Status",
                 Width = 90,
                 MinimumWidth = 85
             });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "CreatedAt",
-                HeaderText = "REGISTERED DATE",
+                HeaderText = "Date Registered",
                 Width = 125,
                 MinimumWidth = 110
             });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Actions",
-                HeaderText = "ACTIONS",
+                HeaderText = "Actions",
                 Width = SuperAdminActionMenuHelper.ActionsColWidth,
                 MinimumWidth = 70,
                 DefaultCellStyle = new DataGridViewCellStyle
@@ -599,8 +598,8 @@ namespace CarwashServices.Roles.SuperAdmin
                 var status = Convert.ToString(e.Value) ?? "Active";
                 bool isActive = status == "Active";
 
-                var pillBg = isActive ? GreenSoft : RedSoft;
-                var pillFg = isActive ? Green : Red;
+                var pillBg = isActive ? BlueSoft : SlateBlueSoft;
+                var pillFg = isActive ? DeepNavy : SlateBlue;
 
                 int pillW = 76;
                 int pillH = 24;

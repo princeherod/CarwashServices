@@ -33,11 +33,11 @@ namespace CRM.api.Controllers
             try
             {
                 var paidTotal = await _db.TenantBillingTransactions
-                    .Where(t => t.PaymentStatus == "Paid")
+                    .Where(t => t.PaymentStatus == "Paid" || t.PaymentStatus == "Completed")
                     .SumAsync(t => (decimal?)t.Amount) ?? 0m;
 
                 var outstandingTotal = await _db.TenantBillingTransactions
-                    .Where(t => t.PaymentStatus != "Paid")
+                    .Where(t => t.PaymentStatus != "Paid" && t.PaymentStatus != "Completed")
                     .SumAsync(t => (decimal?)t.Amount) ?? 0m;
 
                 var activeSubs = await _db.TenantSubscriptions

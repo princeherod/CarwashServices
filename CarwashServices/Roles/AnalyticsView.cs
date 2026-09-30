@@ -62,6 +62,14 @@ namespace CarwashServices.Roles
                 BuildUi();
                 await ReloadAsync();
             };
+
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () => await ReloadAsync());
+                }
+            };
         }
 
         protected override void Dispose(bool disposing)
@@ -585,12 +593,18 @@ namespace CarwashServices.Roles
                 Cursor = Cursors.WaitCursor;
 
                 var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
-                var summaryT = _http.GetFromJsonAsync<AnalyticsSummaryDto>($"api/analytics/summary?companyId={companyId}");
+                string branchParam = "";
+                if (CarwashServices.Auth.SessionUser.CurrentBranchId.HasValue && CarwashServices.Auth.SessionUser.CurrentBranchId.Value > 0)
+                {
+                    branchParam = $"&branchId={CarwashServices.Auth.SessionUser.CurrentBranchId.Value}";
+                }
+                var summaryT = _http.GetFromJsonAsync<AnalyticsSummaryDto>($"api/analytics/summary?companyId={companyId}{branchParam}");
                 var retentionT = _http.GetFromJsonAsync<List<RetentionPointDto>>($"api/analytics/retention?companyId={companyId}");
                 var segmentsT = _http.GetFromJsonAsync<SegmentCountsDto>($"api/analytics/segments?companyId={companyId}");
                 var revenueT = _http.GetFromJsonAsync<RevenueResponseDto>($"api/analytics/revenue?companyId={companyId}");
                 var recentT = _http.GetFromJsonAsync<List<ServiceRequestDto>>($"api/analytics/recent?companyId={companyId}");
-                var customersT = _http.GetFromJsonAsync<List<TenantCustomerDto>>($"api/tenant/{companyId}/tenant-customers");
+                var custUrl = $"api/tenant/{companyId}/tenant-customers" + (branchParam.Length > 0 ? $"?{branchParam.TrimStart('&')}" : "");
+                var customersT = _http.GetFromJsonAsync<List<TenantCustomerDto>>(custUrl);
 
                 // NEW — wash frequency endpoint
                 var washT = _http.GetFromJsonAsync<List<WashFrequencyPointDto>>(

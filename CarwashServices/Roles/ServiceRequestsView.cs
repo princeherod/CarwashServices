@@ -145,6 +145,14 @@ namespace CarwashServices.Roles
                 await LoadRequestsAsync();
             };
 
+            SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () => await LoadRequestsAsync());
+                }
+            };
+
             LostFocus += (s, e) => CloseActiveMenu();
         }
 
@@ -834,6 +842,11 @@ namespace CarwashServices.Roles
                 var url = _tab == ListTab.Active
                     ? $"api/service-requests?companyId={companyId}"
                     : $"api/service-requests/archived?companyId={companyId}";
+
+                if (SessionUser.CurrentBranchId.HasValue && SessionUser.CurrentBranchId.Value > 0)
+                {
+                    url += $"&branchId={SessionUser.CurrentBranchId.Value}";
+                }
 
                 _all = await _http.GetFromJsonAsync<List<ServiceRequestDto>>(url) ?? new();
 

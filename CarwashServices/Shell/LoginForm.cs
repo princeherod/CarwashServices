@@ -393,6 +393,7 @@ namespace CarwashServices.Shell
                             SessionUser.CompanyCode = user.CompanyCode ?? "";
                             SessionUser.TermsAccepted = user.TermsAccepted;
                             SessionUser.TermsAcceptedVersion = user.TermsAcceptedVersion;
+                            SessionUser.MultiBranchEnabled = user.MultiBranchEnabled;
                         }
                     }
                     catch { }

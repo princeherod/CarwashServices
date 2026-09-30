@@ -57,11 +57,25 @@ public class AuthController : ControllerBase
         string? termsAcceptedVersion = null;
         DateTime? termsAcceptedAt = null;
 
+        bool multiBranchEnabled = false;
         if (user.Company != null)
         {
             termsAccepted = user.Company.TermsAccepted;
             termsAcceptedVersion = user.Company.TermsAcceptedVersion;
             termsAcceptedAt = user.Company.TermsAcceptedAt;
+        }
+
+        if (user.CompanyId.HasValue && user.CompanyId.Value > 0)
+        {
+            var sub = await _db.TenantSubscriptions
+                .Include(s => s.Plan)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.CompanyId == user.CompanyId.Value && s.Status == "Active");
+
+            if (sub?.Plan != null)
+            {
+                multiBranchEnabled = sub.Plan.MultiBranchEnabled;
+            }
         }
 
         return Ok(new
@@ -77,7 +91,8 @@ public class AuthController : ControllerBase
             companyCode = user.Company?.CompanyCode ?? "",
             termsAccepted = termsAccepted,
             termsAcceptedVersion = termsAcceptedVersion,
-            termsAcceptedAt = termsAcceptedAt
+            termsAcceptedAt = termsAcceptedAt,
+            multiBranchEnabled = multiBranchEnabled
         });
     }
 }

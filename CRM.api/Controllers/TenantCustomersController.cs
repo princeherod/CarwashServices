@@ -18,12 +18,19 @@ public class TenantCustomersController : ControllerBase
 
     // Active list — archived rows are filtered out.
     [HttpGet]
-    public async Task<IActionResult> GetAll(int companyId)
+    public async Task<IActionResult> GetAll(int companyId, [FromQuery] int? branchId = null)
     {
         await using var tenantDb = await _tenantFactory.CreateAsync(companyId);
-        var customers = await tenantDb.TenantCustomers
+        var query = tenantDb.TenantCustomers
             .AsNoTracking()
-            .Where(c => !c.IsArchived)
+            .Where(c => !c.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(c => c.BranchId == branchId.Value);
+        }
+
+        var customers = await query
             .OrderBy(c => c.TenantCustomerId)
             .ToListAsync();
         return Ok(customers);
@@ -31,12 +38,19 @@ public class TenantCustomersController : ControllerBase
 
     // Archived list.
     [HttpGet("archived")]
-    public async Task<IActionResult> GetArchived(int companyId)
+    public async Task<IActionResult> GetArchived(int companyId, [FromQuery] int? branchId = null)
     {
         await using var tenantDb = await _tenantFactory.CreateAsync(companyId);
-        var customers = await tenantDb.TenantCustomers
+        var query = tenantDb.TenantCustomers
             .AsNoTracking()
-            .Where(c => c.IsArchived)
+            .Where(c => c.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(c => c.BranchId == branchId.Value);
+        }
+
+        var customers = await query
             .OrderByDescending(c => c.ArchivedAt)
             .ToListAsync();
         return Ok(customers);
@@ -110,6 +124,16 @@ public class TenantCustomersController : ControllerBase
         customer.ArchivedAt = null;
         customer.ArchivedBy = null;
 
+        if (!customer.BranchId.HasValue || customer.BranchId.Value <= 0)
+        {
+            var defBranch = await tenantDb.Branches.FirstOrDefaultAsync(b => b.IsMainBranch && !b.IsArchived)
+                ?? await tenantDb.Branches.FirstOrDefaultAsync(b => !b.IsArchived);
+            if (defBranch != null)
+            {
+                customer.BranchId = defBranch.BranchId;
+            }
+        }
+
         tenantDb.TenantCustomers.Add(customer);
         await tenantDb.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { companyId, tenantCustomerId = customer.TenantCustomerId }, customer);
@@ -126,6 +150,11 @@ public class TenantCustomersController : ControllerBase
 
         if (existing is null)
             return NotFound(new { message = $"TenantCustomer {tenantCustomerId} not found." });
+
+        if (customer.BranchId.HasValue && customer.BranchId.Value > 0)
+        {
+            existing.BranchId = customer.BranchId.Value;
+        }
 
         if (string.IsNullOrWhiteSpace(customer.FirstName) || string.IsNullOrWhiteSpace(customer.LastName))
         {

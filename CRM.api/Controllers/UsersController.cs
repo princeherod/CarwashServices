@@ -28,7 +28,7 @@ public class UsersController : ControllerBase
 
         if (companyId.HasValue && companyId.Value > 0)
         {
-            query = query.Where(u => u.CompanyId == companyId.Value || u.CompanyId == null);
+            query = query.Where(u => u.CompanyId == companyId.Value);
         }
 
         if (!string.IsNullOrWhiteSpace(roleIds))

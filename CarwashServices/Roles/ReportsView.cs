@@ -126,6 +126,14 @@ namespace CarwashServices.Roles
             };
 
             InitializeUI();
+
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () => await LoadAsync());
+                }
+            };
         }
 
         protected override void Dispose(bool disposing)
@@ -941,6 +949,11 @@ namespace CarwashServices.Roles
                           $"&range={Uri.EscapeDataString(range)}" +
                           $"&service={Uri.EscapeDataString(service)}" +
                           $"&vehicle={Uri.EscapeDataString(vehicle)}";
+
+                if (CarwashServices.Auth.SessionUser.CurrentBranchId.HasValue && CarwashServices.Auth.SessionUser.CurrentBranchId.Value > 0)
+                {
+                    url += $"&branchId={CarwashServices.Auth.SessionUser.CurrentBranchId.Value}";
+                }
 
                 var resp = await _http.GetFromJsonAsync<ReportsResponseDto>(url, ct)
                            ?? new ReportsResponseDto();

@@ -33,6 +33,7 @@ namespace CarwashServices.Dtos
         public bool TermsAccepted { get; set; } = true;
         public string? TermsAcceptedVersion { get; set; }
         public DateTime? TermsAcceptedAt { get; set; }
+        public bool MultiBranchEnabled { get; set; }
     }
 
     public class UserListItemDto

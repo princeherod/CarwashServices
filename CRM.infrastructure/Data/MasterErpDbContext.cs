@@ -7,8 +7,13 @@ namespace CRM.Infrastructure.Data;
 
 public class MasterErpDbContext : IdentityDbContext
 {
-    public MasterErpDbContext(DbContextOptions<MasterErpDbContext> options) : base(options)
+    public CRM.Infrastructure.Services.ICloudSyncService? CloudSyncService { get; set; }
+
+    public MasterErpDbContext(
+        DbContextOptions<MasterErpDbContext> options,
+        CRM.Infrastructure.Services.ICloudSyncService? cloudSyncService = null) : base(options)
     {
+        CloudSyncService = cloudSyncService;
     }
 
     public DbSet<Company> Companies => Set<Company>();
@@ -30,6 +35,7 @@ public class MasterErpDbContext : IdentityDbContext
     public DbSet<TenantBillingTransaction> TenantBillingTransactions => Set<TenantBillingTransaction>();
     public DbSet<BackupLog> BackupLogs => Set<BackupLog>();
     public DbSet<TermsCondition> TermsConditions => Set<TermsCondition>();
+    public DbSet<TenantBranch> Branches => Set<TenantBranch>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -321,5 +327,99 @@ public class MasterErpDbContext : IdentityDbContext
                 .HasForeignKey(x => x.CompanyId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
+
+        builder.Entity<TenantBranch>(entity =>
+        {
+            entity.HasKey(x => x.BranchId);
+            entity.ToTable("Branches");
+            entity.Property(x => x.BranchCode).HasMaxLength(50).IsRequired();
+            entity.Property(x => x.BranchName).HasMaxLength(150).IsRequired();
+            entity.Property(x => x.Address).HasMaxLength(250);
+            entity.Property(x => x.City).HasMaxLength(100);
+            entity.Property(x => x.Province).HasMaxLength(100);
+            entity.Property(x => x.ContactNumber).HasMaxLength(50);
+            entity.Property(x => x.Email).HasMaxLength(200);
+            entity.Property(x => x.ArchivedBy).HasMaxLength(200);
+            entity.HasIndex(x => x.BranchCode).IsUnique();
+        });
+    }
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var pendingSyncs = new List<(string TableName, int? CompanyId, string Operation, object Entity, Func<string> GetKey)>();
+
+        if (CloudSyncService != null)
+        {
+            foreach (var entry in ChangeTracker.Entries())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                {
+                    string op = entry.State switch
+                    {
+                        EntityState.Added => "INSERT",
+                        EntityState.Modified => "UPDATE",
+                        EntityState.Deleted => "DELETE",
+                        _ => "UPDATE"
+                    };
+
+                    switch (entry.Entity)
+                    {
+                        case Company c:
+                            pendingSyncs.Add(("Companies", c.CompanyId, op, c, () => c.CompanyId.ToString()));
+                            break;
+                        case User u:
+                            pendingSyncs.Add(("Users", u.CompanyId, op, u, () => u.UserId.ToString()));
+                            break;
+                        case Role r:
+                            pendingSyncs.Add(("Roles", null, op, r, () => r.RoleId.ToString()));
+                            break;
+                        case CompanyDatabase cd:
+                            pendingSyncs.Add(("CompanyDatabases", cd.CompanyId, op, cd, () => cd.CompanyDatabaseId.ToString()));
+                            break;
+                        case TermsCondition tc:
+                            pendingSyncs.Add(("TermsConditions", null, op, tc, () => tc.TermsId.ToString()));
+                            break;
+                        case TenantSubscriptionPlan tsp:
+                            pendingSyncs.Add(("TenantSubscriptionPlans", null, op, tsp, () => tsp.PlanId.ToString()));
+                            break;
+                        case TenantSubscription ts:
+                            pendingSyncs.Add(("TenantSubscriptions", ts.CompanyId, op, ts, () => ts.TenantSubscriptionId.ToString()));
+                            break;
+                        case TenantBillingTransaction tbt:
+                            pendingSyncs.Add(("TenantBillingTransactions", tbt.CompanyId, op, tbt, () => tbt.TransactionId.ToString()));
+                            break;
+                        case BackupLog bl:
+                            pendingSyncs.Add(("BackupLogs", null, op, bl, () => bl.BackupId.ToString()));
+                            break;
+                    }
+                }
+            }
+        }
+
+        var result = await base.SaveChangesAsync(cancellationToken);
+
+        if (CloudSyncService != null && pendingSyncs.Count > 0)
+        {
+            foreach (var item in pendingSyncs)
+            {
+                try
+                {
+                    string key = item.GetKey();
+                    await CloudSyncService.QueueAndSyncRecordAsync(
+                        item.TableName,
+                        item.CompanyId,
+                        key,
+                        item.Operation,
+                        item.Entity,
+                        cancellationToken);
+                }
+                catch
+                {
+                    // Local save already succeeded; do not disrupt caller
+                }
+            }
+        }
+
+        return result;
     }
 }

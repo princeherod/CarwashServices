@@ -19,17 +19,25 @@ public class DashboardController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetDashboard([FromQuery] int companyId = 1)
+    public async Task<IActionResult> GetDashboard(
+        [FromQuery] int companyId = 1,
+        [FromQuery] int? branchId = null)
     {
         var today = DateTime.Today;
         var monthStart = new DateTime(today.Year, today.Month, 1);
 
         var tenant = await _tenantFactory.CreateAsync(companyId);
 
-        var customers = await tenant.TenantCustomers
+        var customersQuery = tenant.TenantCustomers
             .AsNoTracking()
-            .Where(c => !c.IsArchived)
-            .ToListAsync();
+            .Where(c => !c.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            customersQuery = customersQuery.Where(c => c.BranchId == branchId.Value);
+        }
+
+        var customers = await customersQuery.ToListAsync();
 
         var products = await tenant.Products
             .AsNoTracking()
@@ -43,10 +51,16 @@ public class DashboardController : ControllerBase
         var users = await _db.Users.AsNoTracking().ToListAsync();
         var userById = users.ToDictionary(u => u.UserId);
 
-        var requests = await tenant.ServiceRequests
+        var requestsQuery = tenant.ServiceRequests
             .AsNoTracking()
-            .Where(r => !r.IsArchived)
-            .ToListAsync();
+            .Where(r => !r.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            requestsQuery = requestsQuery.Where(r => r.BranchId == branchId.Value);
+        }
+
+        var requests = await requestsQuery.ToListAsync();
 
         int totalCustomers = customers.Count;
 
@@ -91,10 +105,16 @@ public class DashboardController : ControllerBase
             .ToList();
 
         // ---- Follow-Up Queue with ids ----
-        var followUps = await tenant.FollowUps
+        var followUpsQuery = tenant.FollowUps
             .AsNoTracking()
-            .Where(f => !f.IsArchived)
-            .ToListAsync();
+            .Where(f => !f.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            followUpsQuery = followUpsQuery.Where(f => f.BranchId == branchId.Value);
+        }
+
+        var followUps = await followUpsQuery.ToListAsync();
 
         var queue = followUps
             .Where(f => f.Status == "Pending" || f.Status == "Scheduled" || f.Status == "Due today")

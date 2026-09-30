@@ -16,6 +16,7 @@ namespace CRM.domain.Entities
         public string Status { get; set; } // Active, Inactive
         public DateTime CreatedAt { get; set; }
         public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
 
         public Role Role { get; set; }
         public CRM.Domain.Entities.Company? Company { get; set; }

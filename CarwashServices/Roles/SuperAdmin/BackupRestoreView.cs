@@ -33,15 +33,12 @@ namespace CarwashServices.Roles.SuperAdmin
         private static readonly Color CardBorder = Color.FromArgb(0xE1, 0xE7, 0xF0);
         private static readonly Color Blue = Color.FromArgb(0x02, 0x84, 0xC7);
         private static readonly Color BlueSoft = Color.FromArgb(0xE0, 0xF2, 0xFE);
-        private static readonly Color Purple = Color.FromArgb(0x7C, 0x3A, 0xED);
-        private static readonly Color PurpleSoft = Color.FromArgb(0xF3, 0xE8, 0xFF);
-        private static readonly Color Green = Color.FromArgb(0x15, 0x80, 0x3D);
-        private static readonly Color GreenSoft = Color.FromArgb(0xDC, 0xFC, 0xE7);
-        private static readonly Color Amber = Color.FromArgb(0xB4, 0x53, 0x09);
-        private static readonly Color AmberBg = Color.FromArgb(0xFF, 0xFB, 0xEB);
-        private static readonly Color AmberBorder = Color.FromArgb(0xFD, 0xE6, 0x8A);
-        private static readonly Color Danger = Color.FromArgb(0xDC, 0x26, 0x26);
-        private static readonly Color DangerHover = Color.FromArgb(0xB9, 0x1C, 0x1C);
+        private static readonly Color DeepNavy = Color.FromArgb(0x0C, 0x4A, 0x6E);
+        private static readonly Color DeepNavySoft = Color.FromArgb(0xEA, 0xF2, 0xFD);
+        private static readonly Color SlateBlue = Color.FromArgb(0x47, 0x55, 0x69);
+        private static readonly Color SlateBlueSoft = Color.FromArgb(0xF1, 0xF5, 0xF9);
+        private static readonly Color RoyalBlue = Color.FromArgb(0x1D, 0x4E, 0xD8);
+        private static readonly Color RoyalBlueHover = Color.FromArgb(0x1E, 0x40, 0xAF);
         private static readonly Color CodeBg = Color.FromArgb(0x0F, 0x17, 0x2A);
 
         // ================================================================
@@ -110,24 +107,13 @@ namespace CarwashServices.Roles.SuperAdmin
             };
             Controls.Add(_scrollContainer);
 
-            // ---- Breadcrumb ----
-            _scrollContainer.Controls.Add(new Label
-            {
-                Text = "Super Admin Modules  ›  Backup & Restore Data",
-                ForeColor = Muted,
-                Font = new Font("Segoe UI", 9f),
-                Location = new Point(36, 12),
-                AutoSize = true,
-                UseMnemonic = false
-            });
-
             // ---- Title ----
             _scrollContainer.Controls.Add(new Label
             {
-                Text = "Backup & Restore Data",
+                Text = "Backup & Restore",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 22f),
-                Location = new Point(36, 34),
+                Location = new Point(36, 20),
                 AutoSize = true,
                 UseMnemonic = false
             });
@@ -137,8 +123,8 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 Text = SuperAdminLabels.BackupRestoreDataSubtitle,
                 ForeColor = Muted,
-                Font = new Font("Segoe UI", 9f),
-                Location = new Point(36, 80),
+                Font = new Font("Segoe UI", 9.5f),
+                Location = new Point(36, 64),
                 AutoSize = true,
                 UseMnemonic = false
             });
@@ -184,7 +170,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
         private void RelayoutCards()
         {
-            int top = 120;
+            int top = 106;
             int padX = 36;
             int gap = 24;
             int availableWidth = Math.Max(700, _scrollContainer.ClientSize.Width - (padX * 2));
@@ -300,7 +286,7 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 Text = "",
                 Font = new Font("Segoe UI", 8.5f),
-                ForeColor = Green,
+                ForeColor = RoyalBlue,
                 Location = new Point(24, _leftCard.Height - 94),
                 Size = new Size(Math.Max(100, _leftCard.Width - 48), 24),
                 UseMnemonic = false
@@ -378,27 +364,27 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 Location = new Point(24, 92),
                 Size = new Size(Math.Max(100, _rightCard.Width - 48), 64),
-                BackColor = AmberBg,
+                BackColor = DeepNavySoft,
                 Padding = new Padding(12)
             };
             _warnBanner.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using var path = RoundedRect(new Rectangle(0, 0, _warnBanner.Width - 1, _warnBanner.Height - 1), 8);
-                using var fill = new SolidBrush(AmberBg);
+                using var fill = new SolidBrush(DeepNavySoft);
                 e.Graphics.FillPath(fill, path);
-                using var pen = new Pen(AmberBorder, 1.2f);
+                using var pen = new Pen(Blue, 1.2f);
                 e.Graphics.DrawPath(pen, path);
 
                 // Warning Icon
-                using var iconPen = new Pen(Amber, 1.8f);
+                using var iconPen = new Pen(DeepNavy, 1.8f);
                 e.Graphics.DrawPolygon(iconPen, new PointF[]
                 {
                     new(22, 16),
                     new(32, 34),
                     new(12, 34)
                 });
-                using var b = new SolidBrush(Amber);
+                using var b = new SolidBrush(DeepNavy);
                 e.Graphics.FillRectangle(b, 21, 23, 2, 5);
                 e.Graphics.FillEllipse(b, 21, 30, 2, 2);
             };
@@ -407,7 +393,7 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 Text = SuperAdminLabels.RestoreWarningCaution,
                 Font = new Font("Segoe UI", 8.5f),
-                ForeColor = Amber,
+                ForeColor = DeepNavy,
                 Location = new Point(40, 10),
                 Size = new Size(_warnBanner.Width - 52, 44),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
@@ -436,7 +422,7 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 Text = "",
                 Font = new Font("Segoe UI", 8.5f),
-                ForeColor = Green,
+                ForeColor = RoyalBlue,
                 Location = new Point(24, _rightCard.Height - 94),
                 Size = new Size(Math.Max(100, _rightCard.Width - 48), 24),
                 UseMnemonic = false
@@ -450,14 +436,14 @@ namespace CarwashServices.Roles.SuperAdmin
                 Font = new Font("Segoe UI Semibold", 10f),
                 Size = new Size(Math.Max(100, _rightCard.Width - 48), 44),
                 Location = new Point(24, _rightCard.Height - 68),
-                BackColor = Danger,
+                BackColor = RoyalBlue,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
                 Enabled = false
             };
             _restoreBtn.FlatAppearance.BorderSize = 0;
-            _restoreBtn.FlatAppearance.MouseOverBackColor = DangerHover;
+            _restoreBtn.FlatAppearance.MouseOverBackColor = RoyalBlueHover;
             _restoreBtn.Click += async (s, e) => await RestoreSelectedBackupAsync();
             _rightCard.Controls.Add(_restoreBtn);
 
@@ -500,7 +486,7 @@ namespace CarwashServices.Roles.SuperAdmin
             }
             catch (Exception ex)
             {
-                _restoreStatusLbl.ForeColor = Danger;
+                _restoreStatusLbl.ForeColor = SlateBlue;
                 _restoreStatusLbl.Text = $"Failed to load backups: {ex.Message}";
             }
             finally
@@ -563,9 +549,9 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using var path = RoundedRect(new Rectangle(0, 0, row.Width - 1, row.Height - 1), 8);
-                using var bgBrush = new SolidBrush(isSelected ? Color.FromArgb(0xEE, 0xF2, 0xFF) : Color.White);
+                using var bgBrush = new SolidBrush(isSelected ? DeepNavySoft : Color.White);
                 e.Graphics.FillPath(bgBrush, path);
-                using var pen = new Pen(isSelected ? Purple : CardBorder, isSelected ? 1.5f : 1f);
+                using var pen = new Pen(isSelected ? RoyalBlue : CardBorder, isSelected ? 1.5f : 1f);
                 e.Graphics.DrawPath(pen, path);
             };
 
@@ -581,8 +567,8 @@ namespace CarwashServices.Roles.SuperAdmin
             // Pill: Auto / Manual
             bool isAuto = string.Equals(item.Type, "Auto", StringComparison.OrdinalIgnoreCase);
             var pillText = isAuto ? SuperAdminLabels.BackupTypeAuto : SuperAdminLabels.BackupTypeManual;
-            var pillBg = isAuto ? BlueSoft : PurpleSoft;
-            var pillFg = isAuto ? Blue : Purple;
+            var pillBg = isAuto ? BlueSoft : SlateBlueSoft;
+            var pillFg = isAuto ? Blue : SlateBlue;
 
             var pill = new Label
             {
@@ -682,13 +668,13 @@ namespace CarwashServices.Roles.SuperAdmin
                 if (!resp.IsSuccessStatusCode)
                 {
                     var err = await resp.Content.ReadAsStringAsync();
-                    _backupStatusLbl.ForeColor = Danger;
+                    _backupStatusLbl.ForeColor = SlateBlue;
                     _backupStatusLbl.Text = $"Backup failed: {err}";
                     return;
                 }
 
                 var result = await resp.Content.ReadFromJsonAsync<CreateBackupResponse>();
-                _backupStatusLbl.ForeColor = Green;
+                _backupStatusLbl.ForeColor = RoyalBlue;
                 _backupStatusLbl.Text = $"✓ Backup created: {result?.FileName} (Status: Success)";
 
                 // Reload restore list to show newly created backup
@@ -696,7 +682,7 @@ namespace CarwashServices.Roles.SuperAdmin
             }
             catch (Exception ex)
             {
-                _backupStatusLbl.ForeColor = Danger;
+                _backupStatusLbl.ForeColor = SlateBlue;
                 _backupStatusLbl.Text = $"Error: {ex.Message}";
             }
             finally
@@ -723,7 +709,7 @@ namespace CarwashServices.Roles.SuperAdmin
             if (confirm != DialogResult.Yes) return;
 
             _restoreStatusLbl.Text = "Restoring database snapshot... Please wait.";
-            _restoreStatusLbl.ForeColor = Amber;
+            _restoreStatusLbl.ForeColor = Blue;
             _restoreBtn.Enabled = false;
             Cursor = Cursors.WaitCursor;
 
@@ -733,12 +719,12 @@ namespace CarwashServices.Roles.SuperAdmin
                 if (!resp.IsSuccessStatusCode)
                 {
                     var err = await resp.Content.ReadAsStringAsync();
-                    _restoreStatusLbl.ForeColor = Danger;
+                    _restoreStatusLbl.ForeColor = SlateBlue;
                     _restoreStatusLbl.Text = $"Restore failed: {err}";
                     return;
                 }
 
-                _restoreStatusLbl.ForeColor = Green;
+                _restoreStatusLbl.ForeColor = RoyalBlue;
                 _restoreStatusLbl.Text = $"✓ Database successfully restored from {_selectedBackup.FileName}!";
 
                 MessageBox.Show(
@@ -751,7 +737,7 @@ namespace CarwashServices.Roles.SuperAdmin
             }
             catch (Exception ex)
             {
-                _restoreStatusLbl.ForeColor = Danger;
+                _restoreStatusLbl.ForeColor = SlateBlue;
                 _restoreStatusLbl.Text = $"Restore error: {ex.Message}";
             }
             finally

@@ -142,15 +142,24 @@ public class FollowUpsController : ControllerBase
     //  LISTS
     // ================================================================
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] int? companyId = null)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] int? companyId = null,
+        [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
         await using var tenant = await _tenantFactory.CreateAsync(cid);
         await AutoExpireAsync(tenant);
 
-        var list = await tenant.FollowUps
+        var query = tenant.FollowUps
             .AsNoTracking()
-            .Where(f => !f.IsArchived)
+            .Where(f => !f.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(f => f.BranchId == branchId.Value);
+        }
+
+        var list = await query
             .OrderByDescending(f => f.FollowUpId)
             .ToListAsync();
         return Ok(list);
@@ -244,14 +253,23 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpGet("archived")]
-    public async Task<IActionResult> GetArchived([FromQuery] int? companyId = null)
+    public async Task<IActionResult> GetArchived(
+        [FromQuery] int? companyId = null,
+        [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
         await using var tenant = await _tenantFactory.CreateAsync(cid);
 
-        var list = await tenant.FollowUps
+        var query = tenant.FollowUps
             .AsNoTracking()
-            .Where(f => f.IsArchived)
+            .Where(f => f.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(f => f.BranchId == branchId.Value);
+        }
+
+        var list = await query
             .OrderByDescending(f => f.ArchivedAt)
             .ToListAsync();
         return Ok(list);

@@ -29,12 +29,18 @@ namespace CarwashServices.Dialogs
         private const int W2 = (ContentW - Gap) / 2;
         private const int X2b = PadX + W2 + Gap;
 
-        // Only these two roles may be assigned from the Manage Users screen.
-        // Aligned with Auth/UserRole.cs: 2 = Manager, 3 = Service Staff.
-        private static readonly (int Id, string Name)[] AllowedRoles =
+        private static readonly (int Id, string Name)[] SuperAdminRoles =
+        {
+            (4, "Super Admin"),
+            (1, "Admin"),
+            (2, "Manager"),
+            (3, "Service Staff")
+        };
+
+        private static readonly (int Id, string Name)[] StandardRoles =
         {
             (2, "Manager"),
-            (3, "Service Staff"),
+            (3, "Service Staff")
         };
 
         // ---- State ----
@@ -236,7 +242,10 @@ namespace CarwashServices.Dialogs
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 BackColor = Color.White
             };
-            foreach (var r in AllowedRoles)
+            var roles = (CarwashServices.Auth.SessionUser.RoleId == 4 || CarwashServices.Auth.SessionUser.Role == CarwashServices.Auth.UserRole.SuperAdmin)
+                ? SuperAdminRoles
+                : StandardRoles;
+            foreach (var r in roles)
                 _roleCombo.Items.Add(new ComboItem(r.Id, r.Name));
             _roleCombo.SelectedIndex = 0;
             body.Controls.Add(_roleCombo);
@@ -370,13 +379,28 @@ namespace CarwashServices.Dialogs
                 }
                 _emailTxt.Text = u.Email;
 
+                bool roleMatched = false;
                 for (int i = 0; i < _roleCombo.Items.Count; i++)
                 {
                     if (_roleCombo.Items[i] is ComboItem ci && ci.Id == u.RoleId)
                     {
                         _roleCombo.SelectedIndex = i;
+                        roleMatched = true;
                         break;
                     }
+                }
+                if (!roleMatched && u.RoleId > 0)
+                {
+                    string rName = u.RoleId switch
+                    {
+                        1 => "Admin",
+                        2 => "Manager",
+                        3 => "Service Staff",
+                        4 => "Super Admin",
+                        _ => $"Role {u.RoleId}"
+                    };
+                    int addedIdx = _roleCombo.Items.Add(new ComboItem(u.RoleId, rName));
+                    _roleCombo.SelectedIndex = addedIdx;
                 }
                 if (_statusCombo != null)
                     _statusCombo.SelectedItem = string.IsNullOrWhiteSpace(u.Status) ? "Active" : u.Status;
@@ -452,6 +476,10 @@ namespace CarwashServices.Dialogs
             {
                 HttpResponseMessage resp;
 
+                int? targetCompanyId = _isEdit
+                    ? (_loaded?.CompanyId ?? (CarwashServices.Auth.SessionUser.CompanyId.HasValue ? CarwashServices.Auth.SessionUser.CurrentCompanyId : (int?)null))
+                    : (CarwashServices.Auth.SessionUser.CompanyId.HasValue ? CarwashServices.Auth.SessionUser.CompanyId.Value : (int?)null);
+
                 if (_isEdit)
                 {
                     object body = string.IsNullOrEmpty(password)
@@ -462,7 +490,8 @@ namespace CarwashServices.Dialogs
                             fullName = full,
                             email = _emailTxt.Text.Trim(),
                             roleId = role.Id,
-                            status
+                            status,
+                            companyId = targetCompanyId
                         }
                         : new
                         {
@@ -473,7 +502,7 @@ namespace CarwashServices.Dialogs
                             roleId = role.Id,
                             status,
                             password,
-                            companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId
+                            companyId = targetCompanyId
                         };
 
                     resp = await _http.PutAsJsonAsync($"api/users/{_userId!.Value}", body);
@@ -489,7 +518,7 @@ namespace CarwashServices.Dialogs
                         roleId = role.Id,
                         status,
                         password,
-                        companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId
+                        companyId = targetCompanyId
                     };
                     resp = await _http.PostAsJsonAsync("api/users", body);
                 }
@@ -511,12 +540,24 @@ namespace CarwashServices.Dialogs
                 else
                 {
                     var text = await resp.Content.ReadAsStringAsync();
-                    _errorLbl.Text = $"Save failed ({(int)resp.StatusCode}).";
+                    string errorMsg = $"Save failed ({(int)resp.StatusCode}).";
+                    try
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(text);
+                        if (doc.RootElement.TryGetProperty("message", out var m))
+                            errorMsg = m.GetString() ?? errorMsg;
+                    }
+                    catch
+                    {
+                        if (!string.IsNullOrWhiteSpace(text)) errorMsg = text;
+                    }
+
+                    _errorLbl.Text = errorMsg;
                     MessageBox.Show(
-                        $"Save failed.\n\nHTTP {(int)resp.StatusCode}\n\n{text}",
-                        "Save User Failed",
+                        errorMsg,
+                        resp.StatusCode == System.Net.HttpStatusCode.Conflict ? "User Already Exists" : "Save User Failed",
                         MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
+                        MessageBoxIcon.Warning);
                 }
             }
             catch (Exception ex)

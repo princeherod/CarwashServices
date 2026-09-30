@@ -82,6 +82,14 @@ namespace CarwashServices.Roles
             Sidebar.EnableDoubleBuffering(this);
 
             Load += async (s, e) => await LoadAsync();
+
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () => await LoadAsync());
+                }
+            };
         }
 
         // ================================================================
@@ -439,8 +447,13 @@ namespace CarwashServices.Roles
             try
             {
                 Cursor = Cursors.WaitCursor;
-                _data = await _http.GetFromJsonAsync<DashboardResponseDto>(
-                    $"api/dashboard?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}") ?? new DashboardResponseDto();
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                string url = $"api/dashboard?companyId={companyId}";
+                if (CarwashServices.Auth.SessionUser.CurrentBranchId.HasValue && CarwashServices.Auth.SessionUser.CurrentBranchId.Value > 0)
+                {
+                    url += $"&branchId={CarwashServices.Auth.SessionUser.CurrentBranchId.Value}";
+                }
+                _data = await _http.GetFromJsonAsync<DashboardResponseDto>(url) ?? new DashboardResponseDto();
                 BindData();
             }
             catch (Exception ex)

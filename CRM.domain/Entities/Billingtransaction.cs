@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace CRM.domain.Entities
 {
@@ -10,6 +10,9 @@ namespace CRM.domain.Entities
         public decimal Amount { get; set; }
         public string PaymentStatus { get; set; } // Paid, Pending, Failed
         public DateTime TransactionDate { get; set; }
+
+        public int? BranchId { get; set; }
+        public TenantBranch? Branch { get; set; }
 
         public CustomerSubscription CustomerSubscription { get; set; }
         public ServiceRequest ServiceRequest { get; set; }

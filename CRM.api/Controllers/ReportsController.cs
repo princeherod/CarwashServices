@@ -22,6 +22,7 @@ public class ReportsController : ControllerBase
     [HttpGet("service-revenue")]
     public async Task<IActionResult> GetServiceRevenueReport(
         [FromQuery] int companyId = 1,
+        [FromQuery] int? branchId = null,
         [FromQuery] string range = "ThisYear",
         [FromQuery] string service = "All",
         [FromQuery] string vehicle = "All")
@@ -49,12 +50,18 @@ public class ReportsController : ControllerBase
                                .ToDictionary(g => g.Key, g => g.First().ProductName);
 
         // Only active requests within the range.
-        var requests = await tenant.ServiceRequests
+        var requestsQuery = tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived
                      && r.RequestedDate >= from
-                     && r.RequestedDate <= to)
-            .ToListAsync();
+                     && r.RequestedDate <= to);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            requestsQuery = requestsQuery.Where(r => r.BranchId == branchId.Value);
+        }
+
+        var requests = await requestsQuery.ToListAsync();
 
         if (service != "All")
         {

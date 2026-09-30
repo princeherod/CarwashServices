@@ -1,58 +1,191 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace CarwashServices.Auth
 {
+    public record ModuleSection(string Title, string[] Modules);
+
     /// <summary>
-    /// Central place that decides which sidebar modules a role can see.
-    /// Role ids MUST match Auth/UserRole.cs:
-    ///   1 = SuperAdmin, 2 = Admin, 3 = Manager, 4 = ServiceStaff
+    /// Central place that decides which sidebar modules a role/tenant can see.
+    /// Supports tenant-specific module arrangements for:
+    ///   - AquaShine: Main Transactions & Data Collection
+    ///   - SparkleRide: Business Intelligence & Actions
+    ///   - CleanRide: Branching, Business Intelligence & Actions
+    ///   - Super Admin: Master Platform or Restored Old Super Admin
     /// </summary>
     public static class RoleRouter
     {
-        public static string[] ModulesFor(UserRole role) => role switch
+        public static ModuleSection[] GetSectionsFor(UserRole role)
         {
-            UserRole.SuperAdmin => new[]
+            if (role == UserRole.SuperAdmin)
             {
-                "Manage Businesses",
-                "Manage Admin Accounts",
-                "Manage Subscription / Billing",
-                "Backup & Restore Data",
-                "Terms & Conditions"
-            },
+                return new[]
+                {
+                    new ModuleSection("OVERVIEW", new[]
+                    {
+                        "View Dashboard",
+                        "Analytics",
+                        "View Reports"
+                    }),
+                    new ModuleSection("MANAGEMENT", new[]
+                    {
+                        "Manage Users",
+                        "Manage Customers",
+                        "Manage Services",
+                        "Manage Service Requests",
+                        "Follow-Ups / Reminders",
+                        "Terms & Conditions"
+                    }),
+                    new ModuleSection("SUPER ADMIN MODULES", new[]
+                    {
+                        "Manage Businesses",
+                        "Manage Admin Accounts",
+                        "Manage Subscription / Billing",
+                        "Backup and Restore Data"
+                    })
+                };
+            }
 
-            UserRole.Admin => new[]
+            if (role == UserRole.Admin)
             {
-                "View Dashboard",
-                "Analytics",
-                "View Reports",
-                "Manage Users",
-                "Manage Customers",
-                "Manage Services",
-                "Manage Service Requests",
-                "Follow-Ups / Reminders",
-                "Terms & Conditions"
-            },
+                var email = (SessionUser.Email ?? "").ToLowerInvariant();
+                var code = (SessionUser.CompanyCode ?? "").ToUpperInvariant();
+                var name = (SessionUser.CompanyName ?? "").ToLowerInvariant();
 
-            UserRole.Manager => new[]
+                // Tenant A: AquaShine -> Main Transactions & Data Collection
+                if (code.Contains("AQUA") || code == "COMP001" || name.Contains("aquashine") || email == "admin@aquashine.com")
+                {
+                    return new[]
+                    {
+                        new ModuleSection("MAIN TRANSACTIONS", new[]
+                        {
+                            "View Dashboard",
+                            "Manage Service Requests",
+                            "Manage Services"
+                        }),
+                        new ModuleSection("DATA COLLECTION", new[]
+                        {
+                            "Manage Customers",
+                            "Manage Users",
+                            "Terms & Conditions"
+                        })
+                    };
+                }
+
+                // Tenant B: SparkleRide -> Business Intelligence & Actions
+                if (code.Contains("SPARK") || code == "COMP002" || name.Contains("sparkleride") || email == "admin@sparkleride.com")
+                {
+                    return new[]
+                    {
+                        new ModuleSection("BUSINESS INTELLIGENCE", new[]
+                        {
+                            "View Dashboard",
+                            "Analytics",
+                            "View Reports"
+                        }),
+                        new ModuleSection("ACTIONS", new[]
+                        {
+                            "Manage Service Requests",
+                            "Follow-Ups / Reminders",
+                            "Manage Users",
+                            "Terms & Conditions"
+                        })
+                    };
+                }
+
+                // Tenant C: CleanRide -> Branching, Business Intelligence & Actions
+                if (code.Contains("CLEAN") || code == "COMP003" || name.Contains("cleanride") || email == "admin@cleanride.com")
+                {
+                    return new[]
+                    {
+                        new ModuleSection("BRANCHING", new[]
+                        {
+                            "Branches"
+                        }),
+                        new ModuleSection("BUSINESS INTELLIGENCE", new[]
+                        {
+                            "View Dashboard",
+                            "Analytics",
+                            "View Reports"
+                        }),
+                        new ModuleSection("ACTIONS", new[]
+                        {
+                            "Manage Service Requests",
+                            "Follow-Ups / Reminders",
+                            "Manage Users",
+                            "Terms & Conditions"
+                        })
+                    };
+                }
+
+                // Restored / Old Admin test account (admin@carwashcrm.com) & Default full Admin modules
+                return new[]
+                {
+                    new ModuleSection("OVERVIEW", new[]
+                    {
+                        "View Dashboard",
+                        "Analytics",
+                        "View Reports"
+                    }),
+                    new ModuleSection("MANAGEMENT", new[]
+                    {
+                        "Manage Users",
+                        "Manage Customers",
+                        "Manage Services",
+                        "Manage Service Requests",
+                        "Follow-Ups / Reminders",
+                        "Terms & Conditions"
+                    })
+                };
+            }
+
+            if (role == UserRole.Manager)
             {
-                "View Dashboard",
-                "Analytics",
-                "View Reports",
-                "Manage Service Requests",
-                "Assign Service Staff",
-                "Follow-Ups / Reminders",
-                "Monitor Service Status"
-            },
+                return new[]
+                {
+                    new ModuleSection("OVERVIEW", new[]
+                    {
+                        "View Dashboard",
+                        "Analytics",
+                        "View Reports"
+                    }),
+                    new ModuleSection("OPERATIONS", new[]
+                    {
+                        "Manage Service Requests",
+                        "Assign Service Staff",
+                        "Follow-Ups / Reminders",
+                        "Monitor Service Status"
+                    })
+                };
+            }
 
-            UserRole.ServiceStaff => new[]
-{
-    "View Dashboard",
-    "Follow-Ups / Reminders",
-    "View Assigned Requests",
-    "Update Service Status"
-},
+            if (role == UserRole.ServiceStaff)
+            {
+                return new[]
+                {
+                    new ModuleSection("MY TASKS", new[]
+                    {
+                        "View Dashboard",
+                        "Follow-Ups / Reminders",
+                        "View Assigned Requests",
+                        "Update Service Status"
+                    })
+                };
+            }
 
-            _ => Array.Empty<string>()
-        };
+            return Array.Empty<ModuleSection>();
+        }
+
+        public static string[] ModulesFor(UserRole role)
+        {
+            var sections = GetSectionsFor(role);
+            var list = new List<string>();
+            foreach (var section in sections)
+            {
+                list.AddRange(section.Modules);
+            }
+            return list.ToArray();
+        }
     }
 }

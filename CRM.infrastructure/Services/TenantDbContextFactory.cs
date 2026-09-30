@@ -9,13 +9,16 @@ public class TenantDbContextFactory : ITenantDbContextFactory
 {
     private readonly ITenantDatabaseResolver _resolver;
     private readonly IConfiguration _configuration;
+    private readonly ICloudSyncService? _cloudSyncService;
 
     public TenantDbContextFactory(
         ITenantDatabaseResolver resolver,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ICloudSyncService? cloudSyncService = null)
     {
         _resolver = resolver;
         _configuration = configuration;
+        _cloudSyncService = cloudSyncService;
     }
 
     public async Task<TenantErpDbContext> CreateAsync(int companyId)
@@ -75,6 +78,9 @@ public class TenantDbContextFactory : ITenantDbContextFactory
                 errorNumbersToAdd: null))
             .Options;
 
-        return new TenantErpDbContext(options);
+        var db = new TenantErpDbContext(options);
+        db.CompanyId = companyId;
+        db.CloudSyncService = _cloudSyncService;
+        return db;
     }
 }

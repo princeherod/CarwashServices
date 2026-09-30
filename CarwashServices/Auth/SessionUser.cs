@@ -50,11 +50,23 @@ namespace CarwashServices.Auth
         public static bool TermsAccepted { get; set; } = true;
         public static string? TermsAcceptedVersion { get; set; }
 
+        public static bool MultiBranchEnabled { get; set; } = false;
+        public static int? CurrentBranchId { get; set; } = null;
+        public static string CurrentBranchName { get; set; } = "All Branches";
+        public static event System.Action? BranchChanged;
+
+        public static void SetBranch(int? branchId, string? branchName)
+        {
+            CurrentBranchId = branchId;
+            CurrentBranchName = string.IsNullOrWhiteSpace(branchName) ? "All Branches" : branchName;
+            BranchChanged?.Invoke();
+        }
+
         /// <summary>
         /// Resolved company ID for tenant API operations.
         /// Defaults to 1 if no specific tenant is assigned.
         /// </summary>
-        public static int CurrentCompanyId => CompanyId.GetValueOrDefault(1) > 0 ? CompanyId.Value : 1;
+        public static int CurrentCompanyId => (CompanyId.HasValue && CompanyId.Value > 0) ? CompanyId.Value : 1;
 
         public static bool IsLoggedIn => UserId > 0;
 
@@ -70,6 +82,9 @@ namespace CarwashServices.Auth
             CompanyCode = "";
             TermsAccepted = true;
             TermsAcceptedVersion = null;
+            MultiBranchEnabled = false;
+            CurrentBranchId = null;
+            CurrentBranchName = "All Branches";
         }
     }
 }

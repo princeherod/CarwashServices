@@ -25,6 +25,10 @@ public class TenantCustomer
     public string? VehicleType { get; set; }
     public string? Source { get; set; }
 
+    // ---- Branch association ----
+    public int? BranchId { get; set; }
+    public CRM.domain.Entities.TenantBranch? Branch { get; set; }
+
     // ---- Archive extension ----
     public bool IsArchived { get; set; }
     public DateTime? ArchivedAt { get; set; }

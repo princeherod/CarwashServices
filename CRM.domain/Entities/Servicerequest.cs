@@ -1,4 +1,4 @@
-﻿namespace CRM.domain.Entities;
+namespace CRM.domain.Entities;
 
 public class ServiceRequest
 {
@@ -20,6 +20,10 @@ public class ServiceRequest
     public bool IsArchived { get; set; }
     public DateTime? ArchivedAt { get; set; }
     public string? ArchivedBy { get; set; }
+
+    // ---- Branch association ----
+    public int? BranchId { get; set; }
+    public TenantBranch? Branch { get; set; }
 
     public User? AssignedStaff { get; set; }
     public User? CreatedByUser { get; set; }

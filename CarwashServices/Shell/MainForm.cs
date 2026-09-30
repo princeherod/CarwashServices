@@ -1,9 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using CarwashServices.Auth;
+using CarwashServices.Common;
+using CarwashServices.Dtos;
 using CarwashServices.Roles;
 using CarwashServices.Roles.Admin;
 using CarwashServices.Roles.SuperAdmin;
@@ -16,6 +21,17 @@ namespace CarwashServices.Shell
         private Panel _headerPanel;
         private Label _titleLabel;
         private Panel _contentPanel;
+
+        private Panel _cloudSyncContainer;
+        private Label _cloudDotLabel;
+        private Label _cloudTextLabel;
+        private Button _cloudSyncButton;
+        private System.Windows.Forms.Timer _cloudSyncTimer;
+        private ToolTip _cloudTooltip;
+
+        private Panel? _branchSwitcherContainer;
+        private ComboBox? _branchSwitcherCombo;
+        private bool _isSwitchingBranch;
 
         public bool SignOutRequested { get; private set; }
 
@@ -63,11 +79,13 @@ namespace CarwashServices.Shell
 
             Controls.Add(_sidebar);
 
+            var theme = TenantThemeManager.Current;
+
             _headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 60,
-                BackColor = Color.FromArgb(0x0A, 0x14, 0x28)
+                BackColor = theme.HeaderBg
             };
 
             _titleLabel = new Label
@@ -77,9 +95,12 @@ namespace CarwashServices.Shell
                 Font = new Font("Segoe UI Semibold", 14f),
                 AutoSize = true,
                 UseMnemonic = false,
-                Location = new Point(24, 16)
+                Location = new Point(24, 16),
+                Visible = false // Removed duplicate title from top bar as per requirement 5
             };
             _headerPanel.Controls.Add(_titleLabel);
+            InitCloudSyncUi();
+            InitBranchSwitcherUi();
             Controls.Add(_headerPanel);
             _headerPanel.BringToFront();
 
@@ -120,6 +141,11 @@ namespace CarwashServices.Shell
         // ================================================================
         private bool CanAccess(string moduleKey)
         {
+            if (SessionUser.Role == UserRole.SuperAdmin) return true;
+            if (moduleKey == "Branches" || moduleKey == "Branching")
+            {
+                if (SessionUser.MultiBranchEnabled) return true;
+            }
             var allowed = RoleRouter.ModulesFor(SessionUser.Role);
             return Array.IndexOf(allowed, moduleKey) >= 0;
         }
@@ -220,9 +246,13 @@ namespace CarwashServices.Shell
         private void NavigateTo(string key)
         {
             // Role guards for Super Admin modules (reachable only by RoleId == 4)
-            if (key is "Manage Admin Accounts" or "Backup & Restore Data" or "Manage Subscription / Billing" or "Manage Subscription/Billing")
+            if (key is "Admin Panel" or "Manage Admin Accounts" or
+                       "Business Intelligence" or
+                       "Subscriptions" or "Manage Subscription / Billing" or "Manage Subscription/Billing" or "Subscription & Billing Management" or
+                       "Manage Businesses" or
+                       "Backup" or "Backup & Restore Data" or "Backup & Restore" or "Backup and Restore Data")
             {
-                if (SessionUser.RoleId != 4)
+                if (SessionUser.RoleId != 4 && SessionUser.Role != UserRole.SuperAdmin)
                 {
                     ShowAccessDenied(key, "Super Admin (Role 4)");
                     return;
@@ -356,31 +386,60 @@ namespace CarwashServices.Shell
                         }
                         break;
 
+                    case "Admin Panel":
+                        view = new DashboardView();
+                        headerText = "ADMIN PANEL";
+                        break;
+
+                    case "Manage Admin Accounts":
+                        view = new UsersView(roleFilter: 1, customTitle: "Manage Admin Accounts");
+                        headerText = "MANAGE ADMIN ACCOUNTS";
+                        break;
+
+                    case "Business Intelligence":
+                        view = new AnalyticsView();
+                        headerText = "BUSINESS INTELLIGENCE";
+                        break;
+
+                    case "Subscriptions":
+                    case "Manage Subscription / Billing":
+                    case "Manage Subscription/Billing":
+                    case "Subscription & Billing Management":
+                        view = new Roles.SuperAdmin.ManageSubscriptionBillingView();
+                        headerText = "SUBSCRIPTIONS";
+                        break;
+
                     case "Manage Businesses":
                         view = new Roles.SuperAdmin.ManageBusinessesView();
                         headerText = "MANAGE BUSINESSES";
                         break;
 
-                    case "Manage Admin Accounts":
-                        view = new Roles.SuperAdmin.ManageAdminAccountsView();
-                        headerText = SuperAdminLabels.NavManageAdminAccounts;
-                        break;
-
+                    case "Backup":
+                    case "Backup & Restore":
                     case "Backup & Restore Data":
-                        view = new Roles.SuperAdmin.BackupRestoreDataView();
-                        headerText = SuperAdminLabels.NavBackupRestoreData;
+                    case "Backup and Restore Data":
+                        view = new Roles.SuperAdmin.BackupRestoreView();
+                        headerText = "BACKUP & RESTORE";
                         break;
 
-                    case "Manage Subscription / Billing":
-                    case "Manage Subscription/Billing":
-                        view = new Roles.SuperAdmin.ManageSubscriptionBillingView();
-                        headerText = SuperAdminLabels.NavManageSubscriptionBilling;
-                        break;
+                    case "Settings":
+                        using (var settingsDlg = new Dialogs.SettingsDialog())
+                        {
+                            settingsDlg.ShowDialog(this);
+                        }
+                        _sidebar.SetActiveModule(_sidebar.ActiveModuleKey);
+                        return;
 
                     case "Terms & Conditions":
                         bool isReadOnly = SessionUser.RoleId != 4;
                         view = new Roles.SuperAdmin.TermsAndConditionsView(isReadOnly);
                         headerText = SuperAdminLabels.NavTermsAndConditions;
+                        break;
+
+                    case "Branches":
+                    case "Branching":
+                        view = new Roles.BranchesView();
+                        headerText = "BRANCH MANAGEMENT";
                         break;
 
                     default:
@@ -443,6 +502,310 @@ namespace CarwashServices.Shell
             {
                 NavigateTo(modules[0]);
             }
+        }
+
+        // ================================================================
+        //  MONSTERASP CLOUD SYNC UI & MONITORING
+        // ================================================================
+        private void InitCloudSyncUi()
+        {
+            _cloudTooltip = new ToolTip();
+
+            _cloudSyncContainer = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 270,
+                BackColor = Color.Transparent
+            };
+
+            _cloudDotLabel = new Label
+            {
+                Text = "●",
+                Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(0x4C, 0xAF, 0x50), // Green default
+                AutoSize = true,
+                Location = new Point(10, 18)
+            };
+
+            _cloudTextLabel = new Label
+            {
+                Text = "Cloud: Online",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9f, FontStyle.Regular),
+                AutoSize = true,
+                Location = new Point(28, 21)
+            };
+
+            _cloudSyncButton = new Button
+            {
+                Text = "☁ Sync Now",
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(0x19, 0x76, 0xD2),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Size = new Size(100, 30),
+                Location = new Point(160, 15),
+                Cursor = Cursors.Hand
+            };
+            _cloudSyncButton.FlatAppearance.BorderSize = 0;
+            _cloudSyncButton.Click += async (s, e) => await TriggerManualSyncAsync();
+
+            _cloudSyncContainer.Controls.Add(_cloudDotLabel);
+            _cloudSyncContainer.Controls.Add(_cloudTextLabel);
+            _cloudSyncContainer.Controls.Add(_cloudSyncButton);
+
+            _headerPanel.Controls.Add(_cloudSyncContainer);
+
+            _cloudSyncTimer = new System.Windows.Forms.Timer { Interval = 10000 };
+            _cloudSyncTimer.Tick += async (s, e) => await RefreshCloudSyncStatusAsync();
+            _cloudSyncTimer.Start();
+
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(1000);
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    BeginInvoke(new Action(async () => await RefreshCloudSyncStatusAsync()));
+                }
+            });
+        }
+
+        private async Task RefreshCloudSyncStatusAsync()
+        {
+            try
+            {
+                using var http = new HttpClient { BaseAddress = new Uri("http://localhost:5180/") };
+                http.Timeout = TimeSpan.FromSeconds(4);
+                var status = await http.GetFromJsonAsync<CloudSyncStatusResponse>("api/cloud-sync/status");
+                if (status != null && !IsDisposed)
+                {
+                    if (status.IsCloudOnline)
+                    {
+                        if (status.PendingCount > 0)
+                        {
+                            _cloudDotLabel.ForeColor = Color.FromArgb(0x60, 0xA5, 0xFA); // Ice Blue
+                            _cloudTextLabel.Text = $"Syncing ({status.PendingCount})...";
+                        }
+                        else
+                        {
+                            _cloudDotLabel.ForeColor = Color.FromArgb(0x38, 0xB6, 0xFF); // Sky Blue (Online)
+                            _cloudTextLabel.Text = "Cloud: Online";
+                        }
+                    }
+                    else
+                    {
+                        _cloudDotLabel.ForeColor = Color.FromArgb(0x64, 0x74, 0x8B); // Slate Blue (Offline)
+                        _cloudTextLabel.Text = status.PendingCount > 0 ? $"Offline ({status.PendingCount} q'd)" : "Cloud: Offline";
+                    }
+
+                    _cloudTooltip.SetToolTip(_cloudSyncContainer,
+                        $"MonsterASP Cloud ({status.CloudServer})\nStatus: {(status.IsCloudOnline ? "Online" : "Offline (Local)")}\nPending: {status.PendingCount}\nSynced: {status.SyncedCount}\nLast Sync: {(status.LastSyncTime?.ToLocalTime().ToString("g") ?? "Never")}");
+                }
+            }
+            catch
+            {
+                if (!IsDisposed)
+                {
+                    _cloudDotLabel.ForeColor = Color.FromArgb(0x9E, 0x9E, 0x9E);
+                    _cloudTextLabel.Text = "Cloud: Local";
+                }
+            }
+        }
+
+        private async Task TriggerManualSyncAsync()
+        {
+            try
+            {
+                _cloudSyncButton.Enabled = false;
+                _cloudSyncButton.Text = "Syncing...";
+                using var http = new HttpClient { BaseAddress = new Uri("http://localhost:5180/") };
+                http.Timeout = TimeSpan.FromSeconds(30);
+                var resp = await http.PostAsync("api/cloud-sync/sync-now", null);
+                if (resp.IsSuccessStatusCode)
+                {
+                    var result = await resp.Content.ReadFromJsonAsync<SyncResultResponse>();
+                    MessageBox.Show(
+                        result?.Message ?? "Synchronization completed successfully!",
+                        "Cloud Sync",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show("Sync request could not be processed.", "Cloud Sync", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                await RefreshCloudSyncStatusAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Sync error: {ex.Message}", "Cloud Sync", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (!IsDisposed)
+                {
+                    _cloudSyncButton.Enabled = true;
+                    _cloudSyncButton.Text = "☁ Sync Now";
+                }
+            }
+        }
+
+        private class CloudSyncStatusResponse
+        {
+            public bool IsCloudOnline { get; set; }
+            public int PendingCount { get; set; }
+            public int SyncedCount { get; set; }
+            public int FailedCount { get; set; }
+            public DateTime? LastSyncTime { get; set; }
+            public string CloudServer { get; set; } = "";
+            public string CloudDatabase { get; set; } = "";
+            public string StatusMessage { get; set; } = "";
+        }
+
+        private class SyncResultResponse
+        {
+            public bool Success { get; set; }
+            public bool IsCloudOnline { get; set; }
+            public int ProcessedCount { get; set; }
+            public int SuccessCount { get; set; }
+            public int FailureCount { get; set; }
+            public string Message { get; set; } = "";
+        }
+
+        // ================================================================
+        //  BRANCH SWITCHER UI
+        // ================================================================
+        private void InitBranchSwitcherUi()
+        {
+            bool isCleanRide = (SessionUser.CompanyCode ?? "").ToUpperInvariant().Contains("CLEAN")
+                || (SessionUser.CompanyCode ?? "").ToUpperInvariant() == "COMP003"
+                || (SessionUser.CompanyName ?? "").ToLowerInvariant().Contains("cleanride")
+                || (SessionUser.Email ?? "").ToLowerInvariant() == "admin@cleanride.com";
+
+            if (!SessionUser.MultiBranchEnabled && !isCleanRide)
+                return;
+
+            _branchSwitcherContainer = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 270,
+                BackColor = Color.Transparent
+            };
+
+            var branchIcon = new Label
+            {
+                Text = "☵ Branch:",
+                ForeColor = Color.FromArgb(0x9A, 0xA8, 0xC0),
+                Font = new Font("Segoe UI Semibold", 8.5f),
+                Location = new Point(6, 21),
+                AutoSize = true
+            };
+
+            _branchSwitcherCombo = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 9f),
+                Location = new Point(72, 16),
+                Width = 190,
+                BackColor = Color.FromArgb(0x14, 0x2A, 0x52),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+
+            _branchSwitcherCombo.SelectedIndexChanged += (s, e) =>
+            {
+                if (_isSwitchingBranch || _branchSwitcherCombo.SelectedItem == null) return;
+                var item = _branchSwitcherCombo.SelectedItem as ComboItem;
+                if (item != null)
+                {
+                    int? bId = item.Id > 0 ? item.Id : null;
+                    SessionUser.SetBranch(bId, item.Text);
+
+                    // Re-navigate to current module so view refreshes
+                    if (!string.IsNullOrEmpty(_sidebar.ActiveModuleKey))
+                    {
+                        NavigateTo(_sidebar.ActiveModuleKey);
+                    }
+                }
+            };
+
+            _branchSwitcherContainer.Controls.Add(branchIcon);
+            _branchSwitcherContainer.Controls.Add(_branchSwitcherCombo);
+
+            _headerPanel.Controls.Add(_branchSwitcherContainer);
+            _branchSwitcherContainer.BringToFront();
+
+            SessionUser.BranchChanged += () =>
+            {
+                if (_branchSwitcherCombo != null && !_branchSwitcherCombo.IsDisposed)
+                {
+                    SyncBranchSwitcherCombo();
+                }
+            };
+
+            _ = Task.Run(async () =>
+            {
+                await LoadBranchesIntoSwitcherAsync();
+            });
+        }
+
+        private async Task LoadBranchesIntoSwitcherAsync()
+        {
+            try
+            {
+                int companyId = SessionUser.CurrentCompanyId;
+                using var http = new HttpClient { BaseAddress = new Uri("http://localhost:5180/"), Timeout = TimeSpan.FromSeconds(5) };
+                var branches = await http.GetFromJsonAsync<List<Dtos.BranchDto>>($"api/tenant/{companyId}/branches") ?? new();
+
+                if (IsDisposed || !IsHandleCreated) return;
+
+                Invoke(() =>
+                {
+                    if (_branchSwitcherCombo == null || _branchSwitcherCombo.IsDisposed) return;
+                    _isSwitchingBranch = true;
+                    _branchSwitcherCombo.Items.Clear();
+                    _branchSwitcherCombo.Items.Add(new ComboItem(0, "All Branches"));
+
+                    int selectIdx = 0;
+                    for (int i = 0; i < branches.Count; i++)
+                    {
+                        var b = branches[i];
+                        int itemIdx = _branchSwitcherCombo.Items.Add(new ComboItem(b.BranchId, b.BranchName));
+                        if (SessionUser.CurrentBranchId == b.BranchId)
+                        {
+                            selectIdx = itemIdx;
+                        }
+                    }
+
+                    _branchSwitcherCombo.SelectedIndex = selectIdx;
+                    _isSwitchingBranch = false;
+                });
+            }
+            catch { }
+        }
+
+        private void SyncBranchSwitcherCombo()
+        {
+            if (_branchSwitcherCombo == null || _branchSwitcherCombo.IsDisposed) return;
+            _isSwitchingBranch = true;
+            for (int i = 0; i < _branchSwitcherCombo.Items.Count; i++)
+            {
+                var item = _branchSwitcherCombo.Items[i] as ComboItem;
+                if (item != null)
+                {
+                    if ((SessionUser.CurrentBranchId == null || SessionUser.CurrentBranchId == 0) && item.Id == 0)
+                    {
+                        _branchSwitcherCombo.SelectedIndex = i;
+                        break;
+                    }
+                    if (SessionUser.CurrentBranchId == item.Id)
+                    {
+                        _branchSwitcherCombo.SelectedIndex = i;
+                        break;
+                    }
+                }
+            }
+            _isSwitchingBranch = false;
         }
     }
 }

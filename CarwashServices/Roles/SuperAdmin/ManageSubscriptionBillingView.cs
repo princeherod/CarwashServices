@@ -37,14 +37,12 @@ namespace CarwashServices.Roles.SuperAdmin
         private static readonly Color HeaderBg = Color.FromArgb(0xF7, 0xFA, 0xFD);
         private static readonly Color Blue = Color.FromArgb(0x02, 0x84, 0xC7);
         private static readonly Color BlueSoft = Color.FromArgb(0xE0, 0xF2, 0xFE);
-        private static readonly Color Purple = Color.FromArgb(0x7C, 0x3A, 0xED);
-        private static readonly Color PurpleSoft = Color.FromArgb(0xF3, 0xE8, 0xFF);
-        private static readonly Color Green = Color.FromArgb(0x16, 0xA3, 0x4A);
-        private static readonly Color GreenSoft = Color.FromArgb(0xDC, 0xFC, 0xE7);
-        private static readonly Color Amber = Color.FromArgb(0xB4, 0x53, 0x09);
-        private static readonly Color AmberSoft = Color.FromArgb(0xFE, 0xF3, 0xC7);
-        private static readonly Color Red = Color.FromArgb(0xDC, 0x26, 0x26);
-        private static readonly Color RedSoft = Color.FromArgb(0xFE, 0xE2, 0xE2);
+        private static readonly Color DeepNavy = Color.FromArgb(0x0C, 0x4A, 0x6E);
+        private static readonly Color DeepNavySoft = Color.FromArgb(0xEA, 0xF2, 0xFD);
+        private static readonly Color SlateBlue = Color.FromArgb(0x47, 0x55, 0x69);
+        private static readonly Color SlateBlueSoft = Color.FromArgb(0xF1, 0xF5, 0xF9);
+        private static readonly Color RoyalBlue = Color.FromArgb(0x1D, 0x4E, 0xD8);
+        private static readonly Color RoyalBlueSoft = Color.FromArgb(0xDB, 0xEA, 0xFE);
 
         // ================================================================
         //  Fonts
@@ -134,24 +132,13 @@ namespace CarwashServices.Roles.SuperAdmin
 
             const int padX = 36;
 
-            // ---- Breadcrumb ----
-            _contentPanel.Controls.Add(new Label
-            {
-                Text = "Super Admin Modules  ›  Manage Subscription & Billing",
-                ForeColor = Muted,
-                Font = new Font("Segoe UI", 9f),
-                Location = new Point(padX, 12),
-                AutoSize = true,
-                UseMnemonic = false
-            });
-
             // ---- Title ----
             _contentPanel.Controls.Add(new Label
             {
-                Text = "Subscription & Billing Management",
+                Text = "Subscriptions",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 22f),
-                Location = new Point(padX, 34),
+                Location = new Point(padX, 20),
                 AutoSize = true,
                 UseMnemonic = false
             });
@@ -161,22 +148,22 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 Text = SuperAdminLabels.ManageSubscriptionBillingSubtitle,
                 ForeColor = Muted,
-                Font = new Font("Segoe UI", 9f),
-                Location = new Point(padX, 80),
+                Font = new Font("Segoe UI", 9.5f),
+                Location = new Point(padX, 64),
                 AutoSize = true,
                 UseMnemonic = false
             });
 
             // ---- 3 Summary Tiles (Clickable KPIs) ----
-            _tileTotalPaid = CreateTile(SuperAdminLabels.TileTotalPaid, SuperAdminLabels.BadgeCollected, Green, GreenSoft, out _lblTotalPaidVal, () =>
+            _tileTotalPaid = CreateTile(SuperAdminLabels.TileTotalPaid, SuperAdminLabels.BadgeCollected, DeepNavy, DeepNavySoft, out _lblTotalPaidVal, () =>
             {
                 _ = SwitchTabAsync(TabMode.Transactions);
             });
-            _tileOutstanding = CreateTile(SuperAdminLabels.TileOutstanding, SuperAdminLabels.BadgePending, Red, RedSoft, out _lblOutstandingVal, () =>
+            _tileOutstanding = CreateTile(SuperAdminLabels.TileOutstanding, SuperAdminLabels.BadgePending, SlateBlue, SlateBlueSoft, out _lblOutstandingVal, () =>
             {
                 _ = SwitchTabAsync(TabMode.Transactions);
             });
-            _tileActiveSubs = CreateTile(SuperAdminLabels.TileActiveSubscriptions, SuperAdminLabels.BadgeEnrolled, Blue, BlueSoft, out _lblActiveSubsVal, () =>
+            _tileActiveSubs = CreateTile(SuperAdminLabels.TileActiveSubscriptions, SuperAdminLabels.BadgeEnrolled, RoyalBlue, RoyalBlueSoft, out _lblActiveSubsVal, () =>
             {
                 _ = SwitchTabAsync(TabMode.CustomerSubscriptions);
             });
@@ -1263,18 +1250,18 @@ namespace CarwashServices.Roles.SuperAdmin
             Color bg, fg;
             if (text.IndexOf("Month", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                bg = PurpleSoft;
-                fg = Purple;
+                bg = RoyalBlueSoft;
+                fg = RoyalBlue;
             }
             else if (text.IndexOf("Quarter", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                bg = BlueSoft;
-                fg = Blue;
+                bg = DeepNavySoft;
+                fg = DeepNavy;
             }
             else
             {
-                bg = GreenSoft;
-                fg = Green;
+                bg = BlueSoft;
+                fg = Blue;
             }
 
             var b = e.CellBounds;
@@ -1313,21 +1300,22 @@ namespace CarwashServices.Roles.SuperAdmin
 
             Color bg, fg;
             if (string.Equals(text, "Active", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(text, "Paid", StringComparison.OrdinalIgnoreCase))
+                string.Equals(text, "Paid", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(text, "Completed", StringComparison.OrdinalIgnoreCase))
             {
-                bg = GreenSoft;
-                fg = Green;
+                bg = BlueSoft;
+                fg = DeepNavy;
             }
             else if (string.Equals(text, "Pending", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(text, "Archived", StringComparison.OrdinalIgnoreCase))
             {
-                bg = AmberSoft;
-                fg = Amber;
+                bg = SlateBlueSoft;
+                fg = SlateBlue;
             }
             else
             {
-                bg = RedSoft;
-                fg = Red;
+                bg = RoyalBlueSoft;
+                fg = RoyalBlue;
             }
 
             var b = e.CellBounds;

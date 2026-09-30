@@ -149,24 +149,13 @@ namespace CarwashServices.Roles.SuperAdmin
             };
             Controls.Add(_scrollContainer);
 
-            // ---- Breadcrumb ----
-            _scrollContainer.Controls.Add(new Label
-            {
-                Text = _isReadOnly ? "Admin Modules  ›  Terms & Conditions" : "Super Admin Modules  ›  Terms & Conditions",
-                ForeColor = Muted,
-                Font = new Font("Segoe UI", 9f),
-                Location = new Point(36, 12),
-                AutoSize = true,
-                UseMnemonic = false
-            });
-
             // ---- Title ----
             _scrollContainer.Controls.Add(new Label
             {
                 Text = "Terms & Conditions",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 22f),
-                Location = new Point(36, 34),
+                Location = new Point(36, 20),
                 AutoSize = true,
                 UseMnemonic = false
             });
@@ -178,8 +167,8 @@ namespace CarwashServices.Roles.SuperAdmin
                     ? SuperAdminLabels.TermsAndConditionsAdminSubtitle
                     : SuperAdminLabels.TermsAndConditionsSubtitle,
                 ForeColor = Muted,
-                Font = new Font("Segoe UI", 9f),
-                Location = new Point(36, 80),
+                Font = new Font("Segoe UI", 9.5f),
+                Location = new Point(36, 64),
                 AutoSize = true,
                 UseMnemonic = false
             });
@@ -226,7 +215,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
         private void RelayoutCards()
         {
-            int top = 120;
+            int top = 106;
             int padX = 36;
             int gap = 24;
             int availableWidth = Math.Max(720, _scrollContainer.ClientSize.Width - (padX * 2));

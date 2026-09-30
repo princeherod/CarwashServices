@@ -1,4 +1,4 @@
-﻿namespace CRM.domain.Entities;
+namespace CRM.domain.Entities;
 
 public class FollowUp
 {
@@ -19,6 +19,10 @@ public class FollowUp
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int? CreatedBy { get; set; }
+
+    // ---- Branch association ----
+    public int? BranchId { get; set; }
+    public TenantBranch? Branch { get; set; }
 
     // ---- Archive extension ----
     public bool IsArchived { get; set; }

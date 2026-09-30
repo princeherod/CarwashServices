@@ -174,6 +174,14 @@ namespace CarwashServices.Roles
 
             _uiReady = true;
 
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () => await LoadAsync());
+                }
+            };
+
             LostFocus += (s, e) => CloseActiveMenu();
         }
 
@@ -1382,6 +1390,10 @@ namespace CarwashServices.Roles
 
                 var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 var url = _tab == ListTab.Active ? $"api/follow-ups?companyId={companyId}" : $"api/follow-ups/archived?companyId={companyId}";
+                if (CarwashServices.Auth.SessionUser.CurrentBranchId.HasValue && CarwashServices.Auth.SessionUser.CurrentBranchId.Value > 0)
+                {
+                    url += $"&branchId={CarwashServices.Auth.SessionUser.CurrentBranchId.Value}";
+                }
                 _all = await _http.GetFromJsonAsync<List<FollowUpDto>>(url) ?? new();
 
                 if (_tab == ListTab.Active)

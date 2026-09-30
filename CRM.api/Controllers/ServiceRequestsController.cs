@@ -43,14 +43,24 @@ public class ServiceRequestsController : ControllerBase
 
     // GET: api/service-requests          → active only
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] int? companyId = null)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] int? companyId = null,
+        [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
         await using var tenant = await _tenantFactory.CreateAsync(cid);
 
-        var list = await tenant.ServiceRequests
+        var query = tenant.ServiceRequests
+            .Include(r => r.Branch)
             .AsNoTracking()
-            .Where(r => !r.IsArchived)
+            .Where(r => !r.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(r => r.BranchId == branchId.Value);
+        }
+
+        var list = await query
             .OrderByDescending(r => r.RequestId)
             .Select(r => new
             {
@@ -59,6 +69,8 @@ public class ServiceRequestsController : ControllerBase
                 r.ServiceId,
                 r.AssignedStaffId,
                 r.CreatedBy,
+                r.BranchId,
+                branchName = r.Branch != null ? r.Branch.BranchName : null,
                 r.Status,
                 r.Priority,
                 r.RequestedDate,
@@ -76,14 +88,24 @@ public class ServiceRequestsController : ControllerBase
 
     // GET: api/service-requests/archived  → archived only
     [HttpGet("archived")]
-    public async Task<IActionResult> GetArchived([FromQuery] int? companyId = null)
+    public async Task<IActionResult> GetArchived(
+        [FromQuery] int? companyId = null,
+        [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
         await using var tenant = await _tenantFactory.CreateAsync(cid);
 
-        var list = await tenant.ServiceRequests
+        var query = tenant.ServiceRequests
+            .Include(r => r.Branch)
             .AsNoTracking()
-            .Where(r => r.IsArchived)
+            .Where(r => r.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(r => r.BranchId == branchId.Value);
+        }
+
+        var list = await query
             .OrderByDescending(r => r.ArchivedAt)
             .Select(r => new
             {
@@ -92,6 +114,8 @@ public class ServiceRequestsController : ControllerBase
                 r.ServiceId,
                 r.AssignedStaffId,
                 r.CreatedBy,
+                r.BranchId,
+                branchName = r.Branch != null ? r.Branch.BranchName : null,
                 r.Status,
                 r.Priority,
                 r.RequestedDate,
@@ -115,6 +139,7 @@ public class ServiceRequestsController : ControllerBase
         await using var tenant = await _tenantFactory.CreateAsync(cid);
 
         var row = await tenant.ServiceRequests
+            .Include(r => r.Branch)
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.RequestId == requestId);
 
@@ -151,6 +176,17 @@ public class ServiceRequestsController : ControllerBase
         req.ArchivedAt = null;
         req.ArchivedBy = null;
 
+        // Default BranchId to main or first branch if not specified
+        if (!req.BranchId.HasValue || req.BranchId.Value <= 0)
+        {
+            var defBranch = await tenant.Branches.FirstOrDefaultAsync(b => b.IsMainBranch && !b.IsArchived)
+                ?? await tenant.Branches.FirstOrDefaultAsync(b => !b.IsArchived);
+            if (defBranch != null)
+            {
+                req.BranchId = defBranch.BranchId;
+            }
+        }
+
         if (req.CreatedBy <= 0)
         {
             var defaultUser = await _masterDb.Users
@@ -172,6 +208,7 @@ public class ServiceRequestsController : ControllerBase
     {
         public int CustomerId { get; set; }
         public int ServiceId { get; set; }
+        public int? BranchId { get; set; }
         public string? Status { get; set; }
         public string? Priority { get; set; }
         public DateTime RequestedDate { get; set; }
@@ -196,6 +233,11 @@ public class ServiceRequestsController : ControllerBase
 
         if (existing is null)
             return NotFound(new { message = $"ServiceRequest {requestId} not found in tenant database." });
+
+        if (req.BranchId.HasValue && req.BranchId.Value > 0)
+        {
+            existing.BranchId = req.BranchId.Value;
+        }
 
         if (req.RequestedDate.Date < DateTime.Today)
             return BadRequest(new { message = "Requested date cannot be in the past." });

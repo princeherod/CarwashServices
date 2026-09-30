@@ -106,6 +106,14 @@ namespace CarwashServices.Roles
             Sidebar.EnableDoubleBuffering(this);
 
             Load += async (s, e) => await LoadCustomersAsync();
+
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () => await LoadCustomersAsync());
+                }
+            };
         }
 
         private void BuildRoot()
@@ -615,16 +623,22 @@ namespace CarwashServices.Roles
                 Cursor = Cursors.WaitCursor;
 
                 var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                string branchParam = "";
+                if (CarwashServices.Auth.SessionUser.CurrentBranchId.HasValue && CarwashServices.Auth.SessionUser.CurrentBranchId.Value > 0)
+                {
+                    branchParam = $"?branchId={CarwashServices.Auth.SessionUser.CurrentBranchId.Value}";
+                }
+
                 if (_tab == ListTab.Active)
                 {
                     var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                        $"api/tenant/{companyId}/tenant-customers");
+                        $"api/tenant/{companyId}/tenant-customers{branchParam}");
                     _allCustomers = list ?? new List<TenantCustomerDto>();
                 }
                 else
                 {
                     var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                        $"api/tenant/{companyId}/tenant-customers/archived");
+                        $"api/tenant/{companyId}/tenant-customers/archived{branchParam}");
                     _archivedCustomers = list ?? new List<TenantCustomerDto>();
                 }
 

@@ -20,7 +20,9 @@ public class AnalyticsController : ControllerBase
 
     // GET: api/analytics/summary?companyId=1
     [HttpGet("summary")]
-    public async Task<IActionResult> GetSummary([FromQuery] int companyId = 1)
+    public async Task<IActionResult> GetSummary(
+        [FromQuery] int companyId = 1,
+        [FromQuery] int? branchId = null)
     {
         var today = DateTime.Today;
         var monthStart = new DateTime(today.Year, today.Month, 1);
@@ -28,18 +30,30 @@ public class AnalyticsController : ControllerBase
         var tenant = await _tenantFactory.CreateAsync(companyId);
 
         // Only active customers count toward the metrics.
-        var customers = await tenant.TenantCustomers
+        var customersQuery = tenant.TenantCustomers
             .AsNoTracking()
-            .Where(c => !c.IsArchived)
-            .ToListAsync();
+            .Where(c => !c.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            customersQuery = customersQuery.Where(c => c.BranchId == branchId.Value);
+        }
+
+        var customers = await customersQuery.ToListAsync();
 
         var totalCustomers = customers.Count;
 
         // Only active service requests count.
-        var requests = await tenant.ServiceRequests
+        var requestsQuery = tenant.ServiceRequests
             .AsNoTracking()
-            .Where(r => !r.IsArchived)
-            .ToListAsync();
+            .Where(r => !r.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            requestsQuery = requestsQuery.Where(r => r.BranchId == branchId.Value);
+        }
+
+        var requests = await requestsQuery.ToListAsync();
 
         var byCustomer = requests
             .Where(r => r.CustomerId > 0)

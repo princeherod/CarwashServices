@@ -23,10 +23,10 @@ namespace CarwashServices.Roles.Admin
         private static readonly Color HeaderBg = Color.FromArgb(0xF7, 0xFA, 0xFD);
         private static readonly Color Blue = Color.FromArgb(0x1E, 0x88, 0xE5);
         private static readonly Color BlueSoft = Color.FromArgb(0xE3, 0xF1, 0xFD);
-        private static readonly Color Green = Color.FromArgb(0x1E, 0x7A, 0x34);
-        private static readonly Color GreenSoft = Color.FromArgb(0xE4, 0xF5, 0xE8);
-        private static readonly Color Red = Color.FromArgb(0xC6, 0x28, 0x28);
-        private static readonly Color RedSoft = Color.FromArgb(0xFD, 0xE7, 0xE6);
+        private static readonly Color StatusActiveFg = Color.FromArgb(0x15, 0x65, 0xC0);
+        private static readonly Color StatusActiveBg = Color.FromArgb(0xEA, 0xF2, 0xFD);
+        private static readonly Color StatusInactiveFg = Color.FromArgb(0x5C, 0x76, 0x8D);
+        private static readonly Color StatusInactiveBg = Color.FromArgb(0xF0, 0xF4, 0xF8);
         private static readonly Color Slate = Color.FromArgb(0x39, 0x49, 0xAB);
         private static readonly Color SlateSoft = Color.FromArgb(0xE8, 0xEA, 0xF6);
 
@@ -52,18 +52,26 @@ namespace CarwashServices.Roles.Admin
         private Button _newUserBtn = null!;
 
         private const int PadX = 40;
-        private const int GridTop = 280;
+        private const int GridTop = 240;
         private const int PageBottom = 24;
 
-        // Aligned with Auth/UserRole.cs: 2 = Manager, 3 = Service Staff.
+        // Aligned with Auth/UserRole.cs: 1 = Admin, 2 = Manager, 3 = Service Staff, 4 = Super Admin.
         private static readonly Dictionary<int, string> RoleNames = new()
         {
+            { 1, "Admin" },
             { 2, "Manager" },
-            { 3, "Service Staff" }
+            { 3, "Service Staff" },
+            { 4, "Super Admin" }
         };
 
-        public UsersView()
+        private readonly int? _roleFilter;
+        private readonly string? _customTitle;
+
+        public UsersView(int? roleFilter = null, string? customTitle = null)
         {
+            _roleFilter = roleFilter;
+            _customTitle = customTitle;
+
             Dock = DockStyle.Fill;
             BackColor = PageBg;
             Font = new Font("Segoe UI", 9.5f);
@@ -85,28 +93,21 @@ namespace CarwashServices.Roles.Admin
 
             _contentPanel.Controls.Add(new Label
             {
-                Text = "Modules  ›  Manage Users",
-                ForeColor = Muted,
-                Font = new Font("Segoe UI", 9f),
-                Location = new Point(PadX, 12),
-                AutoSize = true
-            });
-
-            _contentPanel.Controls.Add(new Label
-            {
-                Text = "Manage Users",
+                Text = _customTitle ?? "Manage Users",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 22f),
-                Location = new Point(PadX, 34),
+                Location = new Point(PadX, 20),
                 AutoSize = true
             });
 
             _contentPanel.Controls.Add(new Label
             {
-                Text = "USERS — user_id · role_id · full_name · email · password_hash · status · created_at",
+                Text = _roleFilter == 1
+                    ? "Administrator accounts, system privileges, and account status."
+                    : "System user accounts, roles, access permissions, and account status.",
                 ForeColor = Muted,
-                Font = new Font("Segoe UI", 9f),
-                Location = new Point(PadX, 80),
+                Font = new Font("Segoe UI", 9.5f),
+                Location = new Point(PadX, 64),
                 AutoSize = true
             });
 
@@ -130,7 +131,7 @@ namespace CarwashServices.Roles.Admin
             var rolesCard = new Panel
             {
                 BackColor = Color.White,
-                Location = new Point(PadX, 130),
+                Location = new Point(PadX, 106),
                 Height = 110,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -150,13 +151,13 @@ namespace CarwashServices.Roles.Admin
                 AutoSize = true
             });
 
-            // Aligned with Auth/UserRole.cs.
+            // Aligned with Auth/UserRole.cs: 1 = Admin, 2 = Manager, 3 = Service Staff, 4 = Super Admin.
             string[] chips =
             {
-                "id:1  Super Admin",
-                "id:2  Admin",
-                "id:3  Manager",
-                "id:4  Service Staff"
+                "id:1  Admin",
+                "id:2  Manager",
+                "id:3  Service Staff",
+                "id:4  Super Admin"
             };
             int cx = 20;
             foreach (var text in chips)
@@ -225,19 +226,19 @@ namespace CarwashServices.Roles.Admin
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal
             };
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "UserId", HeaderText = "USER_ID", Width = 100 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "UserId", HeaderText = "User ID", Width = 100 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Name",
-                HeaderText = "FULL_NAME / EMAIL",
+                HeaderText = "Full Name / Email",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 MinimumWidth = 260,
                 FillWeight = 100
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Role", HeaderText = "ROLE_ID", Width = 180 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "STATUS", Width = 140 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Created", HeaderText = "CREATED_AT", Width = 160 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Actions", HeaderText = "ACTIONS", Width = 120 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Role", HeaderText = "Role", Width = 180 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", Width = 140 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Created", HeaderText = "Date Created", Width = 160 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Actions", HeaderText = "Actions", Width = 120 });
 
             _grid.CellPainting += Grid_CellPainting;
             _grid.CellMouseClick += Grid_CellMouseClick;
@@ -249,7 +250,7 @@ namespace CarwashServices.Roles.Admin
                 var h = _contentPanel.ClientSize.Height;
                 int contentW = Math.Max(0, w - 2 * PadX);
 
-                _newUserBtn.Location = new Point(w - _newUserBtn.Width - PadX, 30);
+                _newUserBtn.Location = new Point(w - _newUserBtn.Width - PadX, 20);
                 rolesCard.Width = contentW;
                 _grid.SetBounds(PadX, GridTop, contentW, Math.Max(0, h - GridTop - PageBottom));
             }
@@ -276,8 +277,11 @@ namespace CarwashServices.Roles.Admin
                 Cursor = Cursors.WaitCursor;
                 _newUserBtn.Enabled = false;
 
-                var list = await _http.GetFromJsonAsync<List<UserListItemDto>>(
-                    $"api/users?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}")
+                var url = (CarwashServices.Auth.SessionUser.RoleId == 4 || CarwashServices.Auth.SessionUser.Role == CarwashServices.Auth.UserRole.SuperAdmin)
+                    ? "api/users?roleIds=1,2,3,4"
+                    : $"api/users?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}";
+
+                var list = await _http.GetFromJsonAsync<List<UserListItemDto>>(url)
                            ?? new List<UserListItemDto>();
                 _all = list;
                 ApplyFilter();
@@ -300,15 +304,19 @@ namespace CarwashServices.Roles.Admin
             _grid.SuspendLayout();
             _grid.Rows.Clear();
 
-            foreach (var u in _all.OrderBy(x => x.UserId))
+            var query = _all.AsEnumerable();
+            if (_roleFilter.HasValue)
             {
-                if (u.RoleId != 3 && u.RoleId != 4) continue;
+                query = query.Where(x => x.RoleId == _roleFilter.Value);
+            }
 
+            foreach (var u in query.OrderBy(x => x.UserId))
+            {
                 var nameCell = u.FullName;
                 if (!string.IsNullOrWhiteSpace(u.Email))
                     nameCell += "\n" + u.Email;
 
-                var roleCell = RoleNames.TryGetValue(u.RoleId, out var rn) ? rn : "Unknown";
+                var roleCell = RoleNames.TryGetValue(u.RoleId, out var rn) ? rn : $"Role {u.RoleId}";
                 roleCell += "\nid:" + u.RoleId;
 
                 _grid.Rows.Add(
@@ -455,8 +463,8 @@ namespace CarwashServices.Roles.Admin
             if (text.Length == 0) { e.Handled = true; return; }
 
             bool active = string.Equals(text, "Active", StringComparison.OrdinalIgnoreCase);
-            var fg = active ? Green : Red;
-            var bg = active ? GreenSoft : RedSoft;
+            var fg = active ? StatusActiveFg : StatusInactiveFg;
+            var bg = active ? StatusActiveBg : StatusInactiveBg;
 
             var b = e.CellBounds;
             using var font = FontTag;
@@ -516,8 +524,8 @@ namespace CarwashServices.Roles.Admin
         {
             "Manager" => (SlateSoft, Slate),
             "Service Staff" => (BlueSoft, Blue),
-            "Admin" => (Color.FromArgb(0xFD, 0xE7, 0xE6), Red),
-            "Super Admin" => (Color.FromArgb(0xEC, 0xE7, 0xFD), Color.FromArgb(0x8B, 0x5C, 0xF6)),
+            "Admin" => (Color.FromArgb(0xEA, 0xF2, 0xFD), Color.FromArgb(0x0D, 0x47, 0xA1)),
+            "Super Admin" => (Color.FromArgb(0x0A, 0x16, 0x33), Color.White),
             _ => (Color.FromArgb(0xEE, 0xF1, 0xF6), Muted)
         };
 

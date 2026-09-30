@@ -16,6 +16,7 @@ namespace CarwashServices.Roles.SuperAdmin
         public const string SuperAdminModulesHeader = "Super Admin Modules";
         public const string AccessDeniedHeader = "403 — Access Denied";
 
+        public const string NavManageUsers = "Manage Users";
         public const string NavManageAdminAccounts = "Manage Admin Accounts";
         public const string NavBackupRestoreData = "Backup & Restore Data";
         public const string NavManageSubscriptionBilling = "Manage Subscription / Billing";
