@@ -97,6 +97,18 @@ namespace CarwashServices.Roles
 
             Sidebar.EnableDoubleBuffering(this);
 
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () =>
+                    {
+                        await LoadLookupsAsync();
+                        await LoadRequestsAsync();
+                    });
+                }
+            };
+
             Load += async (s, e) =>
             {
                 await LoadLookupsAsync();
@@ -376,23 +388,27 @@ namespace CarwashServices.Roles
         private async Task LoadLookupsAsync()
         {
             var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+            var branchId = CarwashServices.Auth.SessionUser.CurrentBranchId;
+            var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"?branchId={branchId.Value}" : "";
+            var userBranchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
+
             try
             {
                 _customers = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                    $"api/tenant/{companyId}/tenant-customers") ?? new();
+                    $"api/tenant/{companyId}/tenant-customers{branchQuery}") ?? new();
             }
             catch { _customers = new(); }
 
             try
             {
                 _services = await _http.GetFromJsonAsync<List<ProductDto>>(
-                    $"api/tenant/{companyId}/products") ?? new();
+                    $"api/tenant/{companyId}/products{branchQuery}") ?? new();
             }
             catch { _services = new(); }
 
             try
             {
-                var all = await _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}") ?? new();
+                var all = await _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}{userBranchQuery}") ?? new();
                 _staff = all.Where(u => u.RoleId == 3).ToList();
             }
             catch { _staff = new(); }
@@ -426,8 +442,12 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
 
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var branchId = CarwashServices.Auth.SessionUser.CurrentBranchId;
+                var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
+
                 var all = await _http.GetFromJsonAsync<List<ServiceRequestDto>>(
-                    $"api/service-requests?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}") ?? new();
+                    $"api/service-requests?companyId={companyId}{branchQuery}") ?? new();
 
                 _unassigned = all
                     .Where(IsAwaitingAssignment)

@@ -87,9 +87,9 @@ namespace CarwashServices.Roles.SuperAdmin
             Font = new Font("Segoe UI", 9.5f);
             DoubleBuffered = true;
 
-            if (SessionUser.RoleId != 4 && SessionUser.Role != UserRole.SuperAdmin)
+            if (SessionUser.RoleId != 1 && SessionUser.Role != UserRole.SuperAdmin)
             {
-                Controls.Add(new AccessDeniedView("Manage Businesses", "Super Admin (Role 4)"));
+                Controls.Add(new AccessDeniedView("Manage Businesses", "Super Admin (Role 1)"));
                 return;
             }
 

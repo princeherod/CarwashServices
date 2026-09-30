@@ -224,6 +224,20 @@ public class ServiceRequestsController : ControllerBase
             }
         }
 
+        // Validate customer belongs to this branch
+        var cust = await tenant.TenantCustomers.AsNoTracking().FirstOrDefaultAsync(c => c.TenantCustomerId == req.CustomerId);
+        if (cust == null)
+            return BadRequest(new { message = "Selected customer not found." });
+        if (req.BranchId.HasValue && cust.BranchId.HasValue && cust.BranchId.Value != req.BranchId.Value)
+            return BadRequest(new { message = "Selected customer belongs to another branch." });
+
+        // Validate service belongs to this branch
+        var srv = await tenant.Products.AsNoTracking().FirstOrDefaultAsync(p => p.ProductId == req.ServiceId);
+        if (srv == null)
+            return BadRequest(new { message = "Selected service not found." });
+        if (req.BranchId.HasValue && srv.BranchId.HasValue && srv.BranchId.Value != req.BranchId.Value)
+            return BadRequest(new { message = "Selected service belongs to another branch." });
+
         if (req.CreatedBy <= 0)
         {
             var defaultUser = await _masterDb.Users
@@ -404,6 +418,9 @@ public class ServiceRequestsController : ControllerBase
 
         if (staffUser == null)
             return BadRequest(new { message = $"User {req.AssignedStaffId} not found." });
+
+        if (staffUser.BranchId.HasValue && existing.BranchId.HasValue && staffUser.BranchId.Value != existing.BranchId.Value)
+            return BadRequest(new { message = "Selected staff does not belong to the request's branch." });
 
         existing.AssignedStaffId = req.AssignedStaffId.Value;
 

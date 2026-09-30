@@ -944,6 +944,7 @@ namespace CarwashServices.Dialogs
                 city = _cityTxt.Text.Trim(),
                 province = _provinceTxt.Text.Trim(),
                 address = ResolveAddress(),
+                branchId = _isEdit ? (_loaded?.BranchId ?? CarwashServices.Auth.SessionUser.CurrentBranchId) : CarwashServices.Auth.SessionUser.CurrentBranchId,
                 isActive = _isEdit
                     ? _statusCombo.SelectedItem?.ToString() != "Inactive"
                     : true,

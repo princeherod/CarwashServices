@@ -14,6 +14,7 @@ namespace CarwashServices.Dialogs
     public class ServiceEditDialog : Form
     {
         private int? _serviceId;
+        private ProductDto? _loaded;
 
         private TextBox _nameTxt = null!;
         private TextBox _descriptionTxt = null!;
@@ -343,6 +344,7 @@ namespace CarwashServices.Dialogs
                 if (list == null) return;
                 var p = list.Find(x => x.ProductId == id);
                 if (p == null) return;
+                _loaded = p;
 
                 _nameTxt.Text = p.ProductName ?? "";
                 _descriptionTxt.Text = p.Description ?? "";
@@ -529,6 +531,9 @@ namespace CarwashServices.Dialogs
                 unitPrice = price,
                 durationMinutes = duration,
                 category = category,
+                branchId = _serviceId.HasValue
+                    ? (_loaded?.BranchId ?? CarwashServices.Auth.SessionUser.CurrentBranchId)
+                    : CarwashServices.Auth.SessionUser.CurrentBranchId,
                 isActive = isActive,
                 createdAt = DateTime.UtcNow
             };

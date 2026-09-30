@@ -106,6 +106,14 @@ namespace CarwashServices.Roles
 
             Sidebar.EnableDoubleBuffering(this);
 
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () => await LoadAsync());
+                }
+            };
+
             Load += async (s, e) => await LoadAsync();
         }
 
@@ -466,8 +474,12 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
 
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var branchId = CarwashServices.Auth.SessionUser.CurrentBranchId;
+                var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
+
                 _data = await _http.GetFromJsonAsync<ServiceStatusResponseDto>(
-                    $"api/service-status?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}") ?? new();
+                    $"api/service-status?companyId={companyId}{branchQuery}") ?? new();
 
                 _kpiPending.Text = _data.Pending.ToString();
                 _kpiInProgress.Text = _data.InProgress.ToString();

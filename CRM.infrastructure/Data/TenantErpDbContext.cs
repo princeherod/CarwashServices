@@ -43,6 +43,11 @@ public class TenantErpDbContext : DbContext
             entity.Property(x => x.ArchivedBy).HasMaxLength(200);
             entity.HasIndex(x => x.IsArchived);
 
+            entity.HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasIndex(x => x.ProductCode).IsUnique();
         });
 

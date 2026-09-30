@@ -116,6 +116,18 @@ namespace CarwashServices.Roles.ServiceStaff
 
             Sidebar.EnableDoubleBuffering(this);
 
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () =>
+                    {
+                        await LoadMyCustomersAsync();
+                        await LoadAsync();
+                    });
+                }
+            };
+
             Load += async (s, e) =>
             {
                 await LoadMyCustomersAsync();
@@ -522,8 +534,11 @@ namespace CarwashServices.Roles.ServiceStaff
                 var staffId = SessionUser.UserId;
                 if (staffId <= 0) return;
 
+                var branchId = SessionUser.CurrentBranchId;
+                var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
+
                 var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                    $"api/follow-ups/my-customers?staffId={staffId}&companyId={SessionUser.CurrentCompanyId}") ?? new();
+                    $"api/follow-ups/my-customers?staffId={staffId}&companyId={SessionUser.CurrentCompanyId}{branchQuery}") ?? new();
 
                 _myCustomers = list;
                 _custById = list.ToDictionary(c => c.TenantCustomerId);
@@ -549,8 +564,11 @@ namespace CarwashServices.Roles.ServiceStaff
                     return;
                 }
 
+                var branchId = SessionUser.CurrentBranchId;
+                var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
+
                 _all = await _http.GetFromJsonAsync<List<FollowUpDto>>(
-                    $"api/follow-ups/mine?staffId={staffId}&companyId={SessionUser.CurrentCompanyId}") ?? new();
+                    $"api/follow-ups/mine?staffId={staffId}&companyId={SessionUser.CurrentCompanyId}{branchQuery}") ?? new();
 
                 RenderGrid();
                 RenderPager(CurrentTotalPages());

@@ -53,8 +53,8 @@ public static class BranchSecurityHelper
             };
         }
 
-        // Super Admin (Role 4) has platform-wide access
-        if (user.RoleId == 4)
+        // Super Admin (Role 1) has platform-wide access
+        if (user.RoleId == 1)
         {
             return new BranchAccessResult
             {

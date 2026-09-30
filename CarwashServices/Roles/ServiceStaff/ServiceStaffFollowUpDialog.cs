@@ -749,7 +749,8 @@ namespace CarwashServices.Dialogs
                 validUntil = (DateTime?)_validUntilPicker.Value,
                 scheduledNow = _sendNow,
                 isDraft = false,
-                createdBy = _staffId
+                createdBy = _staffId,
+                branchId = CarwashServices.Auth.SessionUser.CurrentBranchId
             };
 
             try

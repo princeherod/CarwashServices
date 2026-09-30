@@ -87,9 +87,9 @@ namespace CarwashServices.Roles.SuperAdmin
             Font = new Font("Segoe UI", 9.5f);
             DoubleBuffered = true;
 
-            if (SessionUser.RoleId != 4)
+            if (SessionUser.RoleId != 1 && SessionUser.Role != UserRole.SuperAdmin)
             {
-                Controls.Add(new AccessDeniedView("Manage Admin Accounts", "Super Admin (Role 4)"));
+                Controls.Add(new AccessDeniedView("Manage Admin Accounts", "Super Admin (Role 1)"));
                 return;
             }
 
@@ -346,8 +346,8 @@ namespace CarwashServices.Roles.SuperAdmin
                 Cursor = Cursors.WaitCursor;
                 _newAdminBtn.Enabled = false;
 
-                // Pull data from GET /api/users?roleIds=1,4
-                var list = await _http.GetFromJsonAsync<List<UserListItemDto>>("api/users?roleIds=1,4")
+                // Pull data from GET /api/users?roleIds=1,2,4
+                var list = await _http.GetFromJsonAsync<List<UserListItemDto>>("api/users?roleIds=1,2,4")
                            ?? new List<UserListItemDto>();
                 _admins = list;
                 PopulateGrid();
@@ -384,7 +384,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 if (!string.IsNullOrWhiteSpace(u.Email))
                     nameCell += "\n" + u.Email;
 
-                string roleName = u.RoleId == 4 ? SuperAdminLabels.ChipSuperAdmin : SuperAdminLabels.ChipAdmin;
+                string roleName = (u.RoleId == 1 || u.RoleId == 4) ? SuperAdminLabels.ChipSuperAdmin : SuperAdminLabels.ChipAdmin;
                 string roleCell = roleName;
 
                 _grid.Rows.Add(
@@ -460,7 +460,7 @@ namespace CarwashServices.Roles.SuperAdmin
             bool isSuperAdmin = false;
             if (rowIdx >= 0 && rowIdx < _admins.Count)
             {
-                isSuperAdmin = _admins[rowIdx].RoleId == 4;
+                isSuperAdmin = _admins[rowIdx].RoleId == 1 || _admins[rowIdx].RoleId == 4;
             }
 
             Color avatarBg = isSuperAdmin ? Purple : Navy;

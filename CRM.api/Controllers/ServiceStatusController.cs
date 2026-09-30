@@ -18,32 +18,55 @@ public class ServiceStatusController : ControllerBase
         _tenantFactory = tenantFactory;
     }
 
-    // GET: api/service-status?companyId=1
+    // GET: api/service-status?companyId=1&branchId=2
     [HttpGet]
-    public async Task<IActionResult> Get([FromQuery] int companyId = 1)
+    public async Task<IActionResult> Get([FromQuery] int companyId = 1, [FromQuery] int? branchId = null)
     {
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, companyId, branchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        branchId = sec.EffectiveBranchId;
+
         var tenant = await _tenantFactory.CreateAsync(companyId);
 
         // Load everything that's needed up front, then do the joins in memory.
         // This keeps the round-trip count low, which is the main reason the
         // previous version was timing out.
-        var customers = await tenant.TenantCustomers
+        var custQuery = tenant.TenantCustomers
             .AsNoTracking()
-            .Where(c => !c.IsArchived)
-            .ToListAsync();
+            .Where(c => !c.IsArchived);
 
-        var products = await tenant.Products
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            custQuery = custQuery.Where(c => c.BranchId == branchId.Value);
+        }
+
+        var customers = await custQuery.ToListAsync();
+
+        var prodQuery = tenant.Products
             .AsNoTracking()
-            .Where(p => !p.IsArchived)
-            .ToListAsync();
+            .Where(p => !p.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            prodQuery = prodQuery.Where(p => p.BranchId == branchId.Value);
+        }
+
+        var products = await prodQuery.ToListAsync();
 
         var users = await _db.Users
             .AsNoTracking()
             .ToListAsync();
 
-        var requests = await tenant.ServiceRequests
+        var reqQuery = tenant.ServiceRequests
             .AsNoTracking()
-            .Where(r => !r.IsArchived)
+            .Where(r => !r.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            reqQuery = reqQuery.Where(r => r.BranchId == branchId.Value);
+        }
+
+        var requests = await reqQuery
             .OrderByDescending(r => r.RequestId)
             .ToListAsync();
 

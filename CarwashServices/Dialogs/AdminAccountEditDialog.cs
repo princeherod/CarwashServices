@@ -60,8 +60,8 @@ namespace CarwashServices.Dialogs
 
         private static readonly (int Id, string Name)[] AdminRoles =
         {
-            (4, "Super Admin"),
-            (1, "Admin")
+            (1, "Super Admin"),
+            (2, "Admin")
         };
 
         public AdminAccountEditDialog(UserListItemDto? existing = null)
@@ -73,7 +73,7 @@ namespace CarwashServices.Dialogs
                                     SessionUser.IsLoggedIn &&
                                     (_existing.UserId == SessionUser.UserId ||
                                      (!string.IsNullOrEmpty(SessionUser.Email) && string.Equals(_existing.Email, SessionUser.Email, StringComparison.OrdinalIgnoreCase))) &&
-                                    (SessionUser.RoleId == 4 || SessionUser.Role == UserRole.SuperAdmin || _existing.RoleId == 4);
+                                    (SessionUser.RoleId == 1 || SessionUser.RoleId == 4 || SessionUser.Role == UserRole.SuperAdmin || _existing.RoleId == 1 || _existing.RoleId == 4);
 
             if (SessionUser.IsLoggedIn)
             {
@@ -327,8 +327,8 @@ namespace CarwashServices.Dialogs
                 Font = new Font("Segoe UI", 9.5f)
             };
             var rolesToOffer = !_isEdit
-                ? new[] { (1, "Admin") }
-                : (_existing?.RoleId == 4 ? new[] { (4, "Super Admin") } : new[] { (1, "Admin") });
+                ? new[] { (2, "Admin") }
+                : ((_existing?.RoleId == 1 || _existing?.RoleId == 4) ? new[] { (_existing?.RoleId ?? 1, "Super Admin") } : new[] { (2, "Admin") });
 
             foreach (var r in rolesToOffer)
             {
@@ -460,7 +460,7 @@ namespace CarwashServices.Dialogs
 
             _emailTxt.Text = _existing.Email;
 
-            int targetRoleId = _isSuperAdminSelfEdit ? 4 : _existing.RoleId;
+            int targetRoleId = _isSuperAdminSelfEdit ? (_existing?.RoleId ?? 1) : _existing.RoleId;
             for (int i = 0; i < _roleCombo.Items.Count; i++)
             {
                 if (_roleCombo.Items[i] is RoleItem ri && ri.Id == targetRoleId)

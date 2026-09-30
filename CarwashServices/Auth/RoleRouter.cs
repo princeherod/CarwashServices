@@ -24,25 +24,15 @@ namespace CarwashServices.Auth
                 {
                     new ModuleSection("OVERVIEW", new[]
                     {
-                        "View Dashboard",
-                        "Analytics",
-                        "View Reports"
+                        "Business Intelligence",
+                        "Subscriptions"
                     }),
-                    new ModuleSection("MANAGEMENT", new[]
+                    new ModuleSection("ADMINISTRATION", new[]
                     {
-                        "Manage Users",
-                        "Manage Customers",
-                        "Manage Services",
-                        "Manage Service Requests",
-                        "Follow-Ups / Reminders",
-                        "Terms & Conditions"
-                    }),
-                    new ModuleSection("SUPER ADMIN MODULES", new[]
-                    {
-                        "Manage Businesses",
                         "Manage Admin Accounts",
-                        "Manage Subscription / Billing",
-                        "Backup and Restore Data"
+                        "Manage Businesses",
+                        "Backup",
+                        "Terms & Conditions"
                     })
                 };
             }

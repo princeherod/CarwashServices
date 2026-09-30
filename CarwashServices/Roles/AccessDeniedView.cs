@@ -36,7 +36,7 @@ namespace CarwashServices.Roles
         private Panel _card = null!;
 
         public AccessDeniedView(string moduleName = "Protected Module",
-                                string requiredRole = "Super Admin (Role 4)",
+                                string requiredRole = "Super Admin (Role 1)",
                                 Action? onRedirect = null)
         {
             _moduleName = moduleName;

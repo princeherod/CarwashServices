@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using CarwashServices.Dtos;
 namespace CarwashServices.Dtos
 {
@@ -25,5 +25,9 @@ namespace CarwashServices.Dtos
         public bool IsArchived { get; set; }
         public DateTime? ArchivedAt { get; set; }
         public string? ArchivedBy { get; set; }
+
+        // Multi-branch
+        public int? BranchId { get; set; }
+        public string? BranchName { get; set; }
     }
 }

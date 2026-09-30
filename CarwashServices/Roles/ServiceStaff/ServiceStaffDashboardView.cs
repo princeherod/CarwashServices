@@ -139,6 +139,14 @@ namespace CarwashServices.Roles.ServiceStaff
 
             Sidebar.EnableDoubleBuffering(this);
 
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () => await ReloadAsync());
+                }
+            };
+
             Resize += (s, e) => LayoutAll();
 
             Load += async (s, e) => await ReloadAsync();
@@ -817,8 +825,11 @@ namespace CarwashServices.Roles.ServiceStaff
 
                 Cursor = Cursors.WaitCursor;
 
+                var branchId = SessionUser.CurrentBranchId;
+                var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
+
                 var resp = await _http.GetFromJsonAsync<StaffDashboardResponse>(
-                    $"api/dashboard/staff?companyId={SessionUser.CurrentCompanyId}&staffId={staffId}");
+                    $"api/dashboard/staff?companyId={SessionUser.CurrentCompanyId}&staffId={staffId}{branchQuery}");
 
                 if (resp is null) return;
 

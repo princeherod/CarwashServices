@@ -27,6 +27,7 @@ namespace CarwashServices.Dialogs
         private readonly int? _requestId;
         private readonly List<CustomerDto> _customers;
         private readonly List<ServiceDto> _services;
+        private ServiceRequestDto? _existing;
 
         private ComboBox _customerCombo = null!;
         private ComboBox _serviceCombo = null!;
@@ -449,6 +450,7 @@ namespace CarwashServices.Dialogs
                     $"api/service-requests/{id}?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}");
 
                 if (req == null) return;
+                _existing = req;
 
                 SelectComboById(_customerCombo, req.CustomerId);
                 SelectComboById(_serviceCombo, req.ServiceId);
@@ -568,6 +570,9 @@ namespace CarwashServices.Dialogs
                 requestId = _requestId ?? 0,
                 customerId = custItem.Id!.Value,
                 serviceId = svcItem.Id!.Value,
+                branchId = _requestId.HasValue
+                    ? (_existing?.BranchId ?? CarwashServices.Auth.SessionUser.CurrentBranchId)
+                    : CarwashServices.Auth.SessionUser.CurrentBranchId,
                 priority = _priorityCombo.SelectedItem?.ToString() ?? "Normal",
                 requestedDate = _requestedPicker.Value,
                 scheduledDate = (DateTime?)_scheduledPicker.Value,

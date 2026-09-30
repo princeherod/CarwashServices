@@ -29,13 +29,18 @@ public class StaffDashboardController : ControllerBase
         _tenantFactory = tenantFactory;
     }
 
-    // GET: api/dashboard/staff?companyId=1&staffId=15
+    // GET: api/dashboard/staff?companyId=1&staffId=15&branchId=2
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int companyId = 1,
-                                          [FromQuery] int staffId = 0)
+                                          [FromQuery] int staffId = 0,
+                                          [FromQuery] int? branchId = null)
     {
         if (staffId <= 0)
             return BadRequest(new { message = "staffId is required." });
+
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, companyId, branchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        branchId = sec.EffectiveBranchId;
 
         var today = DateTime.Today;
         var monthStart = new DateTime(today.Year, today.Month, 1);
@@ -43,15 +48,27 @@ public class StaffDashboardController : ControllerBase
         // ---- Tenant lookups (customers + services) ----
         var tenant = await _tenantFactory.CreateAsync(companyId);
 
-        var customers = await tenant.TenantCustomers
+        var custQuery = tenant.TenantCustomers
             .AsNoTracking()
-            .Where(c => !c.IsArchived)
-            .ToListAsync();
+            .Where(c => !c.IsArchived);
 
-        var products = await tenant.Products
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            custQuery = custQuery.Where(c => c.BranchId == branchId.Value);
+        }
+
+        var customers = await custQuery.ToListAsync();
+
+        var prodQuery = tenant.Products
             .AsNoTracking()
-            .Where(p => !p.IsArchived)
-            .ToListAsync();
+            .Where(p => !p.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            prodQuery = prodQuery.Where(p => p.BranchId == branchId.Value);
+        }
+
+        var products = await prodQuery.ToListAsync();
 
         var custById = customers.ToDictionary(c => c.TenantCustomerId);
         var prodById = products.GroupBy(p => p.ProductId)
@@ -62,9 +79,16 @@ public class StaffDashboardController : ControllerBase
         var userById = users.ToDictionary(u => u.UserId);
 
         // ---- Every request assigned to this staff member ----
-        var myRequests = await tenant.ServiceRequests
+        var reqQuery = tenant.ServiceRequests
             .AsNoTracking()
-            .Where(r => !r.IsArchived && r.AssignedStaffId == staffId)
+            .Where(r => !r.IsArchived && r.AssignedStaffId == staffId);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            reqQuery = reqQuery.Where(r => r.BranchId == branchId.Value);
+        }
+
+        var myRequests = await reqQuery
             .OrderByDescending(r => r.RequestId)
             .ToListAsync();
 

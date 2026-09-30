@@ -1,5 +1,7 @@
-﻿using CRM.Domain.Entities;
+using CRM.Domain.Entities;
+using CRM.Infrastructure.Data;
 using CRM.Infrastructure.Services;
+using CRM.api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,32 +11,62 @@ namespace CRM.api.Controllers;
 [Route("api/tenant/{companyId:int}/products")]
 public class ProductsController : ControllerBase
 {
+    private readonly MasterErpDbContext _masterDb;
     private readonly ITenantDbContextFactory _tenantFactory;
 
-    public ProductsController(ITenantDbContextFactory tenantFactory)
+    public ProductsController(MasterErpDbContext masterDb, ITenantDbContextFactory tenantFactory)
     {
+        _masterDb = masterDb;
         _tenantFactory = tenantFactory;
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll(int companyId)
+    public async Task<IActionResult> GetAll(int companyId, [FromQuery] int? branchId = null)
     {
+        var sec = await BranchSecurityHelper.ResolveAndValidateAsync(_masterDb, HttpContext, companyId, branchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+        branchId = sec.EffectiveBranchId;
+
         await using var tenantDb = await _tenantFactory.CreateAsync(companyId);
-        var products = await tenantDb.Products
+        var query = tenantDb.Products
             .AsNoTracking()
-            .Where(p => !p.IsArchived)
+            .Where(p => !p.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(p => p.BranchId == branchId.Value);
+        }
+
+        var products = await query
             .OrderBy(p => p.ProductId)
             .ToListAsync();
         return Ok(products);
     }
 
     [HttpGet("archived")]
-    public async Task<IActionResult> GetArchived(int companyId)
+    public async Task<IActionResult> GetArchived(int companyId, [FromQuery] int? branchId = null)
     {
+        var sec = await BranchSecurityHelper.ResolveAndValidateAsync(_masterDb, HttpContext, companyId, branchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+        branchId = sec.EffectiveBranchId;
+
         await using var tenantDb = await _tenantFactory.CreateAsync(companyId);
-        var products = await tenantDb.Products
+        var query = tenantDb.Products
             .AsNoTracking()
-            .Where(p => p.IsArchived)
+            .Where(p => p.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(p => p.BranchId == branchId.Value);
+        }
+
+        var products = await query
             .OrderByDescending(p => p.ArchivedAt)
             .ToListAsync();
         return Ok(products);
@@ -69,6 +101,36 @@ public class ProductsController : ControllerBase
         product.ArchivedAt = null;
         product.ArchivedBy = null;
 
+        var sec = await BranchSecurityHelper.ResolveAndValidateAsync(_masterDb, HttpContext, companyId, product.BranchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+
+        if (sec.EffectiveBranchId.HasValue && sec.EffectiveBranchId.Value > 0)
+        {
+            product.BranchId = sec.EffectiveBranchId.Value;
+        }
+
+        if (!product.BranchId.HasValue || product.BranchId.Value <= 0)
+        {
+            var defBranch = await tenantDb.Branches.FirstOrDefaultAsync(b => b.IsMainBranch && !b.IsArchived)
+                ?? await tenantDb.Branches.FirstOrDefaultAsync(b => !b.IsArchived);
+            if (defBranch != null)
+            {
+                product.BranchId = defBranch.BranchId;
+            }
+        }
+
+        if (product.BranchId.HasValue && product.BranchId.Value > 0)
+        {
+            var targetBranch = await tenantDb.Branches.AsNoTracking().FirstOrDefaultAsync(b => b.BranchId == product.BranchId.Value);
+            if (targetBranch == null || targetBranch.IsArchived || !targetBranch.IsActive)
+            {
+                return BadRequest(new { message = "Cannot register a service to an archived or inactive branch." });
+            }
+        }
+
         tenantDb.Products.Add(product);
         await tenantDb.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { companyId, productId = product.ProductId }, product);
@@ -84,6 +146,11 @@ public class ProductsController : ControllerBase
 
         if (existing is null)
             return NotFound(new { message = $"Product {productId} not found in tenant {companyId}." });
+
+        if (product.BranchId.HasValue && product.BranchId.Value > 0)
+        {
+            existing.BranchId = product.BranchId.Value;
+        }
 
         existing.ProductCode = product.ProductCode;
         existing.ProductName = product.ProductName;

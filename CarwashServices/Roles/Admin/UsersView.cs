@@ -518,7 +518,7 @@ namespace CarwashServices.Roles.Admin
                 }
 
                 string url;
-                if (CarwashServices.Auth.SessionUser.RoleId == 4 || CarwashServices.Auth.SessionUser.Role == CarwashServices.Auth.UserRole.SuperAdmin)
+                if (CarwashServices.Auth.SessionUser.RoleId == 1 || CarwashServices.Auth.SessionUser.Role == CarwashServices.Auth.UserRole.SuperAdmin)
                 {
                     url = targetBranchId.HasValue
                         ? $"api/users?branchId={targetBranchId.Value}"

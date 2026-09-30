@@ -839,8 +839,10 @@ namespace CarwashServices.Dialogs
             try
             {
                 var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var branchId = CarwashServices.Auth.SessionUser.CurrentBranchId;
+                var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
                 var list = await _http.GetFromJsonAsync<List<SegmentCustomerDto>>(
-                    $"api/analytics/segment-customers?companyId={companyId}&segment=All");
+                    $"api/analytics/segment-customers?companyId={companyId}&segment=All{branchQuery}");
 
                 if (list != null && list.Count > 0)
                 {
@@ -873,7 +875,9 @@ namespace CarwashServices.Dialogs
             try
             {
                 var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
-                var list = await _http.GetFromJsonAsync<List<ProductDto>>($"api/tenant/{companyId}/products");
+                var branchId = CarwashServices.Auth.SessionUser.CurrentBranchId;
+                var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"?branchId={branchId.Value}" : "";
+                var list = await _http.GetFromJsonAsync<List<ProductDto>>($"api/tenant/{companyId}/products{branchQuery}");
                 if (list != null && list.Count > 0)
                 {
                     var active = list.Where(p => !p.IsArchived && p.IsActive).ToList();
@@ -1440,7 +1444,8 @@ namespace CarwashServices.Dialogs
                 scheduledDate,
                 validUntil = (DateTime?)_validUntilPicker.Value,
                 scheduledNow = !draft && _sendNow,
-                isDraft = draft
+                isDraft = draft,
+                branchId = CarwashServices.Auth.SessionUser.CurrentBranchId
             };
 
             try

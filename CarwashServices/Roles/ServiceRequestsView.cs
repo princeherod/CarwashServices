@@ -149,7 +149,11 @@ namespace CarwashServices.Roles
             {
                 if (!IsDisposed && IsHandleCreated)
                 {
-                    Invoke(async () => await LoadRequestsAsync());
+                    Invoke(async () =>
+                    {
+                        await LoadLookupsAsync();
+                        await LoadRequestsAsync();
+                    });
                 }
             };
 
@@ -792,15 +796,20 @@ namespace CarwashServices.Roles
         private async Task LoadLookupsAsync()
         {
             var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+            var branchId = CarwashServices.Auth.SessionUser.CurrentBranchId;
+            var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"?branchId={branchId.Value}" : "";
+            var userBranchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
+
             try
             {
                 _tenantCustomers = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                    $"api/tenant/{companyId}/tenant-customers") ?? new();
+                    $"api/tenant/{companyId}/tenant-customers{branchQuery}") ?? new();
 
                 _customerLookup = _tenantCustomers
                     .Select(c => new CustomerDto
                     {
                         CustomerId = c.TenantCustomerId,
+                        BranchId = c.BranchId,
                         FullName = c.CustomerName,
                         Phone = c.ContactNumber,
                         Email = c.EmailAddress,
@@ -813,7 +822,7 @@ namespace CarwashServices.Roles
             try
             {
                 _tenantProducts = await _http.GetFromJsonAsync<List<ProductDto>>(
-                    $"api/tenant/{companyId}/products") ?? new();
+                    $"api/tenant/{companyId}/products{branchQuery}") ?? new();
 
                 _serviceLookup = _tenantProducts
                     .Select(p => new ServiceDto
@@ -821,13 +830,14 @@ namespace CarwashServices.Roles
                         ServiceId = p.ProductId,
                         ServiceName = p.ProductName,
                         Price = p.UnitPrice,
-                        DurationMinutes = p.DurationMinutes
+                        DurationMinutes = p.DurationMinutes,
+                        BranchId = p.BranchId
                     })
                     .ToList();
             }
             catch { _tenantProducts = new(); _serviceLookup = new(); }
 
-            try { _users = await _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}") ?? new(); }
+            try { _users = await _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}{userBranchQuery}") ?? new(); }
             catch { _users = new(); }
         }
 

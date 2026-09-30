@@ -178,7 +178,11 @@ namespace CarwashServices.Roles
             {
                 if (!IsDisposed && IsHandleCreated)
                 {
-                    Invoke(async () => await LoadAsync());
+                    Invoke(async () =>
+                    {
+                        await LoadLookupsAsync();
+                        await LoadAsync();
+                    });
                 }
             };
 
@@ -1366,17 +1370,21 @@ namespace CarwashServices.Roles
         private async Task LoadLookupsAsync()
         {
             var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+            var branchId = CarwashServices.Auth.SessionUser.CurrentBranchId;
+            var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"?branchId={branchId.Value}" : "";
+            var userBranchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
+
             try
             {
                 _customers = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                    $"api/tenant/{companyId}/tenant-customers") ?? new();
+                    $"api/tenant/{companyId}/tenant-customers{branchQuery}") ?? new();
                 _custById = _customers.ToDictionary(c => c.TenantCustomerId);
             }
             catch { _customers = new(); _custById = new(); }
 
             try
             {
-                _users = await _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}") ?? new();
+                _users = await _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}{userBranchQuery}") ?? new();
                 _userById = _users.ToDictionary(u => u.UserId);
             }
             catch { _users = new(); _userById = new(); }
@@ -1398,7 +1406,10 @@ namespace CarwashServices.Roles
 
                 if (_tab == ListTab.Active)
                 {
-                    _stats = await _http.GetFromJsonAsync<FollowUpStatsDto>($"api/follow-ups/stats?companyId={companyId}")
+                    var statBranchQuery = CarwashServices.Auth.SessionUser.CurrentBranchId.HasValue && CarwashServices.Auth.SessionUser.CurrentBranchId.Value > 0
+                        ? $"&branchId={CarwashServices.Auth.SessionUser.CurrentBranchId.Value}"
+                        : "";
+                    _stats = await _http.GetFromJsonAsync<FollowUpStatsDto>($"api/follow-ups/stats?companyId={companyId}{statBranchQuery}")
                                 ?? new FollowUpStatsDto();
                     BuildStats();
                 }

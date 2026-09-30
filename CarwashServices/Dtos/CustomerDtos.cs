@@ -38,11 +38,16 @@ namespace CarwashServices.Dtos
         public bool IsArchived { get; set; }
         public DateTime? ArchivedAt { get; set; }
         public string? ArchivedBy { get; set; }
+
+        // Multi-branch
+        public int? BranchId { get; set; }
+        public string? BranchName { get; set; }
     }
 
     public class CustomerDto
     {
         public int CustomerId { get; set; }
+        public int? BranchId { get; set; }
         public string FirstName { get; set; } = "";
         public string LastName { get; set; } = "";
         public string FullName { get; set; } = "";

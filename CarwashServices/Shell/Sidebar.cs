@@ -336,7 +336,7 @@ namespace CarwashServices.Shell
             bool isFirstSection = true;
             foreach (var section in sections)
             {
-                if (section.Title == "OVERVIEW")
+                if (section.Title == "OVERVIEW" && SessionUser.Role != UserRole.SuperAdmin)
                 {
                     // Render featured Overview blue pill button
                     _overviewHeaderBtn = new SidebarButton("home", "Overview", theme, isPillStyle: true)
@@ -489,8 +489,11 @@ namespace CarwashServices.Shell
             "Admin Panel" => "home",
             "Manage Businesses" => "businesses",
             "Manage Admin Accounts" => "admin",
+            "Manage admin accounts" => "admin",
+            "Manage Admin Account" => "admin",
             "Subscriptions" => "billing",
             "Manage Subscription / Billing" => "billing",
+            "Manage Subscription/Billing" => "billing",
             "Backup" => "database",
             "Backup & Restore" => "database",
             "Backup & Restore Data" => "database",
@@ -498,6 +501,9 @@ namespace CarwashServices.Shell
             "Branches" => "branches",
             "Branching" => "branches",
             "Terms & Conditions" => "terms",
+            "Terms & Condition" => "terms",
+            "Terms and Conditions" => "terms",
+            "Terms and Condition" => "terms",
             "Assign Service Staff" => "users",
             "Monitor Service Status" => "analytics",
             "View Assigned Requests" => "requests",

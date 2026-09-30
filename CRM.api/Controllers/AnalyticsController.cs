@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using CRM.Domain.Entities;
 using CRM.Infrastructure.Data;
 using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -205,23 +210,40 @@ public class AnalyticsController : ControllerBase
         });
     }
 
-    // GET: api/analytics/segment-customers?companyId=1&segment=AtRisk
+    // GET: api/analytics/segment-customers?companyId=1&segment=AtRisk&branchId=2
     [HttpGet("segment-customers")]
     public async Task<IActionResult> GetSegmentCustomers(
         [FromQuery] int companyId = 1,
-        [FromQuery] string segment = "AtRisk")
+        [FromQuery] string segment = "AtRisk",
+        [FromQuery] int? branchId = null)
     {
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, companyId, branchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        branchId = sec.EffectiveBranchId;
+
         var tenant = await _tenantFactory.CreateAsync(companyId);
 
-        var customers = await tenant.TenantCustomers
+        var custQuery = tenant.TenantCustomers
             .AsNoTracking()
-            .Where(c => !c.IsArchived)
-            .ToListAsync();
+            .Where(c => !c.IsArchived);
 
-        var requests = await tenant.ServiceRequests
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            custQuery = custQuery.Where(c => c.BranchId == branchId.Value);
+        }
+
+        var customers = await custQuery.ToListAsync();
+
+        var reqQuery = tenant.ServiceRequests
             .AsNoTracking()
-            .Where(r => !r.IsArchived)
-            .ToListAsync();
+            .Where(r => !r.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            reqQuery = reqQuery.Where(r => r.BranchId == branchId.Value);
+        }
+
+        var requests = await reqQuery.ToListAsync();
 
         var allRows = SegmentCustomers(customers, requests);
         var rows = (string.IsNullOrWhiteSpace(segment) || string.Equals(segment, "All", StringComparison.OrdinalIgnoreCase))
@@ -535,6 +557,250 @@ public class AnalyticsController : ControllerBase
             case "ThisYear":
             default:
                 return (new DateTime(today.Year, 1, 1), new DateTime(today.Year, 12, 31));
+        }
+    }
+
+    // =====================================================================
+    // GET: api/analytics/platform
+    // Platform-level Business Intelligence for Super Admin
+    // Computes CRM SaaS metrics: tenants, subscriptions, billing, users, branches.
+    // =====================================================================
+    [HttpGet("platform")]
+    public async Task<IActionResult> GetPlatformAnalytics()
+    {
+        try
+        {
+            // 1. Tenants
+            var companies = await _db.Companies.AsNoTracking().ToListAsync();
+            int totalTenants = companies.Count;
+            int activeTenants = companies.Count(c => c.IsActive);
+            int inactiveTenants = companies.Count(c => !c.IsActive);
+            var thirtyDaysAgo = DateTime.UtcNow.AddDays(-30);
+            int newlyRegisteredTenants = companies.Count(c => c.CreatedAt >= thirtyDaysAgo);
+
+            var tenantGrowth = companies
+                .GroupBy(c => new { c.CreatedAt.Year, c.CreatedAt.Month })
+                .OrderBy(g => g.Key.Year).ThenBy(g => g.Key.Month)
+                .Select(g => new
+                {
+                    period = new DateTime(g.Key.Year, g.Key.Month, 1).ToString("MMM yyyy"),
+                    count = g.Count()
+                })
+                .ToList();
+
+            // 2. Subscriptions
+            var subscriptions = await _db.TenantSubscriptions
+                .Include(s => s.Plan)
+                .Include(s => s.Company)
+                .AsNoTracking()
+                .ToListAsync();
+
+            int totalActiveSubscriptions = subscriptions.Count(s => s.Status == "Active");
+            var now = DateTime.UtcNow;
+            var next30Days = now.AddDays(30);
+
+            int expiringSubscriptions = subscriptions.Count(s =>
+                s.Status == "Active" &&
+                s.RenewalDate.HasValue &&
+                s.RenewalDate.Value >= now &&
+                s.RenewalDate.Value <= next30Days);
+
+            int expiredSubscriptions = subscriptions.Count(s =>
+                s.Status == "Expired" ||
+                (s.RenewalDate.HasValue && s.RenewalDate.Value < now && s.Status != "Active"));
+
+            var plans = await _db.TenantSubscriptionPlans.AsNoTracking().ToListAsync();
+
+            var subscriptionsByPlan = plans.Select(p => new
+            {
+                planId = p.PlanId,
+                planName = p.PlanName,
+                price = p.Price,
+                priceFormatted = $"₱{p.Price:N2}",
+                billingCycle = p.BillingCycle,
+                count = subscriptions.Count(s => s.PlanId == p.PlanId && s.Status == "Active")
+            }).ToList();
+
+            var statusDistribution = subscriptions
+                .GroupBy(s => string.IsNullOrWhiteSpace(s.Status) ? "Unknown" : s.Status)
+                .Select(g => new
+                {
+                    status = g.Key,
+                    count = g.Count()
+                })
+                .ToList();
+
+            if (!statusDistribution.Any(s => s.status == "Active"))
+                statusDistribution.Add(new { status = "Active", count = 0 });
+            if (!statusDistribution.Any(s => s.status == "Expired"))
+                statusDistribution.Add(new { status = "Expired", count = 0 });
+
+            var subscriptionGrowth = subscriptions
+                .Where(s => s.StartDate.HasValue)
+                .GroupBy(s => new { s.StartDate!.Value.Year, s.StartDate.Value.Month })
+                .OrderBy(g => g.Key.Year).ThenBy(g => g.Key.Month)
+                .Select(g => new
+                {
+                    period = new DateTime(g.Key.Year, g.Key.Month, 1).ToString("MMM yyyy"),
+                    count = g.Count()
+                })
+                .ToList();
+
+            // 3. Billing
+            var transactions = await _db.TenantBillingTransactions
+                .Include(t => t.Company)
+                .AsNoTracking()
+                .ToListAsync();
+
+            decimal totalSubscriptionRevenue = transactions
+                .Where(t => t.PaymentStatus == "Paid" || t.PaymentStatus == "Completed")
+                .Sum(t => t.Amount);
+
+            int paidBillingTransactions = transactions
+                .Count(t => t.PaymentStatus == "Paid" || t.PaymentStatus == "Completed");
+
+            decimal outstandingBillingAmount = transactions
+                .Where(t => t.PaymentStatus == "Pending" || t.PaymentStatus == "Unpaid")
+                .Sum(t => t.Amount);
+
+            decimal overdueBillingAmount = transactions
+                .Where(t => t.PaymentStatus == "Overdue" ||
+                            (t.PaymentStatus != "Paid" && t.PaymentStatus != "Completed" && t.TransactionDate < DateTime.UtcNow.AddDays(-30)))
+                .Sum(t => t.Amount);
+
+            var revenueByMonth = transactions
+                .Where(t => t.PaymentStatus == "Paid" || t.PaymentStatus == "Completed")
+                .GroupBy(t => new { t.TransactionDate.Year, t.TransactionDate.Month })
+                .OrderBy(g => g.Key.Year).ThenBy(g => g.Key.Month)
+                .Select(g => new
+                {
+                    month = new DateTime(g.Key.Year, g.Key.Month, 1).ToString("MMM yyyy"),
+                    amount = g.Sum(x => x.Amount),
+                    formatted = $"₱{g.Sum(x => x.Amount):N2}",
+                    count = g.Count()
+                })
+                .ToList();
+
+            var revenueByPlan = plans.Select(p =>
+            {
+                var matchingSubs = subscriptions.Where(s => s.PlanId == p.PlanId).Select(s => s.TenantSubscriptionId).ToHashSet();
+                var matchingCompIds = subscriptions.Where(s => s.PlanId == p.PlanId).Select(s => s.CompanyId).ToHashSet();
+
+                var planTxs = transactions.Where(t =>
+                    (t.PaymentStatus == "Paid" || t.PaymentStatus == "Completed") &&
+                    ((t.TenantSubscriptionId.HasValue && matchingSubs.Contains(t.TenantSubscriptionId.Value)) ||
+                     matchingCompIds.Contains(t.CompanyId))).ToList();
+
+                decimal planRevenue = planTxs.Sum(t => t.Amount);
+                double pct = totalSubscriptionRevenue > 0 ? (double)(planRevenue / totalSubscriptionRevenue * 100m) : 0.0;
+
+                return new
+                {
+                    planId = p.PlanId,
+                    planName = p.PlanName,
+                    amount = planRevenue,
+                    formatted = $"₱{planRevenue:N2}",
+                    percentage = Math.Round(pct, 1),
+                    transactionCount = planTxs.Count
+                };
+            }).OrderByDescending(x => x.amount).ToList();
+
+            // 4. Platform aggregates
+            int totalRegisteredUsers = await _db.Users.CountAsync();
+
+            int totalBranches = 0;
+            foreach (var comp in companies)
+            {
+                try
+                {
+                    await using var tenant = await _tenantFactory.CreateAsync(comp.CompanyId);
+                    totalBranches += await tenant.Branches.CountAsync(b => !b.IsArchived && b.IsActive);
+                }
+                catch
+                {
+                    totalBranches += 1;
+                }
+            }
+            if (totalBranches < totalTenants) totalBranches = totalTenants;
+
+            // 5. Recent Subscription Activity
+            var recentActivity = transactions
+                .OrderByDescending(t => t.TransactionDate)
+                .ThenByDescending(t => t.TransactionId)
+                .Take(10)
+                .Select(t =>
+                {
+                    var comp = companies.FirstOrDefault(c => c.CompanyId == t.CompanyId);
+                    var sub = subscriptions.FirstOrDefault(s => (t.TenantSubscriptionId.HasValue && s.TenantSubscriptionId == t.TenantSubscriptionId.Value) || s.CompanyId == t.CompanyId);
+                    var planName = sub?.Plan?.PlanName ?? "Subscription";
+
+                    return new
+                    {
+                        transactionId = t.TransactionId,
+                        companyId = t.CompanyId,
+                        companyName = comp?.CompanyName ?? $"Company #{t.CompanyId}",
+                        companyCode = comp?.CompanyCode ?? $"COMP{t.CompanyId:D3}",
+                        planName = planName,
+                        amount = t.Amount,
+                        amountFormatted = $"₱{t.Amount:N2}",
+                        paymentMethod = t.PaymentMethod ?? "N/A",
+                        paymentStatus = t.PaymentStatus,
+                        date = t.TransactionDate,
+                        dateFormatted = t.TransactionDate.ToString("MMM dd, yyyy")
+                    };
+                })
+                .ToList();
+
+            return Ok(new
+            {
+                platformOverview = new
+                {
+                    totalTenants,
+                    activeTenants,
+                    inactiveTenants,
+                    totalActiveSubscriptions,
+                    totalRevenue = totalSubscriptionRevenue,
+                    totalRevenueFormatted = $"₱{totalSubscriptionRevenue:N2}",
+                    totalRegisteredUsers,
+                    totalBranches,
+                    outstandingAmount = outstandingBillingAmount,
+                    outstandingAmountFormatted = $"₱{outstandingBillingAmount:N2}"
+                },
+                tenantAnalytics = new
+                {
+                    totalTenants,
+                    activeTenants,
+                    inactiveTenants,
+                    newlyRegisteredTenants,
+                    tenantGrowth
+                },
+                subscriptionAnalytics = new
+                {
+                    totalActiveSubscriptions,
+                    expiringSubscriptions,
+                    expiredSubscriptions,
+                    subscriptionsByPlan,
+                    statusDistribution,
+                    subscriptionGrowth
+                },
+                billingAnalytics = new
+                {
+                    totalSubscriptionRevenue,
+                    totalSubscriptionRevenueFormatted = $"₱{totalSubscriptionRevenue:N2}",
+                    paidBillingTransactions,
+                    outstandingBillingAmount,
+                    outstandingBillingAmountFormatted = $"₱{outstandingBillingAmount:N2}",
+                    overdueBillingAmount,
+                    overdueBillingAmountFormatted = $"₱{overdueBillingAmount:N2}",
+                    revenueByMonth,
+                    revenueByPlan
+                },
+                recentActivity
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "Failed to calculate platform analytics.", error = ex.Message });
         }
     }
 }

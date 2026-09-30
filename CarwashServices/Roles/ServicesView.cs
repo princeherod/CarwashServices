@@ -102,6 +102,14 @@ namespace CarwashServices.Roles
 
             Sidebar.EnableDoubleBuffering(this);
 
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    BeginInvoke(new Action(async () => await LoadServicesAsync()));
+                }
+            };
+
             Load += async (s, e) => await LoadServicesAsync();
 
             LostFocus += (s, e) => CloseActiveMenu();
@@ -611,9 +619,11 @@ namespace CarwashServices.Roles
                 Cursor = Cursors.WaitCursor;
 
                 var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var branchId = CarwashServices.Auth.SessionUser.CurrentBranchId;
+                var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"?branchId={branchId.Value}" : "";
                 var url = _tab == ListTab.Active
-                    ? $"api/tenant/{companyId}/products"
-                    : $"api/tenant/{companyId}/products/archived";
+                    ? $"api/tenant/{companyId}/products{branchQuery}"
+                    : $"api/tenant/{companyId}/products/archived{branchQuery}";
 
                 var list = await _http.GetFromJsonAsync<List<ProductDto>>(url);
                 _allServices = list ?? new List<ProductDto>();

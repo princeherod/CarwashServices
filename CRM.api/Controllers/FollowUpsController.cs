@@ -174,31 +174,53 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpGet("mine")]
-    public async Task<IActionResult> GetMine([FromQuery] int staffId, [FromQuery] int? companyId = null)
+    public async Task<IActionResult> GetMine([FromQuery] int staffId, [FromQuery] int? companyId = null, [FromQuery] int? branchId = null)
     {
         if (staffId <= 0) return BadRequest(new { message = "staffId is required." });
 
         var cid = ResolveCompanyId(companyId);
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, cid, branchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        branchId = sec.EffectiveBranchId;
+
         await using var tenant = await _tenantFactory.CreateAsync(cid);
         await AutoExpireAsync(tenant);
 
-        var list = await tenant.FollowUps
+        var query = tenant.FollowUps
             .AsNoTracking()
-            .Where(f => !f.IsArchived && f.CreatedBy == staffId)
+            .Where(f => !f.IsArchived && f.CreatedBy == staffId);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(f => f.BranchId == branchId.Value);
+        }
+
+        var list = await query
             .OrderByDescending(f => f.FollowUpId)
             .ToListAsync();
         return Ok(list);
     }
 
     [HttpGet("pending-approval")]
-    public async Task<IActionResult> GetPendingApproval([FromQuery] int? companyId = null)
+    public async Task<IActionResult> GetPendingApproval([FromQuery] int? companyId = null, [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, cid, branchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        branchId = sec.EffectiveBranchId;
+
         await using var tenant = await _tenantFactory.CreateAsync(cid);
 
-        var list = await tenant.FollowUps
+        var query = tenant.FollowUps
             .AsNoTracking()
-            .Where(f => !f.IsArchived && f.ApprovalStatus == "Pending")
+            .Where(f => !f.IsArchived && f.ApprovalStatus == "Pending");
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(f => f.BranchId == branchId.Value);
+        }
+
+        var list = await query
             .OrderBy(f => f.CreatedAt)
             .ToListAsync();
         return Ok(list);
@@ -206,25 +228,44 @@ public class FollowUpsController : ControllerBase
 
     [HttpGet("my-customers")]
     public async Task<IActionResult> GetMyCustomers([FromQuery] int staffId,
-                                                    [FromQuery] int? companyId = null)
+                                                    [FromQuery] int? companyId = null,
+                                                    [FromQuery] int? branchId = null)
     {
         if (staffId <= 0) return BadRequest(new { message = "staffId is required." });
 
         var cid = ResolveCompanyId(companyId);
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, cid, branchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        branchId = sec.EffectiveBranchId;
+
         await using var tenant = await _tenantFactory.CreateAsync(cid);
 
-        var myCustomerIds = await tenant.ServiceRequests
+        var reqQuery = tenant.ServiceRequests
             .AsNoTracking()
-            .Where(r => !r.IsArchived && r.AssignedStaffId == staffId)
+            .Where(r => !r.IsArchived && r.AssignedStaffId == staffId);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            reqQuery = reqQuery.Where(r => r.BranchId == branchId.Value);
+        }
+
+        var myCustomerIds = await reqQuery
             .Select(r => r.CustomerId)
             .Distinct()
             .ToListAsync();
 
         if (myCustomerIds.Count == 0) return Ok(Array.Empty<object>());
 
-        var customers = await tenant.TenantCustomers
+        var custQuery = tenant.TenantCustomers
             .AsNoTracking()
-            .Where(c => !c.IsArchived && myCustomerIds.Contains(c.TenantCustomerId))
+            .Where(c => !c.IsArchived && myCustomerIds.Contains(c.TenantCustomerId));
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            custQuery = custQuery.Where(c => c.BranchId == branchId.Value);
+        }
+
+        var customers = await custQuery
             .OrderBy(c => c.CustomerName)
             .ToListAsync();
 
@@ -232,14 +273,25 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpGet("customers")]
-    public async Task<IActionResult> GetCustomers([FromQuery] int? companyId = null)
+    public async Task<IActionResult> GetCustomers([FromQuery] int? companyId = null, [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, cid, branchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        branchId = sec.EffectiveBranchId;
+
         await using var tenant = await _tenantFactory.CreateAsync(cid);
 
-        var customers = await tenant.TenantCustomers
+        var query = tenant.TenantCustomers
             .AsNoTracking()
-            .Where(c => !c.IsArchived)
+            .Where(c => !c.IsArchived);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(c => c.BranchId == branchId.Value);
+        }
+
+        var customers = await query
             .OrderBy(c => c.CustomerName)
             .Select(c => new
             {
@@ -253,7 +305,8 @@ public class FollowUpsController : ControllerBase
                 c.VehicleModel,
                 c.VehicleColor,
                 c.VehicleType,
-                c.Source
+                c.Source,
+                c.BranchId
             })
             .ToListAsync();
 
@@ -292,21 +345,31 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpGet("due-today")]
-    public async Task<IActionResult> GetDueToday([FromQuery] int? companyId = null)
+    public async Task<IActionResult> GetDueToday([FromQuery] int? companyId = null, [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, cid, branchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        branchId = sec.EffectiveBranchId;
+
         await using var tenant = await _tenantFactory.CreateAsync(cid);
         await AutoExpireAsync(tenant);
         var today = DateTime.Today;
 
-        var list = await tenant.FollowUps
+        var query = tenant.FollowUps
             .AsNoTracking()
             .Where(f => !f.IsArchived
                      && f.Status == "Scheduled"
                      && f.ApprovalStatus != "Pending"
                      && f.ApprovalStatus != "Rejected"
-                     && f.ScheduledDate.Date == today)
-            .ToListAsync();
+                     && f.ScheduledDate.Date == today);
+
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            query = query.Where(f => f.BranchId == branchId.Value);
+        }
+
+        var list = await query.ToListAsync();
         return Ok(list);
     }
 
@@ -323,16 +386,25 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpGet("stats")]
-    public async Task<IActionResult> GetStats([FromQuery] int? companyId = null)
+    public async Task<IActionResult> GetStats([FromQuery] int? companyId = null, [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, cid, branchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        branchId = sec.EffectiveBranchId;
+
         await using var tenant = await _tenantFactory.CreateAsync(cid);
         await AutoExpireAsync(tenant);
         var today = DateTime.Today;
 
-        var dueToday = await tenant.FollowUps
-            .CountAsync(f => !f.IsArchived
-                          && f.ScheduledDate.Date == today
+        var baseQuery = tenant.FollowUps.Where(f => !f.IsArchived);
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            baseQuery = baseQuery.Where(f => f.BranchId == branchId.Value);
+        }
+
+        var dueToday = await baseQuery
+            .CountAsync(f => f.ScheduledDate.Date == today
                           && f.Status != "Draft"
                           && f.Status != "Sent"
                           && f.Status != "Redeemed"
@@ -340,12 +412,12 @@ public class FollowUpsController : ControllerBase
                           && f.ApprovalStatus != "Pending"
                           && f.ApprovalStatus != "Rejected");
 
-        var offersSent = await tenant.FollowUps
-            .CountAsync(f => !f.IsArchived && (f.Status == "Sent" || f.Status == "Contacted"));
-        var redeemed = await tenant.FollowUps
-            .CountAsync(f => !f.IsArchived && f.Status == "Redeemed");
-        var expired = await tenant.FollowUps
-            .CountAsync(f => !f.IsArchived && f.Status == "Expired");
+        var offersSent = await baseQuery
+            .CountAsync(f => f.Status == "Sent" || f.Status == "Contacted");
+        var redeemed = await baseQuery
+            .CountAsync(f => f.Status == "Redeemed");
+        var expired = await baseQuery
+            .CountAsync(f => f.Status == "Expired");
 
         return Ok(new { dueToday, offersSent, redeemed, expired });
     }
@@ -381,9 +453,14 @@ public class FollowUpsController : ControllerBase
 
         var scheduled = req.ScheduledDate ?? DateTime.Now;
 
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, cid, req.BranchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        int? effectiveBranchId = sec.EffectiveBranchId ?? req.BranchId ?? customer.BranchId;
+
         var entity = new FollowUp
         {
             CustomerId = req.CustomerId,
+            BranchId = effectiveBranchId,
             Type = Clamp(req.Type, 50, "Service Reminder"),
             ContactMethod = "Email",
             Reason = ClampNullable(req.Reason, 200),
@@ -521,6 +598,10 @@ public class FollowUpsController : ControllerBase
             });
         }
 
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, cid, req.BranchId);
+        if (!sec.Allowed) return StatusCode(403, new { message = sec.ErrorMessage });
+        int? effectiveBranchId = sec.EffectiveBranchId ?? req.BranchId;
+
         var scheduled = req.ScheduledDate ?? DateTime.Now;
         var approvalStatus = isServiceStaff ? "Pending" : "NotRequired";
         var status = isServiceStaff
@@ -535,9 +616,11 @@ public class FollowUpsController : ControllerBase
 
         foreach (var cId in eligibleIds)
         {
+            var cust = customerMap[cId];
             var entity = new FollowUp
             {
                 CustomerId = cId,
+                BranchId = effectiveBranchId ?? cust.BranchId,
                 Type = Clamp(req.Type, 50, "Service Reminder"),
                 ContactMethod = "Email",
                 Reason = ClampNullable(req.Reason, 200),
@@ -556,7 +639,6 @@ public class FollowUpsController : ControllerBase
 
             if (sendImmediately)
             {
-                var cust = customerMap[cId];
                 if (string.IsNullOrWhiteSpace(cust.EmailAddress))
                 {
                     entity.Status = "Scheduled";
@@ -1245,6 +1327,7 @@ public class FollowUpRequest
     public bool ScheduledNow { get; set; }
     public bool IsDraft { get; set; }
     public int? CreatedBy { get; set; }
+    public int? BranchId { get; set; }
 }
 
 public class BulkFollowUpRequest
@@ -1260,6 +1343,7 @@ public class BulkFollowUpRequest
     public bool ScheduledNow { get; set; }
     public bool IsDraft { get; set; }
     public int? CreatedBy { get; set; }
+    public int? BranchId { get; set; }
 }
 
 public class BulkFollowUpFailureDto

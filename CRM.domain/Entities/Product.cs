@@ -1,4 +1,4 @@
-﻿namespace CRM.Domain.Entities;
+namespace CRM.Domain.Entities;
 
 public class Product
 {
@@ -16,4 +16,8 @@ public class Product
     public bool IsArchived { get; set; }
     public DateTime? ArchivedAt { get; set; }
     public string? ArchivedBy { get; set; }
+
+    // ---- Multi-branch ----
+    public int? BranchId { get; set; }
+    public CRM.domain.Entities.TenantBranch? Branch { get; set; }
 }

@@ -109,24 +109,24 @@ namespace CarwashServices.Roles.SuperAdmin
         private TermsItemDto? _selectedTerms;
         private readonly List<Panel> _rowPanels = new();
 
-        public TermsAndConditionsView() : this(isReadOnly: SessionUser.RoleId != 4)
+        public TermsAndConditionsView() : this(isReadOnly: SessionUser.RoleId != 1 && SessionUser.Role != UserRole.SuperAdmin)
         {
         }
 
         public TermsAndConditionsView(bool isReadOnly)
         {
-            // Role 1 (Admin) is strictly read-only; Role 4 (Super Admin) gets full access
-            _isReadOnly = isReadOnly || (SessionUser.RoleId != 4);
+            // Admin is read-only; Super Admin (Role 1) gets full access
+            _isReadOnly = isReadOnly || (SessionUser.RoleId != 1 && SessionUser.Role != UserRole.SuperAdmin);
 
             Dock = DockStyle.Fill;
             BackColor = PageBg;
             Font = new Font("Segoe UI", 9.5f);
             DoubleBuffered = true;
 
-            // Role guard: reachable only by role 1 (Admin) and role 4 (Super Admin)
-            if (SessionUser.RoleId != 4 && SessionUser.RoleId != 1)
+            // Role guard: reachable by Admin and Super Admin
+            if (SessionUser.Role != UserRole.SuperAdmin && SessionUser.Role != UserRole.Admin)
             {
-                Controls.Add(new AccessDeniedView("Terms & Conditions", "Super Admin (Role 4) or Admin (Role 1)"));
+                Controls.Add(new AccessDeniedView("Terms & Conditions", "Super Admin (Role 1) or Admin (Role 2)"));
                 return;
             }
 

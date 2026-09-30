@@ -117,6 +117,14 @@ namespace CarwashServices.Roles.ServiceStaff
 
             Sidebar.EnableDoubleBuffering(this);
 
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    Invoke(async () => await LoadAllAsync());
+                }
+            };
+
             Load += async (s, e) => await LoadAllAsync();
         }
 
@@ -291,10 +299,15 @@ namespace CarwashServices.Roles.ServiceStaff
                 }
 
                 var companyId = SessionUser.CurrentCompanyId;
-                var reqsT = _http.GetFromJsonAsync<List<ServiceRequestDto>>($"api/service-requests?companyId={companyId}");
-                var custsT = _http.GetFromJsonAsync<List<TenantCustomerDto>>($"api/tenant/{companyId}/tenant-customers");
-                var svcsT = _http.GetFromJsonAsync<List<ProductDto>>($"api/tenant/{companyId}/products");
-                var usersT = _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}");
+                var branchId = SessionUser.CurrentBranchId;
+                var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"?branchId={branchId.Value}" : "";
+                var userBranchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
+                var reqBranchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
+
+                var reqsT = _http.GetFromJsonAsync<List<ServiceRequestDto>>($"api/service-requests?companyId={companyId}{reqBranchQuery}");
+                var custsT = _http.GetFromJsonAsync<List<TenantCustomerDto>>($"api/tenant/{companyId}/tenant-customers{branchQuery}");
+                var svcsT = _http.GetFromJsonAsync<List<ProductDto>>($"api/tenant/{companyId}/products{branchQuery}");
+                var usersT = _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}{userBranchQuery}");
 
                 await Task.WhenAll(reqsT, custsT, svcsT, usersT);
 
@@ -486,8 +499,10 @@ namespace CarwashServices.Roles.ServiceStaff
         {
             try
             {
+                var branchId = SessionUser.CurrentBranchId;
+                var branchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
                 var all = await _http.GetFromJsonAsync<ServiceStatusResponseDto>(
-                    $"api/service-status?companyId={SessionUser.CurrentCompanyId}") ?? new();
+                    $"api/service-status?companyId={SessionUser.CurrentCompanyId}{branchQuery}") ?? new();
 
                 _history = all.History
                     .Where(h => h.RequestId == requestId)

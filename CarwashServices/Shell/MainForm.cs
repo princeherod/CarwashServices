@@ -245,25 +245,25 @@ namespace CarwashServices.Shell
         // ================================================================
         private void NavigateTo(string key)
         {
-            // Role guards for Super Admin modules (reachable only by RoleId == 4)
-            if (key is "Admin Panel" or "Manage Admin Accounts" or
+            // Role guards for Super Admin modules (reachable only by RoleId == 1 / SuperAdmin)
+            if (key is "Admin Panel" or "Manage Admin Accounts" or "Manage admin accounts" or
                        "Business Intelligence" or
                        "Subscriptions" or "Manage Subscription / Billing" or "Manage Subscription/Billing" or "Subscription & Billing Management" or
                        "Manage Businesses" or
                        "Backup" or "Backup & Restore Data" or "Backup & Restore" or "Backup and Restore Data")
             {
-                if (SessionUser.RoleId != 4 && SessionUser.Role != UserRole.SuperAdmin)
+                if (SessionUser.RoleId != 1 && SessionUser.Role != UserRole.SuperAdmin)
                 {
-                    ShowAccessDenied(key, "Super Admin (Role 4)");
+                    ShowAccessDenied(key, "Super Admin (Role 1)");
                     return;
                 }
             }
-            // Terms & Conditions guard: reachable by Role 1 (Admin) and Role 4 (Super Admin)
-            else if (key == "Terms & Conditions")
+            // Terms & Conditions guard: reachable by Admin and Super Admin
+            else if (key is "Terms & Conditions" or "Terms & Condition" or "Terms and Conditions")
             {
-                if (SessionUser.RoleId != 4 && SessionUser.RoleId != 1)
+                if (SessionUser.Role != UserRole.SuperAdmin && SessionUser.Role != UserRole.Admin)
                 {
-                    ShowAccessDenied(key, "Super Admin (Role 4) or Admin (Role 1)");
+                    ShowAccessDenied(key, "Super Admin (Role 1) or Admin (Role 2)");
                     return;
                 }
             }
@@ -392,13 +392,22 @@ namespace CarwashServices.Shell
                         break;
 
                     case "Manage Admin Accounts":
-                        view = new UsersView(roleFilter: 1, customTitle: "Manage Admin Accounts");
+                    case "Manage admin accounts":
+                        view = new Roles.SuperAdmin.ManageAdminAccountsView();
                         headerText = "MANAGE ADMIN ACCOUNTS";
                         break;
 
                     case "Business Intelligence":
-                        view = new AnalyticsView();
-                        headerText = "BUSINESS INTELLIGENCE";
+                        if (SessionUser.Role == UserRole.SuperAdmin)
+                        {
+                            view = new Roles.SuperAdmin.SuperAdminBusinessIntelligenceView();
+                            headerText = "BUSINESS INTELLIGENCE";
+                        }
+                        else
+                        {
+                            view = new AnalyticsView();
+                            headerText = "BUSINESS INTELLIGENCE";
+                        }
                         break;
 
                     case "Subscriptions":
@@ -431,7 +440,9 @@ namespace CarwashServices.Shell
                         return;
 
                     case "Terms & Conditions":
-                        bool isReadOnly = SessionUser.RoleId != 4;
+                    case "Terms & Condition":
+                    case "Terms and Conditions":
+                        bool isReadOnly = SessionUser.RoleId != 1 && SessionUser.Role != UserRole.SuperAdmin;
                         view = new Roles.SuperAdmin.TermsAndConditionsView(isReadOnly);
                         headerText = SuperAdminLabels.NavTermsAndConditions;
                         break;

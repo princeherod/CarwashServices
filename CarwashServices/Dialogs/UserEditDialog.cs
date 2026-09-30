@@ -261,7 +261,7 @@ namespace CarwashServices.Dialogs
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 BackColor = Color.White
             };
-            var roles = (CarwashServices.Auth.SessionUser.RoleId == 4 || CarwashServices.Auth.SessionUser.Role == CarwashServices.Auth.UserRole.SuperAdmin)
+            var roles = (CarwashServices.Auth.SessionUser.RoleId == 1 || CarwashServices.Auth.SessionUser.Role == CarwashServices.Auth.UserRole.SuperAdmin)
                 ? SuperAdminRoles
                 : StandardRoles;
             foreach (var r in roles)
