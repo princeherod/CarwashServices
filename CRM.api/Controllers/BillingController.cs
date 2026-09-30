@@ -15,10 +15,12 @@ namespace CRM.api.Controllers
     public class BillingController : ControllerBase
     {
         private readonly MasterErpDbContext _db;
+        private readonly Microsoft.Extensions.Logging.ILogger<BillingController> _logger;
 
-        public BillingController(MasterErpDbContext db)
+        public BillingController(MasterErpDbContext db, Microsoft.Extensions.Logging.ILogger<BillingController> logger)
         {
             _db = db;
+            _logger = logger;
         }
 
         // =====================================================================
@@ -28,26 +30,34 @@ namespace CRM.api.Controllers
         [HttpGet("summary")]
         public async Task<IActionResult> GetSummary()
         {
-            var paidTotal = await _db.TenantBillingTransactions
-                .Where(t => t.PaymentStatus == "Paid")
-                .SumAsync(t => (decimal?)t.Amount) ?? 0m;
-
-            var outstandingTotal = await _db.TenantBillingTransactions
-                .Where(t => t.PaymentStatus != "Paid")
-                .SumAsync(t => (decimal?)t.Amount) ?? 0m;
-
-            var activeSubs = await _db.TenantSubscriptions
-                .Where(s => s.Status == "Active")
-                .CountAsync();
-
-            return Ok(new
+            try
             {
-                totalPaid = paidTotal,
-                totalPaidFormatted = $"₱{paidTotal:N2}",
-                outstanding = outstandingTotal,
-                outstandingFormatted = $"₱{outstandingTotal:N2}",
-                activeSubscriptions = activeSubs
-            });
+                var paidTotal = await _db.TenantBillingTransactions
+                    .Where(t => t.PaymentStatus == "Paid")
+                    .SumAsync(t => (decimal?)t.Amount) ?? 0m;
+
+                var outstandingTotal = await _db.TenantBillingTransactions
+                    .Where(t => t.PaymentStatus != "Paid")
+                    .SumAsync(t => (decimal?)t.Amount) ?? 0m;
+
+                var activeSubs = await _db.TenantSubscriptions
+                    .Where(s => s.Status == "Active")
+                    .CountAsync();
+
+                return Ok(new
+                {
+                    totalPaid = paidTotal,
+                    totalPaidFormatted = $"₱{paidTotal:N2}",
+                    outstanding = outstandingTotal,
+                    outstandingFormatted = $"₱{outstandingTotal:N2}",
+                    activeSubscriptions = activeSubs
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to calculate billing summary.");
+                return StatusCode(500, new { message = "Failed to calculate billing summary.", error = ex.Message });
+            }
         }
 
         // =====================================================================
@@ -56,39 +66,47 @@ namespace CRM.api.Controllers
         [HttpGet("plans")]
         public async Task<IActionResult> GetPlans([FromQuery] bool? activeOnly = null, [FromQuery] bool includeArchived = false)
         {
-            IQueryable<TenantSubscriptionPlan> query = _db.TenantSubscriptionPlans.AsNoTracking();
-
-            if (!includeArchived)
+            try
             {
-                query = query.Where(p => !p.IsArchived);
-            }
+                IQueryable<TenantSubscriptionPlan> query = _db.TenantSubscriptionPlans.AsNoTracking();
 
-            if (activeOnly.HasValue && activeOnly.Value)
-            {
-                query = query.Where(p => p.IsActive);
-            }
-
-            var plans = await query
-                .OrderBy(p => p.PlanId)
-                .Select(p => new
+                if (!includeArchived)
                 {
-                    planId = p.PlanId,
-                    planName = p.PlanName,
-                    price = p.Price,
-                    priceFormatted = $"₱{p.Price:N2}",
-                    billingCycle = p.BillingCycle,
-                    description = p.Description ?? string.Empty,
-                    maxUsers = p.MaxUsers,
-                    maxCustomers = p.MaxCustomers,
-                    multiBranchEnabled = p.MultiBranchEnabled,
-                    isActive = p.IsActive,
-                    isArchived = p.IsArchived,
-                    archivedAt = p.ArchivedAt,
-                    activeSubscribers = _db.TenantSubscriptions.Count(s => s.PlanId == p.PlanId && s.Status == "Active")
-                })
-                .ToListAsync();
+                    query = query.Where(p => !p.IsArchived);
+                }
 
-            return Ok(plans);
+                if (activeOnly.HasValue && activeOnly.Value)
+                {
+                    query = query.Where(p => p.IsActive);
+                }
+
+                var plans = await query
+                    .OrderBy(p => p.PlanId)
+                    .Select(p => new
+                    {
+                        planId = p.PlanId,
+                        planName = p.PlanName,
+                        price = p.Price,
+                        priceFormatted = $"₱{p.Price:N2}",
+                        billingCycle = p.BillingCycle,
+                        description = p.Description ?? string.Empty,
+                        maxUsers = p.MaxUsers,
+                        maxCustomers = p.MaxCustomers,
+                        multiBranchEnabled = p.MultiBranchEnabled,
+                        isActive = p.IsActive,
+                        isArchived = p.IsArchived,
+                        archivedAt = p.ArchivedAt,
+                        activeSubscribers = _db.TenantSubscriptions.Count(s => s.PlanId == p.PlanId && s.Status == "Active")
+                    })
+                    .ToListAsync();
+
+                return Ok(plans);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load subscription plans.");
+                return StatusCode(500, new { message = "Failed to load subscription plans.", error = ex.Message });
+            }
         }
 
         public class SavePlanRequest
@@ -294,47 +312,55 @@ namespace CRM.api.Controllers
         [HttpGet("customer-subscriptions")]
         public async Task<IActionResult> GetCustomerSubscriptions()
         {
-            var subs = await _db.TenantSubscriptions
-                .AsNoTracking()
-                .Include(s => s.Company)
-                .Include(s => s.Plan)
-                .OrderByDescending(s => s.TenantSubscriptionId)
-                .ToListAsync();
-
-            var companyIds = subs.Select(s => s.CompanyId).Distinct().ToList();
-            var admins = await _db.Users
-                .AsNoTracking()
-                .Where(u => u.CompanyId != null && companyIds.Contains(u.CompanyId.Value) && (u.RoleId == 1 || u.RoleId == 2))
-                .OrderBy(u => u.RoleId)
-                .ToListAsync();
-
-            var result = subs.Select(s =>
+            try
             {
-                var comp = s.Company;
-                var admin = admins.FirstOrDefault(a => a.CompanyId == s.CompanyId);
+                var subs = await _db.TenantSubscriptions
+                    .AsNoTracking()
+                    .Include(s => s.Company)
+                    .Include(s => s.Plan)
+                    .OrderByDescending(s => s.TenantSubscriptionId)
+                    .ToListAsync();
 
-                return new
+                var companyIds = subs.Select(s => s.CompanyId).Distinct().ToList();
+                var admins = await _db.Users
+                    .AsNoTracking()
+                    .Where(u => u.CompanyId != null && companyIds.Contains(u.CompanyId.Value) && (u.RoleId == 1 || u.RoleId == 2))
+                    .OrderBy(u => u.RoleId)
+                    .ToListAsync();
+
+                var result = subs.Select(s =>
                 {
-                    subscriptionId = s.TenantSubscriptionId,
-                    companyId = s.CompanyId,
-                    companyCode = comp?.CompanyCode ?? $"COMP{s.CompanyId:D3}",
-                    tenantCompany = comp?.CompanyName ?? $"Company #{s.CompanyId}",
-                    adminUser = admin?.FullName ?? "Unassigned",
-                    adminEmail = admin?.Email ?? "",
-                    planId = s.PlanId ?? 0,
-                    planName = s.Plan != null ? s.Plan.PlanName : "No Plan Assigned",
-                    billingCycle = s.Plan != null ? s.Plan.BillingCycle : "Monthly",
-                    price = s.Plan != null ? s.Plan.Price : 0m,
-                    priceFormatted = $"₱{(s.Plan != null ? s.Plan.Price : 0m):N2}",
-                    managedBy = 1,
-                    managedByName = "Super Admin",
-                    startDate = s.StartDate ?? s.CreatedAt,
-                    endDate = s.RenewalDate,
-                    status = s.Status
-                };
-            }).ToList();
+                    var comp = s.Company;
+                    var admin = admins.FirstOrDefault(a => a.CompanyId == s.CompanyId);
 
-            return Ok(result);
+                    return new
+                    {
+                        subscriptionId = s.TenantSubscriptionId,
+                        companyId = s.CompanyId,
+                        companyCode = comp?.CompanyCode ?? $"COMP{s.CompanyId:D3}",
+                        tenantCompany = comp?.CompanyName ?? $"Company #{s.CompanyId}",
+                        adminUser = admin?.FullName ?? "Unassigned",
+                        adminEmail = admin?.Email ?? "",
+                        planId = s.PlanId ?? 0,
+                        planName = s.Plan != null ? s.Plan.PlanName : "No Plan Assigned",
+                        billingCycle = s.Plan != null ? s.Plan.BillingCycle : "Monthly",
+                        price = s.Plan != null ? s.Plan.Price : 0m,
+                        priceFormatted = $"₱{(s.Plan != null ? s.Plan.Price : 0m):N2}",
+                        managedBy = 1,
+                        managedByName = "Super Admin",
+                        startDate = s.StartDate ?? s.CreatedAt,
+                        endDate = s.RenewalDate,
+                        status = s.Status
+                    };
+                }).ToList();
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load tenant subscriptions in Super Admin.");
+                return StatusCode(500, new { message = "Failed to load customer subscriptions.", error = ex.Message });
+            }
         }
 
         public class AssignPlanRequest
@@ -353,71 +379,79 @@ namespace CRM.api.Controllers
         [HttpPost("assign-plan")]
         public async Task<IActionResult> AssignPlan([FromBody] AssignPlanRequest req)
         {
-            var comp = await _db.Companies.FirstOrDefaultAsync(c => c.CompanyId == req.CompanyId);
-            if (comp == null)
+            try
             {
-                return NotFound($"Company {req.CompanyId} not found.");
-            }
-
-            var plan = await _db.TenantSubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == req.PlanId);
-            if (plan == null)
-            {
-                return NotFound($"Subscription plan {req.PlanId} not found.");
-            }
-
-            var sub = await _db.TenantSubscriptions
-                .FirstOrDefaultAsync(s => s.CompanyId == req.CompanyId);
-
-            DateTime start = req.StartDate ?? DateTime.UtcNow;
-            DateTime renewal = req.RenewalDate ?? start.AddMonths(1);
-
-            if (sub == null)
-            {
-                sub = new TenantSubscription
+                var comp = await _db.Companies.FirstOrDefaultAsync(c => c.CompanyId == req.CompanyId);
+                if (comp == null)
                 {
+                    return NotFound($"Company {req.CompanyId} not found.");
+                }
+
+                var plan = await _db.TenantSubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == req.PlanId);
+                if (plan == null)
+                {
+                    return NotFound($"Subscription plan {req.PlanId} not found.");
+                }
+
+                var sub = await _db.TenantSubscriptions
+                    .FirstOrDefaultAsync(s => s.CompanyId == req.CompanyId);
+
+                DateTime start = req.StartDate ?? DateTime.UtcNow;
+                DateTime renewal = req.RenewalDate ?? start.AddMonths(1);
+
+                if (sub == null)
+                {
+                    sub = new TenantSubscription
+                    {
+                        CompanyId = req.CompanyId,
+                        PlanId = req.PlanId,
+                        Status = req.Status,
+                        StartDate = start,
+                        RenewalDate = renewal,
+                        AutoRenew = req.AutoRenew,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _db.TenantSubscriptions.Add(sub);
+                }
+                else
+                {
+                    sub.PlanId = req.PlanId;
+                    sub.Status = req.Status;
+                    sub.StartDate = start;
+                    sub.RenewalDate = renewal;
+                    sub.AutoRenew = req.AutoRenew;
+                }
+
+                await _db.SaveChangesAsync();
+
+                // Create pending or completed transaction entry for billing record
+                var txn = new TenantBillingTransaction
+                {
+                    TenantSubscriptionId = sub.TenantSubscriptionId,
                     CompanyId = req.CompanyId,
-                    PlanId = req.PlanId,
-                    Status = req.Status,
-                    StartDate = start,
-                    RenewalDate = renewal,
-                    AutoRenew = req.AutoRenew,
-                    CreatedAt = DateTime.UtcNow
+                    Amount = plan.Price,
+                    PaymentStatus = "Pending",
+                    TransactionDate = DateTime.UtcNow,
+                    ReferenceNumber = $"INV-{DateTime.UtcNow:yyyyMMdd}-{sub.TenantSubscriptionId:D4}"
                 };
-                _db.TenantSubscriptions.Add(sub);
+                _db.TenantBillingTransactions.Add(txn);
+                await _db.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    subscriptionId = sub.TenantSubscriptionId,
+                    companyId = sub.CompanyId,
+                    planId = sub.PlanId,
+                    status = sub.Status,
+                    startDate = sub.StartDate,
+                    renewalDate = sub.RenewalDate
+                });
             }
-            else
+            catch (Exception ex)
             {
-                sub.PlanId = req.PlanId;
-                sub.Status = req.Status;
-                sub.StartDate = start;
-                sub.RenewalDate = renewal;
-                sub.AutoRenew = req.AutoRenew;
+                _logger.LogError(ex, "Failed to assign plan to company {CompanyId}.", req.CompanyId);
+                return StatusCode(500, new { message = "Failed to assign subscription plan.", error = ex.Message });
             }
-
-            await _db.SaveChangesAsync();
-
-            // Create pending or completed transaction entry for billing record
-            var txn = new TenantBillingTransaction
-            {
-                TenantSubscriptionId = sub.TenantSubscriptionId,
-                CompanyId = req.CompanyId,
-                Amount = plan.Price,
-                PaymentStatus = "Pending",
-                TransactionDate = DateTime.UtcNow,
-                ReferenceNumber = $"INV-{DateTime.UtcNow:yyyyMMdd}-{sub.TenantSubscriptionId:D4}"
-            };
-            _db.TenantBillingTransactions.Add(txn);
-            await _db.SaveChangesAsync();
-
-            return Ok(new
-            {
-                subscriptionId = sub.TenantSubscriptionId,
-                companyId = sub.CompanyId,
-                planId = sub.PlanId,
-                status = sub.Status,
-                startDate = sub.StartDate,
-                renewalDate = sub.RenewalDate
-            });
         }
 
         // =====================================================================
@@ -426,41 +460,49 @@ namespace CRM.api.Controllers
         [HttpGet("transactions")]
         public async Task<IActionResult> GetTransactions()
         {
-            var rawTxs = await _db.TenantBillingTransactions
-                .AsNoTracking()
-                .Include(t => t.Company)
-                .Include(t => t.TenantSubscription)
-                    .ThenInclude(ts => ts!.Plan)
-                .OrderByDescending(t => t.TransactionDate)
-                .ThenByDescending(t => t.TransactionId)
-                .ToListAsync();
-
-            var result = rawTxs.Select(t =>
+            try
             {
-                var comp = t.Company;
-                var plan = t.TenantSubscription?.Plan;
-                var planName = plan?.PlanName ?? "Subscription Plan";
-                var refCode = !string.IsNullOrWhiteSpace(t.ReferenceNumber)
-                    ? t.ReferenceNumber
-                    : $"SUB-INV-{t.TransactionDate:yyyyMM}-{t.TransactionId:D4}";
+                var rawTxs = await _db.TenantBillingTransactions
+                    .AsNoTracking()
+                    .Include(t => t.Company)
+                    .Include(t => t.TenantSubscription)
+                        .ThenInclude(ts => ts!.Plan)
+                    .OrderByDescending(t => t.TransactionDate)
+                    .ThenByDescending(t => t.TransactionId)
+                    .ToListAsync();
 
-                return new
+                var result = rawTxs.Select(t =>
                 {
-                    transactionId = t.TransactionId,
-                    subscriptionId = t.TenantSubscriptionId,
-                    tenantCompany = comp?.CompanyName ?? $"Company #{t.CompanyId}",
-                    tenantCompanyCode = comp?.CompanyCode ?? $"COMP{t.CompanyId:D3}",
-                    planName = planName,
-                    referenceNumber = refCode,
-                    amount = t.Amount,
-                    amountFormatted = $"₱{t.Amount:N2}",
-                    paymentStatus = t.PaymentStatus,
-                    paymentMethod = t.PaymentMethod ?? "—",
-                    transactionDate = t.TransactionDate
-                };
-            }).ToList();
+                    var comp = t.Company;
+                    var plan = t.TenantSubscription?.Plan;
+                    var planName = plan?.PlanName ?? "Subscription Plan";
+                    var refCode = !string.IsNullOrWhiteSpace(t.ReferenceNumber)
+                        ? t.ReferenceNumber
+                        : $"SUB-INV-{t.TransactionDate:yyyyMM}-{t.TransactionId:D4}";
 
-            return Ok(result);
+                    return new
+                    {
+                        transactionId = t.TransactionId,
+                        subscriptionId = t.TenantSubscriptionId,
+                        tenantCompany = comp?.CompanyName ?? $"Company #{t.CompanyId}",
+                        tenantCompanyCode = comp?.CompanyCode ?? $"COMP{t.CompanyId:D3}",
+                        planName = planName,
+                        referenceNumber = refCode,
+                        amount = t.Amount,
+                        amountFormatted = $"₱{t.Amount:N2}",
+                        paymentStatus = t.PaymentStatus,
+                        paymentMethod = t.PaymentMethod ?? "—",
+                        transactionDate = t.TransactionDate
+                    };
+                }).ToList();
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load billing transactions.");
+                return StatusCode(500, new { message = "Failed to load billing transactions.", error = ex.Message });
+            }
         }
 
         public class MarkPaidRequest
@@ -476,29 +518,37 @@ namespace CRM.api.Controllers
         [HttpPost("mark-paid")]
         public async Task<IActionResult> MarkPaid([FromBody] MarkPaidRequest req)
         {
-            var txn = await _db.TenantBillingTransactions.FirstOrDefaultAsync(t => t.TransactionId == req.TransactionId);
-            if (txn == null)
+            try
             {
-                return NotFound($"Transaction {req.TransactionId} not found.");
+                var txn = await _db.TenantBillingTransactions.FirstOrDefaultAsync(t => t.TransactionId == req.TransactionId);
+                if (txn == null)
+                {
+                    return NotFound($"Transaction {req.TransactionId} not found.");
+                }
+
+                txn.PaymentStatus = "Paid";
+                txn.PaymentMethod = string.IsNullOrWhiteSpace(req.PaymentMethod) ? "Cash / Manual" : req.PaymentMethod.Trim();
+                if (!string.IsNullOrWhiteSpace(req.ReferenceNumber))
+                {
+                    txn.ReferenceNumber = req.ReferenceNumber.Trim();
+                }
+                txn.TransactionDate = DateTime.UtcNow;
+
+                await _db.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    transactionId = txn.TransactionId,
+                    paymentStatus = txn.PaymentStatus,
+                    paymentMethod = txn.PaymentMethod,
+                    referenceNumber = txn.ReferenceNumber
+                });
             }
-
-            txn.PaymentStatus = "Paid";
-            txn.PaymentMethod = string.IsNullOrWhiteSpace(req.PaymentMethod) ? "Cash / Manual" : req.PaymentMethod.Trim();
-            if (!string.IsNullOrWhiteSpace(req.ReferenceNumber))
+            catch (Exception ex)
             {
-                txn.ReferenceNumber = req.ReferenceNumber.Trim();
+                _logger.LogError(ex, "Failed to mark transaction {TransactionId} as paid.", req.TransactionId);
+                return StatusCode(500, new { message = "Failed to record payment.", error = ex.Message });
             }
-            txn.TransactionDate = DateTime.UtcNow;
-
-            await _db.SaveChangesAsync();
-
-            return Ok(new
-            {
-                transactionId = txn.TransactionId,
-                paymentStatus = txn.PaymentStatus,
-                paymentMethod = txn.PaymentMethod,
-                referenceNumber = txn.ReferenceNumber
-            });
         }
     }
 }

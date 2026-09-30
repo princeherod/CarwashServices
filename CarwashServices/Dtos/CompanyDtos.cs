@@ -23,6 +23,10 @@ namespace CarwashServices.Dtos
         public string AdminEmail { get; set; } = "";
         public string? DatabaseServer { get; set; }
         public string? DatabaseName { get; set; }
+        public bool TermsAccepted { get; set; }
+        public DateTime? TermsAcceptedAt { get; set; }
+        public string? TermsAcceptedBy { get; set; }
+        public string? TermsAcceptedVersion { get; set; }
     }
 
     public class InitialAdminDto

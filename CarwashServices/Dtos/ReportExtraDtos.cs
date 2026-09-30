@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace CarwashServices.Dtos
 {
@@ -89,6 +89,7 @@ namespace CarwashServices.Dtos
 
     public class RetentionSummaryRowDto
     {
+        public int CustomerId { get; set; }
         public string Customer { get; set; } = "";
         public string LastVisit { get; set; } = "";
         public string DaysSince { get; set; } = "";

@@ -75,6 +75,11 @@ namespace CarwashServices.Roles.SuperAdmin
         private Button _newAdminBtn = null!;
         private Panel _rolesCard = null!;
 
+        // Actions Three-Dot Menu & Hover
+        private int _hoverAction = -1;
+        private ContextMenuStrip? _activeMenu;
+        private int _menuRow = -1;
+
         public ManageAdminAccountsView()
         {
             Dock = DockStyle.Fill;
@@ -248,10 +253,38 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Role", HeaderText = SuperAdminLabels.ColRole, Width = 150 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = SuperAdminLabels.ColStatus, Width = 120 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Created", HeaderText = SuperAdminLabels.ColDateCreated, Width = 170 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Actions", HeaderText = SuperAdminLabels.ColActions, Width = 110 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Actions",
+                HeaderText = SuperAdminLabels.ColActions,
+                Width = SuperAdminActionMenuHelper.ActionsColWidth,
+                MinimumWidth = 70,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.White,
+                    SelectionBackColor = Color.FromArgb(0xEA, 0xF2, 0xFD),
+                    Padding = new Padding(0),
+                    Alignment = DataGridViewContentAlignment.MiddleCenter
+                }
+            });
 
             _grid.CellPainting += Grid_CellPainting;
+            _grid.CellMouseMove += Grid_CellMouseMove;
             _grid.CellMouseClick += Grid_CellMouseClick;
+            _grid.MouseLeave += (s, e) => SetHover(-1);
+            _grid.Scroll += (s, e) => { CloseActiveMenu(); SetHover(-1); };
+            _grid.CellDoubleClick += (s, e) =>
+            {
+                if (e.RowIndex >= 0 && e.RowIndex < _admins.Count)
+                {
+                    var idText = _grid.Rows[e.RowIndex].Cells["UserId"].Value?.ToString() ?? "";
+                    if (int.TryParse(idText, out var id))
+                    {
+                        var admin = _admins.FirstOrDefault(u => u.UserId == id);
+                        if (admin != null) OpenEditAdminDialog(admin);
+                    }
+                }
+            };
             _contentPanel.Controls.Add(_grid);
 
             void Relayout()
@@ -319,6 +352,12 @@ namespace CarwashServices.Roles.SuperAdmin
                 _admins = list;
                 PopulateGrid();
             }
+            catch (HttpRequestException ex)
+            {
+                MessageBox.Show(
+                    $"Unable to reach the server to load admin accounts.\n\nPlease verify that the backend API is running on http://localhost:5180.\n\nDetails: {ex.Message}",
+                    "Server Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
             catch (Exception ex)
             {
                 MessageBox.Show(
@@ -334,6 +373,8 @@ namespace CarwashServices.Roles.SuperAdmin
 
         private void PopulateGrid()
         {
+            CloseActiveMenu();
+            SetHover(-1);
             _grid.SuspendLayout();
             _grid.Rows.Clear();
 
@@ -352,7 +393,7 @@ namespace CarwashServices.Roles.SuperAdmin
                     roleCell,
                     u.Status,
                     u.CreatedAt.ToString("yyyy-MM-dd HH:mm"),
-                    SuperAdminLabels.ActionEdit);
+                    "Actions");
             }
 
             _grid.ClearSelection();
@@ -380,7 +421,8 @@ namespace CarwashServices.Roles.SuperAdmin
                     PaintStatusCell(e);
                     break;
                 case "Actions":
-                    PaintEditButton(e);
+                    bool hover = _hoverAction == (e.RowIndex << 2);
+                    SuperAdminActionMenuHelper.PaintActionsCell(e, hover);
                     break;
             }
         }
@@ -532,35 +574,6 @@ namespace CarwashServices.Roles.SuperAdmin
             e.Handled = true;
         }
 
-        private void PaintEditButton(DataGridViewCellPaintingEventArgs e)
-        {
-            e.Paint(e.CellBounds, DataGridViewPaintParts.Background |
-                                  DataGridViewPaintParts.Border |
-                                  DataGridViewPaintParts.SelectionBackground);
-
-            var b = e.CellBounds;
-            int btnW = 72, btnH = 32;
-            var rect = new Rectangle(
-                b.X + (b.Width - btnW) / 2,
-                b.Y + (b.Height - btnH) / 2,
-                btnW, btnH);
-
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = RoundedRect(rect, 8))
-            using (var fill = new SolidBrush(Color.White))
-            using (var pen = new Pen(Blue, 1.2f))
-            {
-                e.Graphics.FillPath(fill, path);
-                e.Graphics.DrawPath(pen, path);
-            }
-
-            TextRenderer.DrawText(e.Graphics, "Edit", FontTag, rect, Blue,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
-
-            e.Handled = true;
-        }
-
         private static string Initials(string name)
         {
             if (string.IsNullOrWhiteSpace(name)) return "?";
@@ -570,17 +583,101 @@ namespace CarwashServices.Roles.SuperAdmin
             return (parts[0][0].ToString() + parts[parts.Length - 1][0].ToString()).ToUpper();
         }
 
+        private void Grid_CellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 ||
+                _grid.Columns[e.ColumnIndex].Name != "Actions")
+            {
+                SetHover(-1);
+                return;
+            }
+
+            SetHover(SuperAdminActionMenuHelper.HitTestActions(_grid, e.RowIndex, e.Location));
+        }
+
+        private void SetHover(int encoded)
+        {
+            if (encoded == _hoverAction) return;
+
+            int old = _hoverAction;
+            _hoverAction = encoded;
+
+            var col = _grid.Columns["Actions"];
+            if (col != null)
+            {
+                if (old >= 0 && (old >> 2) < _grid.RowCount) _grid.InvalidateCell(col.Index, old >> 2);
+                if (encoded >= 0 && (encoded >> 2) < _grid.RowCount) _grid.InvalidateCell(col.Index, encoded >> 2);
+            }
+
+            _grid.Cursor = encoded >= 0 ? Cursors.Hand : Cursors.Default;
+        }
+
         private void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
             if (_grid.Columns[e.ColumnIndex].Name != "Actions") return;
 
+            int hit = SuperAdminActionMenuHelper.HitTestActions(_grid, e.RowIndex, e.Location);
+            if (hit < 0) return;
+
             var idText = _grid.Rows[e.RowIndex].Cells["UserId"].Value?.ToString() ?? "";
             if (!int.TryParse(idText, out var id)) return;
 
             var existing = _admins.FirstOrDefault(u => u.UserId == id);
-            OpenEditAdminDialog(existing);
+            if (existing == null) return;
+
+            ShowActionsMenu(e.RowIndex, existing);
+        }
+
+        private void ShowActionsMenu(int rowIndex, UserListItemDto admin)
+        {
+            CloseActiveMenu();
+
+            var menu = SuperAdminActionMenuHelper.CreateMenu();
+
+            SuperAdminActionMenuHelper.AddMenuItem(menu, "Edit", () => OpenEditAdminDialog(admin));
+
+            _activeMenu = menu;
+            _menuRow = rowIndex;
+
+            menu.Closed += (s, e) =>
+            {
+                if (ReferenceEquals(_activeMenu, menu))
+                {
+                    _activeMenu = null;
+                    _menuRow = -1;
+                    var col = _grid.Columns["Actions"];
+                    if (col != null && rowIndex >= 0 && rowIndex < _grid.RowCount)
+                        _grid.InvalidateCell(col.Index, rowIndex);
+                }
+            };
+
+            SuperAdminActionMenuHelper.ShowMenu(menu, _grid, rowIndex);
+        }
+
+        private void CloseActiveMenu()
+        {
+            if (_activeMenu == null) return;
+            var m = _activeMenu;
+            _activeMenu = null;
+            m.Close();
+            if (_menuRow >= 0)
+            {
+                var col = _grid.Columns["Actions"];
+                if (col != null && _menuRow < _grid.RowCount)
+                    _grid.InvalidateCell(col.Index, _menuRow);
+                _menuRow = -1;
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                CloseActiveMenu();
+            }
+            base.Dispose(disposing);
         }
 
         private async void OpenNewAdminDialog()

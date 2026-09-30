@@ -243,6 +243,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // ============================================================
             var navItems = new[]
             {
+                ("Manage Businesses", "business"),
                 ("Manage Admin Accounts", "admin"),
                 ("Backup & Restore Data", "database"),
                 ("Manage Subscription / Billing", "billing"),
@@ -339,7 +340,7 @@ namespace CarwashServices.Roles.SuperAdmin
             if (_activeModule == key && _contentPanel.Controls.Count > 0)
                 return;
 
-            if (key is "Manage Admin Accounts" or "Backup & Restore Data" or "Manage Subscription / Billing" or "Manage Subscription/Billing")
+            if (key is "Manage Businesses" or "Manage Admin Accounts" or "Backup & Restore Data" or "Manage Subscription / Billing" or "Manage Subscription/Billing")
             {
                 if (SessionUser.RoleId != 4)
                 {
@@ -373,6 +374,7 @@ namespace CarwashServices.Roles.SuperAdmin
 
                 UserControl? view = key switch
                 {
+                    "Manage Businesses" => new ManageBusinessesView(),
                     "Manage Admin Accounts" => new ManageAdminAccountsView(),
                     "Backup & Restore Data" => new BackupRestoreDataView(),
                     "Manage Subscription / Billing" => new ManageSubscriptionBillingView(),
@@ -528,6 +530,11 @@ namespace CarwashServices.Roles.SuperAdmin
 
                 switch (key)
                 {
+                    case "business":
+                        g.DrawRectangle(pen, 3, 5, 14, 13);
+                        g.DrawLine(pen, 3, 9, 17, 9);
+                        g.DrawRectangle(pen, 8, 12, 4, 6);
+                        break;
                     case "admin":
                         PointF[] shield =
                         {

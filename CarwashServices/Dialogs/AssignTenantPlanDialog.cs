@@ -27,7 +27,6 @@ namespace CarwashServices.Dialogs
 
         private Label _companyLbl = null!;
         private ComboBox _planCombo = null!;
-        private ComboBox _statusCombo = null!;
         private DateTimePicker _startPicker = null!;
         private DateTimePicker _renewalPicker = null!;
         private CheckBox _autoRenewCheck = null!;
@@ -63,7 +62,7 @@ namespace CarwashServices.Dialogs
         private void InitializeForm()
         {
             Text = $"Assign Subscription Plan — {_companyItem.TenantCompany}";
-            ClientSize = new Size(540, 520);
+            ClientSize = new Size(540, 460);
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9.5f);
@@ -211,21 +210,6 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(_planCombo);
             y += 36;
 
-            // Status Dropdown
-            body.Controls.Add(Caption("STATUS", left, y));
-            y += 20;
-            _statusCombo = new ComboBox
-            {
-                Location = new Point(left, y),
-                Width = w,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 9.5f)
-            };
-            _statusCombo.Items.AddRange(new object[] { "Active", "Inactive" });
-            _statusCombo.SelectedIndex = 0;
-            body.Controls.Add(_statusCombo);
-            y += 36;
-
             // Dates (2 cols)
             int colW = (w - 16) / 2;
             body.Controls.Add(Caption("START DATE", left, y));
@@ -325,7 +309,7 @@ namespace CarwashServices.Dialogs
                 {
                     companyId = _companyItem.CompanyId,
                     planId = selectedPlan.PlanId,
-                    status = _statusCombo.SelectedItem?.ToString() ?? "Active",
+                    status = "Active",
                     startDate = _startPicker.Value.Date,
                     renewalDate = _renewalPicker.Value.Date,
                     autoRenew = _autoRenewCheck.Checked
@@ -334,6 +318,7 @@ namespace CarwashServices.Dialogs
                 var response = await _http.PostAsJsonAsync("api/billing/assign-plan", payload);
                 if (response.IsSuccessStatusCode)
                 {
+                    MessageBox.Show($"Subscription plan '{selectedPlan.PlanName}' has been successfully assigned to '{_companyItem.TenantCompany}'.", "Plan Assigned", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     DialogResult = DialogResult.OK;
                     Close();
                 }

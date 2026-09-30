@@ -377,9 +377,10 @@ namespace CarwashServices.Shell
 
                 if (resp.IsSuccessStatusCode)
                 {
+                    AuthUserDto? user = null;
                     try
                     {
-                        var user = await resp.Content.ReadFromJsonAsync<AuthUserDto>();
+                        user = await resp.Content.ReadFromJsonAsync<AuthUserDto>();
                         if (user != null)
                         {
                             SessionUser.UserId = user.UserId;
@@ -390,9 +391,32 @@ namespace CarwashServices.Shell
                             SessionUser.CompanyId = user.CompanyId;
                             SessionUser.CompanyName = user.CompanyName ?? "";
                             SessionUser.CompanyCode = user.CompanyCode ?? "";
+                            SessionUser.TermsAccepted = user.TermsAccepted;
+                            SessionUser.TermsAcceptedVersion = user.TermsAcceptedVersion;
                         }
                     }
                     catch { }
+
+                    // Initial Terms & Conditions acceptance guard:
+                    // If a company/tenant account has not accepted the terms and conditions yet,
+                    // display the Terms & Conditions agreement dialog (installer-style)
+                    // where they must review and either accept or decline before proceeding into the CRM.
+                    if (user != null && user.CompanyId.HasValue && user.CompanyId.Value > 0 && !user.TermsAccepted)
+                    {
+                        Hide();
+                        using var termsDlg = new Dialogs.CompanyTermsAgreementDialog(user);
+                        var termsResult = termsDlg.ShowDialog();
+                        if (termsResult != DialogResult.OK)
+                        {
+                            // Terms rejected or cancelled: revoke session and stay on login
+                            SessionUser.Clear();
+                            Show();
+                            _password.ClearValue();
+                            Fail("Access Denied: You must accept the Terms and Conditions to access the CRM system.", null);
+                            return;
+                        }
+                        Show();
+                    }
 
                     SaveRememberedEmail();
 

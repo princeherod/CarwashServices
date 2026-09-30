@@ -53,6 +53,17 @@ public class AuthController : ControllerBase
                 return Unauthorized(new { message = "Invalid email or password." });
         }
 
+        bool termsAccepted = true;
+        string? termsAcceptedVersion = null;
+        DateTime? termsAcceptedAt = null;
+
+        if (user.Company != null)
+        {
+            termsAccepted = user.Company.TermsAccepted;
+            termsAcceptedVersion = user.Company.TermsAcceptedVersion;
+            termsAcceptedAt = user.Company.TermsAcceptedAt;
+        }
+
         return Ok(new
         {
             userId = user.UserId,
@@ -63,7 +74,10 @@ public class AuthController : ControllerBase
             roleId = user.RoleId,
             companyId = user.CompanyId,
             companyName = user.Company?.CompanyName ?? "",
-            companyCode = user.Company?.CompanyCode ?? ""
+            companyCode = user.Company?.CompanyCode ?? "",
+            termsAccepted = termsAccepted,
+            termsAcceptedVersion = termsAcceptedVersion,
+            termsAcceptedAt = termsAcceptedAt
         });
     }
 }

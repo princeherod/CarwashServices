@@ -29,7 +29,7 @@ namespace CarwashServices.Dialogs
         private ComboBox _cycleCombo = null!;
         private NumericUpDown _usersNum = null!;
         private NumericUpDown _customersNum = null!;
-        private ComboBox _statusCombo = null!;
+        private ComboBox? _statusCombo;
         private CheckBox _multiBranchChk = null!;
         private Label _errorLbl = null!;
         private Button _saveBtn = null!;
@@ -65,7 +65,7 @@ namespace CarwashServices.Dialogs
                 if (cycleIdx >= 0) _cycleCombo.SelectedIndex = cycleIdx;
                 _usersNum.Value = Math.Max(1, Math.Min(1000, _existingPlan.MaxUsers));
                 _customersNum.Value = Math.Max(1, Math.Min(100000, _existingPlan.MaxCustomers));
-                _statusCombo.SelectedIndex = _existingPlan.IsActive ? 0 : 1;
+                if (_statusCombo != null) _statusCombo.SelectedIndex = _existingPlan.IsActive ? 0 : 1;
                 _multiBranchChk.Checked = _existingPlan.MultiBranchEnabled;
             }
         }
@@ -94,7 +94,7 @@ namespace CarwashServices.Dialogs
         private void InitializeForm()
         {
             Text = "Create Tenant Subscription Plan";
-            ClientSize = new Size(560, 560);
+            ClientSize = new Size(560, _existingPlan != null ? 560 : 500);
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9.5f);
@@ -277,31 +277,49 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(_customersNum);
             y += 36;
 
-            // Status & Multi-Branch (2 cols)
-            body.Controls.Add(Caption("STATUS", left, y));
-            body.Controls.Add(Caption("MULTI-BRANCH", left + colW + 16, y));
-            y += 20;
-
-            _statusCombo = new ComboBox
+            // Status & Multi-Branch
+            if (_existingPlan != null)
             {
-                Location = new Point(left, y),
-                Width = colW,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 9.5f)
-            };
-            _statusCombo.Items.AddRange(new object[] { "Active", "Inactive" });
-            _statusCombo.SelectedIndex = 0;
-            body.Controls.Add(_statusCombo);
+                body.Controls.Add(Caption("STATUS", left, y));
+                body.Controls.Add(Caption("MULTI-BRANCH", left + colW + 16, y));
+                y += 20;
 
-            _multiBranchChk = new CheckBox
+                _statusCombo = new ComboBox
+                {
+                    Location = new Point(left, y),
+                    Width = colW,
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    Font = new Font("Segoe UI", 9.5f)
+                };
+                _statusCombo.Items.AddRange(new object[] { "Active", "Inactive" });
+                _statusCombo.SelectedIndex = 0;
+                body.Controls.Add(_statusCombo);
+
+                _multiBranchChk = new CheckBox
+                {
+                    Text = "Enable Multi-Branch",
+                    Location = new Point(left + colW + 16, y + 2),
+                    AutoSize = true,
+                    Font = new Font("Segoe UI Semibold", 9.5f),
+                    ForeColor = Navy
+                };
+                body.Controls.Add(_multiBranchChk);
+            }
+            else
             {
-                Text = "Enable Multi-Branch",
-                Location = new Point(left + colW + 16, y + 2),
-                AutoSize = true,
-                Font = new Font("Segoe UI Semibold", 9.5f),
-                ForeColor = Navy
-            };
-            body.Controls.Add(_multiBranchChk);
+                body.Controls.Add(Caption("MULTI-BRANCH", left, y));
+                y += 20;
+
+                _multiBranchChk = new CheckBox
+                {
+                    Text = "Enable Multi-Branch support for this subscription tier",
+                    Location = new Point(left, y + 2),
+                    AutoSize = true,
+                    Font = new Font("Segoe UI Semibold", 9.5f),
+                    ForeColor = Navy
+                };
+                body.Controls.Add(_multiBranchChk);
+            }
         }
 
         public void SetInitialValues(string name, string desc, decimal price, string cycle, int maxUsers, int maxCustomers, bool active, bool multiBranch = false)
@@ -313,7 +331,7 @@ namespace CarwashServices.Dialogs
             if (cycleIdx >= 0) _cycleCombo.SelectedIndex = cycleIdx;
             _usersNum.Value = Math.Max(1, maxUsers);
             _customersNum.Value = Math.Max(1, maxCustomers);
-            _statusCombo.SelectedIndex = active ? 0 : 1;
+            if (_statusCombo != null) _statusCombo.SelectedIndex = active ? 0 : 1;
             _multiBranchChk.Checked = multiBranch;
         }
 
@@ -351,7 +369,7 @@ namespace CarwashServices.Dialogs
                     maxUsers = (int)_usersNum.Value,
                     maxCustomers = (int)_customersNum.Value,
                     multiBranchEnabled = _multiBranchChk.Checked,
-                    isActive = _statusCombo.SelectedIndex == 0
+                    isActive = _statusCombo != null ? (_statusCombo.SelectedIndex == 0) : true
                 };
 
                 HttpResponseMessage response;
@@ -366,6 +384,15 @@ namespace CarwashServices.Dialogs
 
                 if (response.IsSuccessStatusCode)
                 {
+                    if (isEditing)
+                    {
+                        MessageBox.Show($"Subscription plan '{name}' has been updated successfully.", "Plan Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        MessageBox.Show($"Subscription plan '{name}' has been created successfully.", "Plan Created", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+
                     DialogResult = DialogResult.OK;
                     Close();
                 }

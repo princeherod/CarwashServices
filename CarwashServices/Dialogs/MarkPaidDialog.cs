@@ -220,27 +220,60 @@ namespace CarwashServices.Dialogs
             };
             _methodCombo.Items.AddRange(new object[] { "GCash", "Cash", "Bank Transfer", "Card" });
             _methodCombo.SelectedIndex = 0;
+            _methodCombo.SelectedIndexChanged += (s, e) =>
+            {
+                var m = _methodCombo.SelectedItem?.ToString() ?? "GCash";
+                _refTxt.Text = GenerateReference(m);
+            };
             body.Controls.Add(_methodCombo);
             y += 36;
 
             // Reference Number
-            body.Controls.Add(Caption("REFERENCE NUMBER / TRANSACTION ID", left, y));
+            body.Controls.Add(Caption("REFERENCE NUMBER (AUTOMATICALLY GENERATED)", left, y));
             y += 20;
             _refTxt = new TextBox
             {
                 Location = new Point(left, y),
                 Width = w,
                 Font = new Font("Segoe UI", 10f),
-                Text = $"GCASH-{DateTime.UtcNow:yyyyMMdd}-{new Random().Next(10000, 99999)}"
+                ReadOnly = true,
+                TabStop = false,
+                BackColor = Color.FromArgb(0xF8, 0xFA, 0xFC),
+                ForeColor = Navy,
+                Text = GenerateReference("GCash")
             };
             body.Controls.Add(_refTxt);
+
+            var hintLbl = new Label
+            {
+                Text = "⚡ Reference number is generated automatically based on payment method and timestamp.",
+                Font = new Font("Segoe UI", 8.2f),
+                ForeColor = Muted,
+                Location = new Point(left, y + 32),
+                AutoSize = true
+            };
+            body.Controls.Add(hintLbl);
+        }
+
+        private static string GenerateReference(string method)
+        {
+            string prefix = method.Trim().ToUpperInvariant() switch
+            {
+                "GCASH" => "GCASH",
+                "CASH" => "CASH",
+                "BANK TRANSFER" => "BANK",
+                "CARD" => "CARD",
+                _ => "PAY"
+            };
+            return $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmss}-{Random.Shared.Next(1000, 9999)}";
         }
 
         public void SetInitialPayment(string method, string refNumber)
         {
             int idx = _methodCombo.Items.IndexOf(method);
             if (idx >= 0) _methodCombo.SelectedIndex = idx;
-            _refTxt.Text = refNumber;
+            if (!string.IsNullOrWhiteSpace(refNumber))
+                _refTxt.Text = refNumber;
         }
 
         private async Task SaveAsync()
@@ -252,9 +285,8 @@ namespace CarwashServices.Dialogs
 
             if (string.IsNullOrWhiteSpace(refNum))
             {
-                _errorLbl.Text = "Please enter a reference number.";
-                _refTxt.Focus();
-                return;
+                refNum = GenerateReference(method);
+                _refTxt.Text = refNum;
             }
 
             _saveBtn.Enabled = false;
@@ -272,6 +304,7 @@ namespace CarwashServices.Dialogs
                 var response = await _http.PostAsJsonAsync("api/billing/mark-paid", payload);
                 if (response.IsSuccessStatusCode)
                 {
+                    MessageBox.Show($"Payment of {_tx.AmountFormatted} for Transaction #{_tx.TransactionId} has been successfully recorded with Reference No. '{refNum}'.", "Payment Recorded", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     DialogResult = DialogResult.OK;
                     Close();
                 }

@@ -258,6 +258,7 @@ public class ReportsExtraController : ControllerBase
 
             return new
             {
+                customerId = c.TenantCustomerId,
                 customer = c.CustomerName,
                 lastVisit = lastVisit?.ToString("yyyy-MM-dd") ?? "—",
                 daysSince = daysSince >= 9999 ? "—" : daysSince.ToString(),

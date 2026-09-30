@@ -56,6 +56,11 @@ namespace CarwashServices.Roles.SuperAdmin
         private ComboBox _statusFilterCombo = null!;
         private Button _registerBtn = null!;
 
+        // Actions Three-Dot Menu & Hover
+        private int _hoverAction = -1;
+        private ContextMenuStrip? _activeMenu;
+        private int _menuRow = -1;
+
         // Layout controls
         private Panel _totalCard = null!;
         private Panel _activeCard = null!;
@@ -155,10 +160,19 @@ namespace CarwashServices.Roles.SuperAdmin
             _registerBtn.Click += (s, e) => OpenRegisterDialog();
             _contentPanel.Controls.Add(_registerBtn);
 
-            // ---- KPI Cards Row ----
-            _totalCard = CreateKpiCard("TOTAL BUSINESSES", out _kpiTotalNum, Navy);
-            _activeCard = CreateKpiCard("ACTIVE TENANTS", out _kpiActiveNum, Green);
-            _inactiveCard = CreateKpiCard("INACTIVE TENANTS", out _kpiInactiveNum, Red);
+            // ---- KPI Cards Row (Clickable) ----
+            _totalCard = CreateKpiCard("TOTAL BUSINESSES", out _kpiTotalNum, Navy, () =>
+            {
+                _statusFilterCombo.SelectedIndex = 0;
+            });
+            _activeCard = CreateKpiCard("ACTIVE TENANTS", out _kpiActiveNum, Green, () =>
+            {
+                _statusFilterCombo.SelectedItem = "Active";
+            });
+            _inactiveCard = CreateKpiCard("INACTIVE TENANTS", out _kpiInactiveNum, Red, () =>
+            {
+                _statusFilterCombo.SelectedItem = "Inactive";
+            });
 
             _contentPanel.Controls.Add(_totalCard);
             _contentPanel.Controls.Add(_activeCard);
@@ -339,12 +353,22 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 Name = "Actions",
                 HeaderText = "ACTIONS",
-                Width = 220,
-                MinimumWidth = 215
+                Width = SuperAdminActionMenuHelper.ActionsColWidth,
+                MinimumWidth = 70,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.White,
+                    SelectionBackColor = Color.FromArgb(0xEA, 0xF2, 0xFD),
+                    Padding = new Padding(0),
+                    Alignment = DataGridViewContentAlignment.MiddleCenter
+                }
             });
 
             _grid.CellPainting += Grid_CellPainting;
+            _grid.CellMouseMove += Grid_CellMouseMove;
             _grid.CellMouseClick += Grid_CellMouseClick;
+            _grid.MouseLeave += (s, e) => SetHover(-1);
+            _grid.Scroll += (s, e) => { CloseActiveMenu(); SetHover(-1); };
             _grid.CellDoubleClick += (s, e) =>
             {
                 if (e.RowIndex >= 0 && e.RowIndex < _companies.Count)
@@ -407,11 +431,12 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.SetBounds(PadX, GridY, totalW, gridH);
         }
 
-        private static Panel CreateKpiCard(string title, out Label numLbl, Color numColor)
+        private static Panel CreateKpiCard(string title, out Label numLbl, Color numColor, Action? onClick = null)
         {
             var p = new Panel
             {
-                BackColor = Color.White
+                BackColor = Color.White,
+                Cursor = onClick != null ? Cursors.Hand : Cursors.Default
             };
             p.Paint += (s, e) =>
             {
@@ -428,7 +453,8 @@ namespace CarwashServices.Roles.SuperAdmin
                 Font = FontKpiLbl,
                 ForeColor = Muted,
                 Location = new Point(16, 12),
-                AutoSize = true
+                AutoSize = true,
+                Cursor = onClick != null ? Cursors.Hand : Cursors.Default
             };
             numLbl = new Label
             {
@@ -436,8 +462,16 @@ namespace CarwashServices.Roles.SuperAdmin
                 Font = FontKpiNum,
                 ForeColor = numColor,
                 Location = new Point(14, 30),
-                AutoSize = true
+                AutoSize = true,
+                Cursor = onClick != null ? Cursors.Hand : Cursors.Default
             };
+
+            if (onClick != null)
+            {
+                p.Click += (s, e) => onClick();
+                titleL.Click += (s, e) => onClick();
+                numLbl.Click += (s, e) => onClick();
+            }
 
             p.Controls.Add(titleL);
             p.Controls.Add(numLbl);
@@ -448,14 +482,32 @@ namespace CarwashServices.Roles.SuperAdmin
         {
             try
             {
+                Cursor = Cursors.WaitCursor;
+                if (_refreshBtn != null) _refreshBtn.Enabled = false;
+
                 var list = await _http.GetFromJsonAsync<List<CompanyListItemDto>>("api/companies");
                 _companies = list ?? new();
                 UpdateKpis();
                 ApplyFilter();
             }
+            catch (HttpRequestException ex)
+            {
+                MessageBox.Show(
+                    $"Unable to connect to the backend server to retrieve business records.\n\nPlease verify that the API server is active on http://localhost:5180.\n\nError: {ex.Message}",
+                    "Server Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (TaskCanceledException)
+            {
+                MessageBox.Show("Loading business records timed out. Please try refreshing.", "Request Timeout", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to load companies: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"Failed to load companies: {ex.Message}", "Data Collection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+                if (_refreshBtn != null) _refreshBtn.Enabled = true;
             }
         }
 
@@ -472,6 +524,8 @@ namespace CarwashServices.Roles.SuperAdmin
 
         private void ApplyFilter()
         {
+            CloseActiveMenu();
+            SetHover(-1);
             _grid.Rows.Clear();
 
             var search = _searchTxt.Text.Trim().ToLowerInvariant();
@@ -525,32 +579,6 @@ namespace CarwashServices.Roles.SuperAdmin
             _grid.ClearSelection();
         }
 
-        private struct BusinessActionRects
-        {
-            public Rectangle ViewRect;
-            public Rectangle EditRect;
-            public Rectangle ToggleRect;
-        }
-
-        private static BusinessActionRects GetActionRelativeRects(int cellHeight, bool isActive)
-        {
-            int h = 26;
-            int y = (cellHeight - h) / 2;
-            int x = 8;
-            int gap = 6;
-
-            int viewW = 50;
-            int editW = 50;
-            int toggleW = isActive ? 82 : 72;
-
-            return new BusinessActionRects
-            {
-                ViewRect = new Rectangle(x, y, viewW, h),
-                EditRect = new Rectangle(x + viewW + gap, y, editW, h),
-                ToggleRect = new Rectangle(x + viewW + gap + editW + gap, y, toggleW, h)
-            };
-        }
-
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0) return;
@@ -591,58 +619,11 @@ namespace CarwashServices.Roles.SuperAdmin
                             TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
                 TextRenderer.DrawText(e.Graphics, status, FontTag, r, pillFg, flags);
             }
-            // Actions: View, Edit, Deactivate/Activate
+            // Actions: Three-dot dropdown menu
             else if (col == "Actions")
             {
-                e.Handled = true;
-                e.PaintBackground(e.ClipBounds, true);
-
-                var idText = _grid.Rows[e.RowIndex].Cells["CompanyId"].Value?.ToString() ?? "";
-                if (!int.TryParse(idText, out var id)) return;
-                var comp = _companies.FirstOrDefault(c => c.CompanyId == id);
-                if (comp == null) return;
-
-                var rel = GetActionRelativeRects(e.CellBounds.Height, comp.IsActive);
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-
-                // 1. "View" button (Slate / Navy)
-                var viewRect = new Rectangle(e.CellBounds.X + rel.ViewRect.X, e.CellBounds.Y + rel.ViewRect.Y, rel.ViewRect.Width, rel.ViewRect.Height);
-                using (var p = RoundedRect(viewRect, 5))
-                using (var brush = new SolidBrush(Color.FromArgb(0xEA, 0xEE, 0xF5)))
-                using (var pen = new Pen(BorderSoft, 1f))
-                {
-                    e.Graphics.FillPath(brush, p);
-                    e.Graphics.DrawPath(pen, p);
-                }
-                var centerFlags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix;
-                TextRenderer.DrawText(e.Graphics, "View", FontTag, viewRect, Navy, centerFlags);
-
-                // 2. "Edit" button (Blue)
-                var editRect = new Rectangle(e.CellBounds.X + rel.EditRect.X, e.CellBounds.Y + rel.EditRect.Y, rel.EditRect.Width, rel.EditRect.Height);
-                using (var p = RoundedRect(editRect, 5))
-                using (var brush = new SolidBrush(BlueSoft))
-                using (var pen = new Pen(Color.FromArgb(0xBA, 0xDB, 0xF9), 1f))
-                {
-                    e.Graphics.FillPath(brush, p);
-                    e.Graphics.DrawPath(pen, p);
-                }
-                TextRenderer.DrawText(e.Graphics, "Edit", FontTag, editRect, Blue, centerFlags);
-
-                // 3. "Deactivate" / "Activate" button
-                string actText = comp.IsActive ? "Deactivate" : "Activate";
-                Color actBg = comp.IsActive ? RedSoft : GreenSoft;
-                Color actFg = comp.IsActive ? Red : Green;
-                Color actBorder = comp.IsActive ? Color.FromArgb(0xFA, 0xCD, 0xCC) : Color.FromArgb(0xC4, 0xEB, 0xCD);
-
-                var actRect = new Rectangle(e.CellBounds.X + rel.ToggleRect.X, e.CellBounds.Y + rel.ToggleRect.Y, rel.ToggleRect.Width, rel.ToggleRect.Height);
-                using (var p = RoundedRect(actRect, 5))
-                using (var brush = new SolidBrush(actBg))
-                using (var pen = new Pen(actBorder, 1f))
-                {
-                    e.Graphics.FillPath(brush, p);
-                    e.Graphics.DrawPath(pen, p);
-                }
-                TextRenderer.DrawText(e.Graphics, actText, FontTag, actRect, actFg, centerFlags);
+                bool hover = _hoverAction == (e.RowIndex << 2);
+                SuperAdminActionMenuHelper.PaintActionsCell(e, hover);
             }
         }
 
@@ -711,10 +692,43 @@ namespace CarwashServices.Roles.SuperAdmin
             }
         }
 
-        private async void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        private void Grid_CellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
         {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 ||
+                _grid.Columns[e.ColumnIndex].Name != "Actions")
+            {
+                SetHover(-1);
+                return;
+            }
+
+            SetHover(SuperAdminActionMenuHelper.HitTestActions(_grid, e.RowIndex, e.Location));
+        }
+
+        private void SetHover(int encoded)
+        {
+            if (encoded == _hoverAction) return;
+
+            int old = _hoverAction;
+            _hoverAction = encoded;
+
+            var col = _grid.Columns["Actions"];
+            if (col != null)
+            {
+                if (old >= 0 && (old >> 2) < _grid.RowCount) _grid.InvalidateCell(col.Index, old >> 2);
+                if (encoded >= 0 && (encoded >> 2) < _grid.RowCount) _grid.InvalidateCell(col.Index, encoded >> 2);
+            }
+
+            _grid.Cursor = encoded >= 0 ? Cursors.Hand : Cursors.Default;
+        }
+
+        private void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
             if (_grid.Columns[e.ColumnIndex].Name != "Actions") return;
+
+            int hit = SuperAdminActionMenuHelper.HitTestActions(_grid, e.RowIndex, e.Location);
+            if (hit < 0) return;
 
             var idText = _grid.Rows[e.RowIndex].Cells["CompanyId"].Value?.ToString() ?? "";
             if (!int.TryParse(idText, out var id)) return;
@@ -722,20 +736,65 @@ namespace CarwashServices.Roles.SuperAdmin
             var company = _companies.FirstOrDefault(c => c.CompanyId == id);
             if (company == null) return;
 
-            var rel = GetActionRelativeRects(_grid.Rows[e.RowIndex].Height, company.IsActive);
+            ShowActionsMenu(e.RowIndex, company);
+        }
 
-            if (rel.ViewRect.Contains(e.Location))
+        private void ShowActionsMenu(int rowIndex, CompanyListItemDto company)
+        {
+            CloseActiveMenu();
+
+            var menu = SuperAdminActionMenuHelper.CreateMenu();
+
+            SuperAdminActionMenuHelper.AddMenuItem(menu, "View", () => OpenViewDialog(company));
+            SuperAdminActionMenuHelper.AddMenuItem(menu, "Edit", () => OpenEditDialog(company));
+
+            string toggleText = company.IsActive ? "Deactivate" : "Activate";
+            SuperAdminActionMenuHelper.AddMenuItem(
+                menu,
+                toggleText,
+                () => { _ = ToggleStatusAsync(company); },
+                isDanger: company.IsActive);
+
+            _activeMenu = menu;
+            _menuRow = rowIndex;
+
+            menu.Closed += (s, e) =>
             {
-                OpenViewDialog(company);
-            }
-            else if (rel.EditRect.Contains(e.Location))
+                if (ReferenceEquals(_activeMenu, menu))
+                {
+                    _activeMenu = null;
+                    _menuRow = -1;
+                    var col = _grid.Columns["Actions"];
+                    if (col != null && rowIndex >= 0 && rowIndex < _grid.RowCount)
+                        _grid.InvalidateCell(col.Index, rowIndex);
+                }
+            };
+
+            SuperAdminActionMenuHelper.ShowMenu(menu, _grid, rowIndex);
+        }
+
+        private void CloseActiveMenu()
+        {
+            if (_activeMenu == null) return;
+            var m = _activeMenu;
+            _activeMenu = null;
+            m.Close();
+            if (_menuRow >= 0)
             {
-                OpenEditDialog(company);
+                var col = _grid.Columns["Actions"];
+                if (col != null && _menuRow < _grid.RowCount)
+                    _grid.InvalidateCell(col.Index, _menuRow);
+                _menuRow = -1;
             }
-            else if (rel.ToggleRect.Contains(e.Location))
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
             {
-                await ToggleStatusAsync(company);
+                CloseActiveMenu();
             }
+            base.Dispose(disposing);
         }
 
         private void OpenRegisterDialog()

@@ -47,6 +47,8 @@ namespace CarwashServices.Auth
         public static int? CompanyId { get; set; }
         public static string CompanyName { get; set; } = "";
         public static string CompanyCode { get; set; } = "";
+        public static bool TermsAccepted { get; set; } = true;
+        public static string? TermsAcceptedVersion { get; set; }
 
         /// <summary>
         /// Resolved company ID for tenant API operations.
@@ -66,6 +68,8 @@ namespace CarwashServices.Auth
             CompanyId = null;
             CompanyName = "";
             CompanyCode = "";
+            TermsAccepted = true;
+            TermsAcceptedVersion = null;
         }
     }
 }

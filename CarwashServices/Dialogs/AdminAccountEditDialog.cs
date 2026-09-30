@@ -115,7 +115,7 @@ namespace CarwashServices.Dialogs
         private void InitializeForm()
         {
             Text = _isEdit ? $"{SuperAdminLabels.DialogEditAdminTitle} — #{_existing!.UserId}" : SuperAdminLabels.DialogNewAdminTitle;
-            ClientSize = new Size(640, _isSuperAdminSelfEdit ? 500 : 580);
+            ClientSize = new Size(640, (_isSuperAdminSelfEdit || !_isEdit) ? 500 : 580);
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9.5f);
@@ -326,9 +326,13 @@ namespace CarwashServices.Dialogs
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Font = new Font("Segoe UI", 9.5f)
             };
-            foreach (var r in AdminRoles)
+            var rolesToOffer = !_isEdit
+                ? new[] { (1, "Admin") }
+                : (_existing?.RoleId == 4 ? new[] { (4, "Super Admin") } : new[] { (1, "Admin") });
+
+            foreach (var r in rolesToOffer)
             {
-                _roleCombo.Items.Add(new RoleItem(r.Id, r.Name));
+                _roleCombo.Items.Add(new RoleItem(r.Item1, r.Item2));
             }
             _roleCombo.SelectedIndex = 0;
 
@@ -346,8 +350,8 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(_roleCombo);
             y += 50;
 
-            // Row 3: Status (Omitted entirely for Super Admin self-edit)
-            if (!_isSuperAdminSelfEdit)
+            // Row 3: Status (Omitted when creating new admin and for Super Admin self-edit)
+            if (_isEdit && !_isSuperAdminSelfEdit)
             {
                 body.Controls.Add(Caption(SuperAdminLabels.FieldStatus, leftColX, y));
                 y += 22;
@@ -563,6 +567,8 @@ namespace CarwashServices.Dialogs
                     _existing.FirstName = first;
                     _existing.LastName = last;
                     _existing.FullName = $"{first} {last}".Trim();
+
+                    MessageBox.Show("Administrator account details have been updated successfully.", "Account Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
@@ -592,6 +598,8 @@ namespace CarwashServices.Dialogs
                         _errorLbl.Text = $"Creation failed ({resp.StatusCode}): {ExtractMessage(err)}";
                         return;
                     }
+
+                    MessageBox.Show($"Administrator account for '{first} {last}' ({email}) has been successfully created.", "Account Created", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
 
                 DialogResult = DialogResult.OK;

@@ -30,6 +30,9 @@ namespace CarwashServices.Dtos
         public int? CompanyId { get; set; }
         public string? CompanyName { get; set; }
         public string? CompanyCode { get; set; }
+        public bool TermsAccepted { get; set; } = true;
+        public string? TermsAcceptedVersion { get; set; }
+        public DateTime? TermsAcceptedAt { get; set; }
     }
 
     public class UserListItemDto

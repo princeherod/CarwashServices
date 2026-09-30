@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using CRM.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -35,6 +35,9 @@ public class TenantDbContextFactory : ITenantDbContextFactory
                 $"Database={databaseInfo.DatabaseName};" +
                 $"Trusted_Connection=True;" +
                 $"TrustServerCertificate=True;" +
+                $"Connect Timeout=60;" +
+                $"ConnectRetryCount=3;" +
+                $"ConnectRetryInterval=10;" +
                 $"MultipleActiveResultSets=True;";
         }
         else
@@ -59,11 +62,17 @@ public class TenantDbContextFactory : ITenantDbContextFactory
                 $"Password={password};" +
                 $"Encrypt=True;" +
                 $"TrustServerCertificate=True;" +
+                $"Connect Timeout=60;" +
+                $"ConnectRetryCount=3;" +
+                $"ConnectRetryInterval=10;" +
                 $"MultipleActiveResultSets=True;";
         }
 
         var options = new DbContextOptionsBuilder<TenantErpDbContext>()
-            .UseSqlServer(connectionString)
+            .UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(30),
+                errorNumbersToAdd: null))
             .Options;
 
         return new TenantErpDbContext(options);

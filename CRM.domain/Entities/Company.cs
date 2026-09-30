@@ -8,6 +8,11 @@ public class Company
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    public bool TermsAccepted { get; set; } = false;
+    public DateTime? TermsAcceptedAt { get; set; }
+    public string? TermsAcceptedBy { get; set; }
+    public string? TermsAcceptedVersion { get; set; }
+
     public string? ContactPhone { get; set; }
     public string? ContactEmail { get; set; }
     public string? AddressLine { get; set; }

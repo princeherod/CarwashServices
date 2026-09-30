@@ -47,7 +47,7 @@ namespace CarwashServices.Dialogs
         private TextBox _lastNameTxt = null!;
         private TextBox _emailTxt = null!;
         private ComboBox _roleCombo = null!;
-        private ComboBox _statusCombo = null!;
+        private ComboBox? _statusCombo;
         private TextBox _passwordTxt = null!;
         private TextBox _confirmTxt = null!;
         private Label _errorLbl = null!;
@@ -231,7 +231,7 @@ namespace CarwashServices.Dialogs
             _roleCombo = new ComboBox
             {
                 Location = new Point(PadX, y + 22),
-                Width = W2,
+                Width = _isEdit ? W2 : ContentW,
                 Font = new Font("Segoe UI", 10f),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 BackColor = Color.White
@@ -241,18 +241,21 @@ namespace CarwashServices.Dialogs
             _roleCombo.SelectedIndex = 0;
             body.Controls.Add(_roleCombo);
 
-            body.Controls.Add(MakeLabel("Status", X2b, y));
-            _statusCombo = new ComboBox
+            if (_isEdit)
             {
-                Location = new Point(X2b, y + 22),
-                Width = W2,
-                Font = new Font("Segoe UI", 10f),
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.White
-            };
-            _statusCombo.Items.AddRange(new object[] { "Active", "Inactive" });
-            _statusCombo.SelectedIndex = 0;
-            body.Controls.Add(_statusCombo);
+                body.Controls.Add(MakeLabel("Status", X2b, y));
+                _statusCombo = new ComboBox
+                {
+                    Location = new Point(X2b, y + 22),
+                    Width = W2,
+                    Font = new Font("Segoe UI", 10f),
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    BackColor = Color.White
+                };
+                _statusCombo.Items.AddRange(new object[] { "Active", "Inactive" });
+                _statusCombo.SelectedIndex = 0;
+                body.Controls.Add(_statusCombo);
+            }
             y += 88;
 
             // ============ PASSWORD & SECURITY ============
@@ -375,7 +378,8 @@ namespace CarwashServices.Dialogs
                         break;
                     }
                 }
-                _statusCombo.SelectedItem = string.IsNullOrWhiteSpace(u.Status) ? "Active" : u.Status;
+                if (_statusCombo != null)
+                    _statusCombo.SelectedItem = string.IsNullOrWhiteSpace(u.Status) ? "Active" : u.Status;
 
                 ClearError();
             }
@@ -437,7 +441,7 @@ namespace CarwashServices.Dialogs
             ClearError();
 
             var role = (ComboItem)_roleCombo.SelectedItem!;
-            var status = _statusCombo.SelectedItem?.ToString() ?? "Active";
+            var status = _statusCombo?.SelectedItem?.ToString() ?? "Active";
             var password = _passwordTxt.Text;
 
             var first = _firstNameTxt.Text.Trim();
@@ -492,6 +496,15 @@ namespace CarwashServices.Dialogs
 
                 if (resp.IsSuccessStatusCode)
                 {
+                    if (_isEdit)
+                    {
+                        MessageBox.Show($"User '{full}' has been updated successfully.", "User Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        MessageBox.Show($"User '{full}' ({_emailTxt.Text.Trim()}) has been created successfully.", "User Created", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+
                     DialogResult = DialogResult.OK;
                     Close();
                 }

@@ -202,9 +202,10 @@ public class AnalyticsController : ControllerBase
             .Where(r => !r.IsArchived)
             .ToListAsync();
 
-        var rows = SegmentCustomers(customers, requests)
-            .Where(s => s.Segment == segment)
-            .ToList();
+        var allRows = SegmentCustomers(customers, requests);
+        var rows = (string.IsNullOrWhiteSpace(segment) || string.Equals(segment, "All", StringComparison.OrdinalIgnoreCase))
+            ? allRows
+            : allRows.Where(s => string.Equals(s.Segment, segment, StringComparison.OrdinalIgnoreCase)).ToList();
 
         if (rows.Count > 0)
         {

@@ -46,7 +46,6 @@ namespace CarwashServices.Roles
         private ComboBox _serviceCombo;
         private ComboBox _vehicleCombo;
         private Button _runBtn;
-        private Button _csvBtn;
         private Button _pdfBtn;
         private Button _modeChartTableBtn;
         private Button _modeChartBtn;
@@ -244,11 +243,7 @@ namespace CarwashServices.Roles
             _runBtn.Click += async (s, e) => await RunReportAsync();
             _filterCard.Controls.Add(_runBtn);
 
-            _csvBtn = MakeSecondaryButton("⬇  Export CSV", 170, 90);
-            _csvBtn.Click += (s, e) => ExportCsv();
-            _filterCard.Controls.Add(_csvBtn);
-
-            _pdfBtn = MakeSecondaryButton("⬇  Export PDF", 320, 90);
+            _pdfBtn = MakeSecondaryButton("⬇  Export PDF", 170, 90);
             _pdfBtn.Click += (s, e) => ExportPdf();
             _filterCard.Controls.Add(_pdfBtn);
 
@@ -1139,60 +1134,6 @@ namespace CarwashServices.Roles
                 if (_currentExtra is IExportableReport er) return er.HasData;
                 return false;
             }
-        }
-
-        private void ExportCsv()
-        {
-            if (!HasRows)
-            {
-                MessageBox.Show("There is nothing to export. Run a report that returns data first.",
-                    "Export CSV", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            try
-            {
-                using var sfd = new SaveFileDialog
-                {
-                    Filter = "CSV files (*.csv)|*.csv",
-                    FileName = MakeFileName("csv")
-                };
-                if (sfd.ShowDialog() != DialogResult.OK) return;
-
-                var sb = new StringBuilder();
-
-                if (_currentReportType == RevenueReport)
-                {
-                    var inv = CultureInfo.InvariantCulture;
-                    sb.AppendLine("Txn #,Date,Customer,Vehicle,Service,Amount,Payment,Status");
-                    foreach (var t in FilteredTransactions())
-                    {
-                        sb.AppendLine(
-                            $"{Csv(t.Txn)},{Csv(t.Date)},{Csv(t.Customer)},{Csv(t.Vehicle)}," +
-                            $"{Csv(t.Service)},{t.Amount.ToString("0.##", inv)},{Csv(t.Payment)},{Csv(t.Status)}");
-                    }
-                }
-                else if (_currentExtra is IExportableReport er)
-                {
-                    sb.Append(er.BuildCsv());
-                }
-
-                File.WriteAllText(sfd.FileName, sb.ToString(), new UTF8Encoding(true));
-                MessageBox.Show("Report exported.", "Export CSV", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Export failed.\n\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        private static string Csv(string? s)
-        {
-            if (string.IsNullOrEmpty(s)) return "";
-            if ("=+-@".IndexOf(s[0]) >= 0) s = "'" + s;
-            if (s.Contains(',') || s.Contains('"') || s.Contains('\n'))
-                return "\"" + s.Replace("\"", "\"\"") + "\"";
-            return s;
         }
 
         private string MakeFileName(string ext)

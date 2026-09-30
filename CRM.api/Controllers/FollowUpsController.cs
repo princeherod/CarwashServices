@@ -339,9 +339,10 @@ public class FollowUpsController : ControllerBase
                 isServiceStaff = true;
         }
 
-        bool exists = await tenant.TenantCustomers
-            .AnyAsync(c => c.TenantCustomerId == req.CustomerId && !c.IsArchived);
-        if (!exists)
+        var customer = await tenant.TenantCustomers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.TenantCustomerId == req.CustomerId && !c.IsArchived);
+        if (customer is null)
             return BadRequest(new { message = $"Customer {req.CustomerId} not found." });
 
         var scheduled = req.ScheduledDate ?? DateTime.Now;
@@ -364,10 +365,46 @@ public class FollowUpsController : ControllerBase
             ApprovalStatus = isServiceStaff ? "Pending" : "NotRequired",
             Status = isServiceStaff
                 ? "Pending"
-                : DeriveStatusOnCreate(scheduled, req.ValidUntil, req.ScheduledNow, isDraft: false)
+                : DeriveStatusOnCreate(scheduled, req.ValidUntil, req.ScheduledNow, req.IsDraft)
         };
 
-        if (entity.Status == "Sent") entity.SentAt = DateTime.Now;
+        if (!isServiceStaff && !req.IsDraft && req.ScheduledNow)
+        {
+            if (string.IsNullOrWhiteSpace(customer.EmailAddress))
+            {
+                entity.Status = "Scheduled";
+            }
+            else
+            {
+                var subject = FollowUpEmailTemplate.BuildSubject(BusinessName);
+                var html = FollowUpEmailTemplate.BuildHtml(
+                    customerName: customer.CustomerName ?? "there",
+                    messagePreview: entity.Notes ?? "",
+                    discountOffer: entity.DiscountOffer,
+                    validUntil: entity.ValidUntil,
+                    businessName: BusinessName);
+
+                var sendResult = await _emailSender.SendAsync(
+                    toEmail: customer.EmailAddress,
+                    toName: customer.CustomerName ?? customer.EmailAddress,
+                    subject: subject,
+                    htmlBody: html);
+
+                if (sendResult.Success)
+                {
+                    entity.Status = "Sent";
+                    entity.SentAt = DateTime.Now;
+                }
+                else
+                {
+                    entity.Status = "Scheduled";
+                }
+            }
+        }
+        else if (entity.Status == "Sent")
+        {
+            entity.SentAt = DateTime.Now;
+        }
 
         try { tenant.FollowUps.Add(entity); await tenant.SaveChangesAsync(); }
         catch (DbUpdateException ex)
@@ -414,22 +451,22 @@ public class FollowUpsController : ControllerBase
 
         var requestedIds = req.CustomerIds.Distinct().ToList();
 
-        var existingIds = await tenant.TenantCustomers
+        var existingCustomers = await tenant.TenantCustomers
             .AsNoTracking()
             .Where(c => requestedIds.Contains(c.TenantCustomerId) && !c.IsArchived)
-            .Select(c => c.TenantCustomerId)
             .ToListAsync();
 
-        requestedIds = requestedIds.Intersect(existingIds).ToList();
+        var customerMap = existingCustomers.ToDictionary(c => c.TenantCustomerId);
+        requestedIds = requestedIds.Where(id => customerMap.ContainsKey(id)).ToList();
         if (requestedIds.Count == 0)
             return BadRequest(new { message = "None of the selected customers exist." });
 
+        // Block only customers who already have an active pending/scheduled follow-up.
+        // Completed states (Sent, Contacted, Redeemed, Expired, Draft) do not block future retention follow-ups.
         var blockedIds = await tenant.FollowUps
             .Where(f => requestedIds.Contains(f.CustomerId)
                      && !f.IsArchived
-                     && f.Status != "Expired"
-                     && f.Status != "Draft"
-                     && f.ApprovalStatus != "Rejected")
+                     && (f.Status == "Scheduled" || f.Status == "Due today" || f.ApprovalStatus == "Pending"))
             .Select(f => f.CustomerId)
             .Distinct()
             .ToListAsync();
@@ -439,6 +476,12 @@ public class FollowUpsController : ControllerBase
         {
             return Conflict(new
             {
+                count = 0,
+                sent = 0,
+                skipped = blockedIds.Count,
+                pendingApproval = 0,
+                skippedIds = blockedIds,
+                failures = new List<BulkFollowUpFailureDto>(),
                 message = "All selected customers already have active follow-ups.",
                 blockedCount = blockedIds.Count
             });
@@ -448,9 +491,14 @@ public class FollowUpsController : ControllerBase
         var approvalStatus = isServiceStaff ? "Pending" : "NotRequired";
         var status = isServiceStaff
             ? "Pending"
-            : DeriveStatusOnCreate(scheduled, req.ValidUntil, req.ScheduledNow, isDraft: false);
+            : DeriveStatusOnCreate(scheduled, req.ValidUntil, req.ScheduledNow, req.IsDraft);
+
+        bool sendImmediately = !isServiceStaff && !req.IsDraft && req.ScheduledNow;
 
         var created = new List<FollowUp>(eligibleIds.Count);
+        var failures = new List<BulkFollowUpFailureDto>();
+        int sentCount = 0;
+
         foreach (var cId in eligibleIds)
         {
             var entity = new FollowUp
@@ -472,7 +520,56 @@ public class FollowUpsController : ControllerBase
                 Status = status
             };
 
-            if (status == "Sent") entity.SentAt = DateTime.Now;
+            if (sendImmediately)
+            {
+                var cust = customerMap[cId];
+                if (string.IsNullOrWhiteSpace(cust.EmailAddress))
+                {
+                    entity.Status = "Scheduled";
+                    failures.Add(new BulkFollowUpFailureDto
+                    {
+                        CustomerId = cId,
+                        Error = "Customer has no email address on file."
+                    });
+                }
+                else
+                {
+                    var subject = FollowUpEmailTemplate.BuildSubject(BusinessName);
+                    var html = FollowUpEmailTemplate.BuildHtml(
+                        customerName: cust.CustomerName ?? "there",
+                        messagePreview: entity.Notes ?? "",
+                        discountOffer: entity.DiscountOffer,
+                        validUntil: entity.ValidUntil,
+                        businessName: BusinessName);
+
+                    var sendResult = await _emailSender.SendAsync(
+                        toEmail: cust.EmailAddress,
+                        toName: cust.CustomerName ?? cust.EmailAddress,
+                        subject: subject,
+                        htmlBody: html);
+
+                    if (sendResult.Success)
+                    {
+                        entity.Status = "Sent";
+                        entity.SentAt = DateTime.Now;
+                        sentCount++;
+                    }
+                    else
+                    {
+                        entity.Status = "Scheduled";
+                        failures.Add(new BulkFollowUpFailureDto
+                        {
+                            CustomerId = cId,
+                            Error = sendResult.ErrorMessage ?? "Email send failed."
+                        });
+                    }
+                }
+            }
+            else if (entity.Status == "Sent")
+            {
+                entity.SentAt = DateTime.Now;
+            }
+
             tenant.FollowUps.Add(entity);
             created.Add(entity);
         }
@@ -486,9 +583,54 @@ public class FollowUpsController : ControllerBase
 
         return Ok(new
         {
+            count = created.Count,
+            sent = sentCount,
+            skipped = blockedIds.Count,
+            pendingApproval = isServiceStaff ? created.Count : 0,
+            skippedIds = blockedIds,
+            failures = failures,
             createdCount = created.Count,
             blockedCount = blockedIds.Count,
-            createdIds = created.Select(f => f.FollowUpId).ToList()
+            createdIds = created.Select(f => f.FollowUpId).ToList(),
+            message = isServiceStaff
+                ? "Submitted for approval."
+                : req.IsDraft
+                    ? "Saved as draft. No email was sent."
+                    : req.ScheduledNow
+                        ? $"Follow-ups processed ({sentCount} sent, {failures.Count} failed)."
+                        : "Follow-ups scheduled. Email will be sent on the scheduled date."
+        });
+    }
+
+    // ================================================================
+    //  TEST SMTP
+    // ================================================================
+    [HttpPost("test-smtp")]
+    public async Task<IActionResult> TestSmtp([FromQuery] string? to = null)
+    {
+        var target = string.IsNullOrWhiteSpace(to) ? _smtpOptions.Value.SenderEmail : to;
+        var subject = $"AquaShine Car Wash - SMTP Test ({DateTime.Now:yyyy-MM-dd HH:mm:ss})";
+        var html = "<div style='font-family:sans-serif;padding:16px;'><h2 style='color:#1E88E5;'>AquaShine CRM SMTP Test</h2><p>This email verifies that your SMTP server and credentials are fully configured and functional.</p></div>";
+
+        var result = await _emailSender.SendAsync(
+            toEmail: target,
+            toName: "Admin",
+            subject: subject,
+            htmlBody: html);
+
+        if (result.Success)
+        {
+            return Ok(new
+            {
+                success = true,
+                message = $"Test email sent successfully to {target}."
+            });
+        }
+
+        return StatusCode(500, new
+        {
+            success = false,
+            message = result.ErrorMessage
         });
     }
 
@@ -588,8 +730,43 @@ public class FollowUpsController : ControllerBase
                     existing.Status = "Scheduled";
                 else
                 {
-                    if (existing.Status != "Sent") existing.SentAt ??= DateTime.Now;
-                    existing.Status = "Sent";
+                    if (existing.Status != "Sent")
+                    {
+                        var customer = await tenant.TenantCustomers
+                            .AsNoTracking()
+                            .FirstOrDefaultAsync(c => c.TenantCustomerId == existing.CustomerId);
+
+                        if (customer != null && !string.IsNullOrWhiteSpace(customer.EmailAddress))
+                        {
+                            var subject = FollowUpEmailTemplate.BuildSubject(BusinessName);
+                            var html = FollowUpEmailTemplate.BuildHtml(
+                                customerName: customer.CustomerName ?? "there",
+                                messagePreview: existing.Notes ?? "",
+                                discountOffer: existing.DiscountOffer,
+                                validUntil: existing.ValidUntil,
+                                businessName: BusinessName);
+
+                            var sendResult = await _emailSender.SendAsync(
+                                toEmail: customer.EmailAddress,
+                                toName: customer.CustomerName ?? customer.EmailAddress,
+                                subject: subject,
+                                htmlBody: html);
+
+                            if (sendResult.Success)
+                            {
+                                existing.Status = "Sent";
+                                existing.SentAt = DateTime.Now;
+                            }
+                            else
+                            {
+                                existing.Status = "Scheduled";
+                            }
+                        }
+                        else
+                        {
+                            existing.Status = "Scheduled";
+                        }
+                    }
                 }
 
                 if (!AllowedStatuses.Contains(existing.Status))
@@ -1049,4 +1226,10 @@ public class BulkFollowUpRequest
     public bool ScheduledNow { get; set; }
     public bool IsDraft { get; set; }
     public int? CreatedBy { get; set; }
+}
+
+public class BulkFollowUpFailureDto
+{
+    public int CustomerId { get; set; }
+    public string? Error { get; set; }
 }

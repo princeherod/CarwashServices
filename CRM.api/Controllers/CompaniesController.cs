@@ -81,124 +81,156 @@ public class CompaniesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var companies = await _masterDb.Companies
-            .AsNoTracking()
-            .OrderBy(c => c.CompanyId)
-            .ToListAsync();
-
-        var companyIds = companies.Select(c => c.CompanyId).ToList();
-
-        var users = await _masterDb.Users
-            .AsNoTracking()
-            .Where(u => u.CompanyId != null && companyIds.Contains(u.CompanyId.Value))
-            .ToListAsync();
-
-        var databases = await _masterDb.CompanyDatabases
-            .AsNoTracking()
-            .Where(d => companyIds.Contains(d.CompanyId))
-            .ToListAsync();
-
-        var result = companies.Select(c =>
+        try
         {
-            var companyUsers = users.Where(u => u.CompanyId == c.CompanyId).ToList();
-            var adminUser = companyUsers.FirstOrDefault(u => u.RoleId == 1) ?? companyUsers.FirstOrDefault();
-            var dbConfig = databases.FirstOrDefault(d => d.CompanyId == c.CompanyId);
+            var companies = await _masterDb.Companies
+                .AsNoTracking()
+                .OrderBy(c => c.CompanyId)
+                .ToListAsync();
 
-            return new
+            var companyIds = companies.Select(c => c.CompanyId).ToList();
+
+            var users = await _masterDb.Users
+                .AsNoTracking()
+                .Where(u => u.CompanyId != null && companyIds.Contains(u.CompanyId.Value))
+                .ToListAsync();
+
+            var databases = await _masterDb.CompanyDatabases
+                .AsNoTracking()
+                .Where(d => companyIds.Contains(d.CompanyId))
+                .ToListAsync();
+
+            var result = companies.Select(c =>
             {
-                companyId = c.CompanyId,
-                companyCode = c.CompanyCode,
-                companyName = c.CompanyName,
-                isActive = c.IsActive,
-                createdAt = c.CreatedAt,
-                contactPhone = c.ContactPhone,
-                contactEmail = c.ContactEmail,
-                addressLine = c.AddressLine,
-                city = c.City,
-                province = c.Province,
-                state = c.State,
-                postalCode = c.PostalCode,
-                country = c.Country,
-                adminCount = companyUsers.Count,
-                adminUserId = adminUser?.UserId,
-                adminUser = adminUser?.FullName ?? "Unassigned",
-                adminEmail = adminUser?.Email ?? "",
-                databaseServer = dbConfig?.ServerName,
-                databaseName = dbConfig?.DatabaseName
-            };
-        }).ToList();
+                var companyUsers = users.Where(u => u.CompanyId == c.CompanyId).ToList();
+                var adminUser = companyUsers.FirstOrDefault(u => u.RoleId == 1) ?? companyUsers.FirstOrDefault();
+                var dbConfig = databases.FirstOrDefault(d => d.CompanyId == c.CompanyId);
 
-        return Ok(result);
+                return new
+                {
+                    companyId = c.CompanyId,
+                    companyCode = c.CompanyCode,
+                    companyName = c.CompanyName,
+                    isActive = c.IsActive,
+                    createdAt = c.CreatedAt,
+                    contactPhone = c.ContactPhone,
+                    contactEmail = c.ContactEmail,
+                    addressLine = c.AddressLine,
+                    city = c.City,
+                    province = c.Province,
+                    state = c.State,
+                    postalCode = c.PostalCode,
+                    country = c.Country,
+                    adminCount = companyUsers.Count,
+                    adminUserId = adminUser?.UserId,
+                    adminUser = adminUser?.FullName ?? "Unassigned",
+                    adminEmail = adminUser?.Email ?? "",
+                    databaseServer = dbConfig?.ServerName,
+                    databaseName = dbConfig?.DatabaseName,
+                    termsAccepted = c.TermsAccepted,
+                    termsAcceptedAt = c.TermsAcceptedAt,
+                    termsAcceptedBy = c.TermsAcceptedBy,
+                    termsAcceptedVersion = c.TermsAcceptedVersion
+                };
+            }).ToList();
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load company records in Super Admin.");
+            return StatusCode(500, new { message = "Failed to load company records.", error = ex.Message });
+        }
     }
 
     // GET: api/companies/next-code
     [HttpGet("next-code")]
     public async Task<IActionResult> GetNextCode()
     {
-        var codes = await _masterDb.Companies
-            .AsNoTracking()
-            .Select(c => c.CompanyCode)
-            .ToListAsync();
-
-        int maxNum = 0;
-        foreach (var code in codes)
+        try
         {
-            if (string.IsNullOrWhiteSpace(code)) continue;
-            var match = Regex.Match(code.Trim(), @"^COMP(\d+)$", RegexOptions.IgnoreCase);
-            if (match.Success && int.TryParse(match.Groups[1].Value, out var num))
-            {
-                if (num > maxNum) maxNum = num;
-            }
-        }
+            var codes = await _masterDb.Companies
+                .AsNoTracking()
+                .Select(c => c.CompanyCode)
+                .ToListAsync();
 
-        string next = $"COMP{(maxNum + 1):D3}";
-        return Ok(new { nextCode = next });
+            int maxNum = 0;
+            foreach (var code in codes)
+            {
+                if (string.IsNullOrWhiteSpace(code)) continue;
+                var match = Regex.Match(code.Trim(), @"^COMP(\d+)$", RegexOptions.IgnoreCase);
+                if (match.Success && int.TryParse(match.Groups[1].Value, out var num))
+                {
+                    if (num > maxNum) maxNum = num;
+                }
+            }
+
+            string next = $"COMP{(maxNum + 1):D3}";
+            return Ok(new { nextCode = next });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate next company code.");
+            return StatusCode(500, new { message = "Failed to generate next code.", error = ex.Message });
+        }
     }
 
     // GET: api/companies/1
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
-        var company = await _masterDb.Companies
-            .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.CompanyId == id);
-
-        if (company is null)
+        try
         {
-            return NotFound(new { message = $"Company {id} not found." });
+            var company = await _masterDb.Companies
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.CompanyId == id);
+
+            if (company is null)
+            {
+                return NotFound(new { message = $"Company {id} not found." });
+            }
+
+            var companyUsers = await _masterDb.Users
+                .AsNoTracking()
+                .Where(u => u.CompanyId == id)
+                .ToListAsync();
+
+            var adminUser = companyUsers.FirstOrDefault(u => u.RoleId == 1) ?? companyUsers.FirstOrDefault();
+            var dbConfig = await _masterDb.CompanyDatabases
+                .AsNoTracking()
+                .FirstOrDefaultAsync(d => d.CompanyId == id);
+
+            return Ok(new
+            {
+                companyId = company.CompanyId,
+                companyCode = company.CompanyCode,
+                companyName = company.CompanyName,
+                isActive = company.IsActive,
+                createdAt = company.CreatedAt,
+                contactPhone = company.ContactPhone,
+                contactEmail = company.ContactEmail,
+                addressLine = company.AddressLine,
+                city = company.City,
+                province = company.Province,
+                state = company.State,
+                postalCode = company.PostalCode,
+                country = company.Country,
+                adminCount = companyUsers.Count,
+                adminUser = adminUser?.FullName ?? "Unassigned",
+                adminEmail = adminUser?.Email ?? "",
+                databaseServer = dbConfig?.ServerName,
+                databaseName = dbConfig?.DatabaseName,
+                termsAccepted = company.TermsAccepted,
+                termsAcceptedAt = company.TermsAcceptedAt,
+                termsAcceptedBy = company.TermsAcceptedBy,
+                termsAcceptedVersion = company.TermsAcceptedVersion
+            });
         }
-
-        var companyUsers = await _masterDb.Users
-            .AsNoTracking()
-            .Where(u => u.CompanyId == id)
-            .ToListAsync();
-
-        var adminUser = companyUsers.FirstOrDefault(u => u.RoleId == 1) ?? companyUsers.FirstOrDefault();
-        var dbConfig = await _masterDb.CompanyDatabases
-            .AsNoTracking()
-            .FirstOrDefaultAsync(d => d.CompanyId == id);
-
-        return Ok(new
+        catch (Exception ex)
         {
-            companyId = company.CompanyId,
-            companyCode = company.CompanyCode,
-            companyName = company.CompanyName,
-            isActive = company.IsActive,
-            createdAt = company.CreatedAt,
-            contactPhone = company.ContactPhone,
-            contactEmail = company.ContactEmail,
-            addressLine = company.AddressLine,
-            city = company.City,
-            province = company.Province,
-            state = company.State,
-            postalCode = company.PostalCode,
-            country = company.Country,
-            adminCount = companyUsers.Count,
-            adminUser = adminUser?.FullName ?? "Unassigned",
-            adminEmail = adminUser?.Email ?? "",
-            databaseServer = dbConfig?.ServerName,
-            databaseName = dbConfig?.DatabaseName
-        });
+            _logger.LogError(ex, "Failed to retrieve company {CompanyId}.", id);
+            return StatusCode(500, new { message = $"Failed to retrieve company {id}.", error = ex.Message });
+        }
     }
 
     // POST: api/companies

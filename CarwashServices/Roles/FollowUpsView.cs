@@ -53,6 +53,7 @@ namespace CarwashServices.Roles
         private Panel _logCard = null!;
         private Panel _header = null!;
         private Button _addBtn = null!;
+        private Button _testSmtpBtn = null!;
         private TextBox _searchBox = null!;
         private ComboBox _statusFilterCombo = null!;
 
@@ -308,6 +309,23 @@ namespace CarwashServices.Roles
             _addBtn.FlatAppearance.MouseDownBackColor = Color.FromArgb(0x06, 0x0E, 0x22);
             _addBtn.Click += (s, e) => OpenAddDialog();
             _header.Controls.Add(_addBtn);
+
+            _testSmtpBtn = new Button
+            {
+                Text = "Test SMTP",
+                Font = new Font("Segoe UI Semibold", 9.5f),
+                Size = new Size(110, 44),
+                Cursor = Cursors.Hand,
+                BackColor = Color.White,
+                ForeColor = Navy,
+                FlatStyle = FlatStyle.Flat,
+                UseVisualStyleBackColor = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            _testSmtpBtn.FlatAppearance.BorderColor = CardBorder;
+            _testSmtpBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xF0, 0xF4, 0xFA);
+            _testSmtpBtn.Click += async (s, e) => await PromptTestSmtpAsync();
+            _header.Controls.Add(_testSmtpBtn);
 
             _tabBar = new Panel { Height = 44, BackColor = Color.White };
             _tabBar.Paint += (s, e) =>
@@ -605,7 +623,7 @@ namespace CarwashServices.Roles
             _grid.Columns.Clear();
 
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "FollowUpId", Visible = false });
-
+                    
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Customer",
@@ -817,6 +835,7 @@ namespace CarwashServices.Roles
 
                 _header.SetBounds(L, y, w, 92);
                 _addBtn.Location = new Point(w - _addBtn.Width, 14);
+                _testSmtpBtn.Location = new Point(_addBtn.Left - 10 - _testSmtpBtn.Width, 14);
                 y += 92 + 8;
 
                 _tabBar.SetBounds(L, y, w, 44);
@@ -1266,6 +1285,11 @@ namespace CarwashServices.Roles
             else
             {
                 // Non-approval rows keep the existing actions.
+                if (string.Equals(f.Status, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(f.Status, "Due today", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddMenuItem(menu, "Send Now", () => SendNowRowAsync(f));
+                }
                 AddMenuItem(menu, "Edit", () => OpenEditDialog(f));
                 AddMenuItem(menu, "Archive", () => ArchiveAsync(f), isDanger: true);
             }
@@ -1812,9 +1836,54 @@ namespace CarwashServices.Roles
             finally { Cursor = Cursors.Default; }
         }
 
-        // ================================================================
-        //  EDIT / ARCHIVE / RESTORE / ADD
-        // ================================================================
+        private async void SendNowRowAsync(FollowUpDto f)
+        {
+            var custName = _custById.TryGetValue(f.CustomerId, out var c) ? c.CustomerName : "the customer";
+            var ask = MessageBox.Show(
+                $"Send follow-up email to {custName} now?",
+                "Confirm Send",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (ask != DialogResult.Yes) return;
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var resp = await _http.PostAsJsonAsync(
+                    $"api/follow-ups/{f.FollowUpId}/send?companyId={companyId}",
+                    new { companyId });
+
+                if (resp.IsSuccessStatusCode)
+                {
+                    MessageBox.Show(
+                        $"Follow-up email successfully sent to {custName}.",
+                        "Sent",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    await LoadAsync();
+                }
+                else
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    MessageBox.Show(
+                        $"Send failed.\n\n{resp.StatusCode}\n\n{body}",
+                        "Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Send failed.\n\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+            }
+        }
+
         private void OpenEditDialog(FollowUpDto dto)
         {
             using var dlg = new FollowUpEditDialog(_customers, dto);
@@ -1899,7 +1968,10 @@ namespace CarwashServices.Roles
             }
         }
 
-        public async void OpenAddDialogWithCustomers(List<int> preselectedCustomerIds)
+        public async void OpenAddDialogWithCustomers(
+            List<int> preselectedCustomerIds,
+            string? defaultReason = null,
+            Dictionary<int, SegmentCustomerDto>? segmentInfo = null)
         {
             await LoadLookupsAsync();
 
@@ -1911,7 +1983,7 @@ namespace CarwashServices.Roles
                 return;
             }
 
-            using var dlg = new FollowUpEditDialog(_customers, preselectedCustomerIds);
+            using var dlg = new FollowUpEditDialog(_customers, preselectedCustomerIds, defaultReason, segmentInfo);
             if (dlg.ShowDialog(this.FindForm()) == DialogResult.OK)
             {
                 _page = 1;
@@ -1925,6 +1997,120 @@ namespace CarwashServices.Roles
         {
             await LoadLookupsAsync();
             await LoadAsync();
+        }
+
+        private async Task PromptTestSmtpAsync()
+        {
+            using var dlg = new Form
+            {
+                Text = "Test Google SMTP Email Delivery",
+                Size = new Size(460, 240),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 9.5f)
+            };
+
+            var titleLbl = new Label
+            {
+                Text = "Send Test Email via Google SMTP",
+                Font = new Font("Segoe UI Semibold", 12f),
+                ForeColor = Navy,
+                Location = new Point(24, 16),
+                AutoSize = true
+            };
+            dlg.Controls.Add(titleLbl);
+
+            var descLbl = new Label
+            {
+                Text = "Enter any recipient email to test delivery (e.g. Gmail, Yahoo, Outlook):",
+                Font = new Font("Segoe UI", 9f),
+                ForeColor = Muted,
+                Location = new Point(24, 46),
+                Size = new Size(400, 36)
+            };
+            dlg.Controls.Add(descLbl);
+
+            var emailTxt = new TextBox
+            {
+                Text = !string.IsNullOrWhiteSpace(SessionUser.Email) ? SessionUser.Email : "princealegria4@gmail.com",
+                Font = new Font("Segoe UI", 10f),
+                Location = new Point(24, 86),
+                Width = 394
+            };
+            dlg.Controls.Add(emailTxt);
+
+            var sendBtn = new Button
+            {
+                Text = "Send Test Email",
+                Font = new Font("Segoe UI Semibold", 9.5f),
+                ForeColor = Color.White,
+                BackColor = Blue,
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(140, 36),
+                Location = new Point(278, 140),
+                Cursor = Cursors.Hand
+            };
+            sendBtn.FlatAppearance.BorderSize = 0;
+            dlg.Controls.Add(sendBtn);
+
+            var cancelBtn = new Button
+            {
+                Text = "Cancel",
+                Font = new Font("Segoe UI", 9.5f),
+                ForeColor = Navy,
+                BackColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(90, 36),
+                Location = new Point(176, 140),
+                Cursor = Cursors.Hand
+            };
+            cancelBtn.FlatAppearance.BorderColor = CardBorder;
+            cancelBtn.Click += (s, e) => dlg.Close();
+            dlg.Controls.Add(cancelBtn);
+
+            sendBtn.Click += async (s, e) =>
+            {
+                var target = emailTxt.Text.Trim();
+                if (string.IsNullOrWhiteSpace(target) || !target.Contains("@"))
+                {
+                    MessageBox.Show("Please enter a valid recipient email address.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                sendBtn.Enabled = false;
+                sendBtn.Text = "Sending...";
+                dlg.Cursor = Cursors.WaitCursor;
+
+                try
+                {
+                    using var resp = await _http.PostAsync($"api/follow-ups/test-smtp?to={Uri.EscapeDataString(target)}", null);
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        MessageBox.Show($"Test email sent successfully to {target}!\n\nPlease check the recipient inbox.", "SMTP Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        dlg.Close();
+                    }
+                    else
+                    {
+                        var err = await resp.Content.ReadAsStringAsync();
+                        MessageBox.Show($"SMTP Error:\n\n{err}", "SMTP Delivery Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to connect to API server:\n\n{ex.Message}", "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    dlg.Cursor = Cursors.Default;
+                    sendBtn.Enabled = true;
+                    sendBtn.Text = "Send Test Email";
+                }
+            };
+
+            dlg.ShowDialog(this);
         }
     }
 }

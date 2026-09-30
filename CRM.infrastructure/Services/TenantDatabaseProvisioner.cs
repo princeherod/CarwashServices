@@ -78,7 +78,10 @@ public class TenantDatabaseProvisioner : ITenantDatabaseProvisioner
 
         // 2. Connect to tenant database and ensure tables and constraints are created
         var options = new DbContextOptionsBuilder<TenantErpDbContext>()
-            .UseSqlServer(tenantConnStr)
+            .UseSqlServer(tenantConnStr, sql => sql.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(30),
+                errorNumbersToAdd: null))
             .Options;
 
         using (var tenantDb = new TenantErpDbContext(options))
@@ -176,8 +179,8 @@ public class TenantDatabaseProvisioner : ITenantDatabaseProvisioner
 
         if (isLocalDb)
         {
-            var master = $"Server={serverName};Database=master;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True;";
-            var tenant = $"Server={serverName};Database={databaseName};Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True;";
+            var master = $"Server={serverName};Database=master;Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=60;ConnectRetryCount=3;ConnectRetryInterval=10;MultipleActiveResultSets=True;";
+            var tenant = $"Server={serverName};Database={databaseName};Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=60;ConnectRetryCount=3;ConnectRetryInterval=10;MultipleActiveResultSets=True;";
             return (master, tenant);
         }
 
@@ -187,14 +190,14 @@ public class TenantDatabaseProvisioner : ITenantDatabaseProvisioner
         if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(password))
         {
             // Fall back to trusted connection if credentials not set in appsettings
-            var master = $"Server={serverName};Database=master;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True;";
-            var tenant = $"Server={serverName};Database={databaseName};Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True;";
+            var master = $"Server={serverName};Database=master;Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=60;ConnectRetryCount=3;ConnectRetryInterval=10;MultipleActiveResultSets=True;";
+            var tenant = $"Server={serverName};Database={databaseName};Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=60;ConnectRetryCount=3;ConnectRetryInterval=10;MultipleActiveResultSets=True;";
             return (master, tenant);
         }
         else
         {
-            var master = $"Server={serverName};Database=master;User Id={userId};Password={password};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True;";
-            var tenant = $"Server={serverName};Database={databaseName};User Id={userId};Password={password};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True;";
+            var master = $"Server={serverName};Database=master;User Id={userId};Password={password};Encrypt=True;TrustServerCertificate=True;Connect Timeout=60;ConnectRetryCount=3;ConnectRetryInterval=10;MultipleActiveResultSets=True;";
+            var tenant = $"Server={serverName};Database={databaseName};User Id={userId};Password={password};Encrypt=True;TrustServerCertificate=True;Connect Timeout=60;ConnectRetryCount=3;ConnectRetryInterval=10;MultipleActiveResultSets=True;";
             return (master, tenant);
         }
     }

@@ -226,6 +226,24 @@ namespace CarwashServices.Dialogs
                 ("Multi-Tenancy Mode", "Database-per-tenant (Isolated Storage)")
             }, 32, ref y, cardW));
 
+            y += 16;
+
+            // Card 5: Terms & Conditions Agreement Status
+            string termsStatus = _company.TermsAccepted ? "Accepted" : "Pending Initial Acceptance";
+            string termsAcceptedDate = _company.TermsAcceptedAt.HasValue ? _company.TermsAcceptedAt.Value.ToString("yyyy-MM-dd HH:mm") : "Not yet accepted";
+            string termsAcceptedBy = !string.IsNullOrWhiteSpace(_company.TermsAcceptedBy) ? _company.TermsAcceptedBy : "Pending";
+            string termsVersion = !string.IsNullOrWhiteSpace(_company.TermsAcceptedVersion) ? _company.TermsAcceptedVersion : "None";
+
+            body.Controls.Add(CreateSectionCard("TERMS & CONDITIONS AGREEMENT", new[]
+            {
+                ("Status", termsStatus),
+                ("Agreement Version", termsVersion),
+                ("Accepted At", termsAcceptedDate),
+                ("Accepted By", termsAcceptedBy)
+            }, 32, ref y, cardW));
+
+            y += 24;
+
             Controls.Add(body);
             body.BringToFront();
         }

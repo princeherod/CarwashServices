@@ -183,6 +183,106 @@ namespace CRM.api.Controllers
             }
             return $"v{DateTime.UtcNow:yyyy.MM}";
         }
+
+        // =====================================================================
+        // POST /api/terms/accept
+        // =====================================================================
+        [HttpPost("accept")]
+        public async Task<IActionResult> AcceptTerms([FromBody] AcceptTermsRequest? req)
+        {
+            if (req == null || req.CompanyId <= 0)
+                return BadRequest(new { message = "CompanyId is required." });
+
+            var company = await _db.Companies.FirstOrDefaultAsync(c => c.CompanyId == req.CompanyId);
+            if (company == null)
+                return NotFound(new { message = $"Company with ID {req.CompanyId} not found." });
+
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.UserId == req.UserId);
+            string acceptedBy = user != null ? $"{user.FullName} ({user.Email})" : $"User #{req.UserId}";
+
+            string version = req.Version?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                var latest = await _db.TermsConditions.OrderByDescending(t => t.TermsId).FirstOrDefaultAsync();
+                version = latest?.Version ?? "v1.0";
+            }
+
+            company.TermsAccepted = true;
+            company.TermsAcceptedAt = DateTime.UtcNow;
+            company.TermsAcceptedBy = acceptedBy;
+            company.TermsAcceptedVersion = version;
+
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                message = "Terms & Conditions accepted successfully.",
+                companyId = company.CompanyId,
+                termsAccepted = true,
+                termsAcceptedAt = company.TermsAcceptedAt,
+                termsAcceptedBy = company.TermsAcceptedBy,
+                termsAcceptedVersion = company.TermsAcceptedVersion
+            });
+        }
+
+        // =====================================================================
+        // POST /api/terms/decline
+        // =====================================================================
+        [HttpPost("decline")]
+        public async Task<IActionResult> DeclineTerms([FromBody] DeclineTermsRequest? req)
+        {
+            if (req == null || req.CompanyId <= 0)
+                return BadRequest(new { message = "CompanyId is required." });
+
+            var company = await _db.Companies.FirstOrDefaultAsync(c => c.CompanyId == req.CompanyId);
+            if (company == null)
+                return NotFound(new { message = $"Company with ID {req.CompanyId} not found." });
+
+            company.TermsAccepted = false;
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                message = "Terms & Conditions declined. Access to CRM remains restricted until terms are accepted.",
+                companyId = company.CompanyId,
+                termsAccepted = false
+            });
+        }
+
+        // =====================================================================
+        // GET /api/terms/company/{companyId}
+        // =====================================================================
+        [HttpGet("company/{companyId:int}")]
+        public async Task<IActionResult> GetCompanyTermsStatus(int companyId)
+        {
+            var company = await _db.Companies
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.CompanyId == companyId);
+
+            if (company == null)
+                return NotFound(new { message = $"Company with ID {companyId} not found." });
+
+            var latestTerms = await _db.TermsConditions
+                .AsNoTracking()
+                .OrderByDescending(t => t.TermsId)
+                .FirstOrDefaultAsync();
+
+            return Ok(new
+            {
+                companyId = company.CompanyId,
+                companyCode = company.CompanyCode,
+                companyName = company.CompanyName,
+                termsAccepted = company.TermsAccepted,
+                termsAcceptedAt = company.TermsAcceptedAt,
+                termsAcceptedBy = company.TermsAcceptedBy,
+                termsAcceptedVersion = company.TermsAcceptedVersion,
+                latestVersion = latestTerms?.Version ?? "v1.0",
+                latestTermsId = latestTerms?.TermsId,
+                needsAcceptance = !company.TermsAccepted
+            });
+        }
     }
 
     public class CreateTermsRequest
@@ -190,5 +290,20 @@ namespace CRM.api.Controllers
         public string? Content { get; set; }
         public int? CreatedBy { get; set; }
         public string? Version { get; set; }
+    }
+
+    public class AcceptTermsRequest
+    {
+        public int CompanyId { get; set; }
+        public int UserId { get; set; }
+        public int? TermsId { get; set; }
+        public string? Version { get; set; }
+    }
+
+    public class DeclineTermsRequest
+    {
+        public int CompanyId { get; set; }
+        public int UserId { get; set; }
+        public string? Reason { get; set; }
     }
 }

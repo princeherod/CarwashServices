@@ -277,10 +277,40 @@ namespace CarwashServices.Controls.Reports
 
             _grid.CellPainting += Grid_CellPainting;
 
-            // Click a retention row -> jump to the customer's record.
+            // Click a retention row -> jump to customer's follow-up or record.
             _grid.CellMouseClick += (s, e) =>
             {
                 if (e.RowIndex < 0) return;
+
+                var rowDto = _grid.Rows[e.RowIndex].Tag as RetentionSummaryRowDto;
+                string action = _grid.Rows[e.RowIndex].Cells["Action"].Value?.ToString() ?? "";
+
+                if (action == "Send follow-up" && (e.ColumnIndex == _grid.Columns["Action"].Index || e.Button == MouseButtons.Left))
+                {
+                    if (rowDto != null && rowDto.CustomerId > 0)
+                    {
+                        var main = FindForm() as MainForm;
+                        if (main != null)
+                        {
+                            int days = int.TryParse(rowDto.DaysSince, out var ds) ? ds : 60;
+                            var segDict = new Dictionary<int, SegmentCustomerDto>
+                            {
+                                [rowDto.CustomerId] = new SegmentCustomerDto
+                                {
+                                    CustomerId = rowDto.CustomerId,
+                                    Name = rowDto.Customer,
+                                    DaysSince = days,
+                                    Segment = rowDto.Segment,
+                                    DaysLeft = Math.Max(0, 120 - days)
+                                }
+                            };
+                            string reason = $"Customer {rowDto.Customer} has not returned for {days} days (At-Risk retention follow-up).";
+                            main.NavigateToFollowUpsWithCustomers(new List<int> { rowDto.CustomerId }, reason, segDict);
+                            return;
+                        }
+                    }
+                }
+
                 Navigate("Manage Customers");
             };
         }
@@ -362,7 +392,41 @@ namespace CarwashServices.Controls.Reports
             subLbl.BackColor = Color.White;
             card.Controls.Add(subLbl);
 
-            BindClick(card, () => Navigate("Manage Customers"));
+            if (title == "At Risk")
+            {
+                BindClick(card, () =>
+                {
+                    var atRiskRows = _data.Rows.Where(r => (r.Segment == "At Risk" || r.Segment == "AtRisk") && r.CustomerId > 0).ToList();
+                    if (atRiskRows.Count > 0)
+                    {
+                        var main = FindForm() as MainForm;
+                        if (main != null)
+                        {
+                            var ids = atRiskRows.Select(r => r.CustomerId).ToList();
+                            var segDict = atRiskRows.ToDictionary(r => r.CustomerId, r =>
+                            {
+                                int d = int.TryParse(r.DaysSince, out var ds) ? ds : 60;
+                                return new SegmentCustomerDto
+                                {
+                                    CustomerId = r.CustomerId,
+                                    Name = r.Customer,
+                                    DaysSince = d,
+                                    Segment = r.Segment,
+                                    DaysLeft = Math.Max(0, 120 - d)
+                                };
+                            });
+                            string reason = $"Customers have not visited for 61–120 days (At-Risk customer retention follow-up).";
+                            main.NavigateToFollowUpsWithCustomers(ids, reason, segDict);
+                            return;
+                        }
+                    }
+                    Navigate("Manage Customers");
+                });
+            }
+            else
+            {
+                BindClick(card, () => Navigate("Manage Customers"));
+            }
             grid.Controls.Add(card, col, 0);
         }
 
@@ -408,6 +472,7 @@ namespace CarwashServices.Controls.Reports
                     var idx = _grid.Rows.Add(
                         row.Customer, Or(row.LastVisit), row.DaysSince, row.TotalVisits,
                         row.Ltv, row.AvgRating, Or(row.Complaint), row.Segment, Or(row.RetentionAction));
+                    _grid.Rows[idx].Tag = row;
 
                     var cells = _grid.Rows[idx].Cells;
                     var complaint = cells["Complaint"].Value?.ToString();
@@ -466,31 +531,68 @@ namespace CarwashServices.Controls.Reports
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
-            if (_grid.Columns[e.ColumnIndex].Name != "Segment") return;
+            var colName = _grid.Columns[e.ColumnIndex].Name;
 
-            e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
-
-            var text = e.FormattedValue?.ToString() ?? "";
-            if (text.Length > 0)
+            if (colName == "Segment")
             {
-                var (bg, fg) = SegmentColors(text);
-                var textSize = TextRenderer.MeasureText(e.Graphics, text, PillFont);
-                int h = 24;
-                var pill = new Rectangle(e.CellBounds.X + 12,
-                    e.CellBounds.Y + (e.CellBounds.Height - h) / 2,
-                    textSize.Width + 20, h);
+                e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
 
-                var oldMode = e.Graphics.SmoothingMode;
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var path = RoundedRect(pill, h / 2))
-                using (var brush = new SolidBrush(bg))
-                    e.Graphics.FillPath(brush, path);
-                e.Graphics.SmoothingMode = oldMode;
+                var text = e.FormattedValue?.ToString() ?? "";
+                if (text.Length > 0)
+                {
+                    var (bg, fg) = SegmentColors(text);
+                    var textSize = TextRenderer.MeasureText(e.Graphics, text, PillFont);
+                    int h = 24;
+                    var pill = new Rectangle(e.CellBounds.X + 12,
+                        e.CellBounds.Y + (e.CellBounds.Height - h) / 2,
+                        textSize.Width + 20, h);
 
-                TextRenderer.DrawText(e.Graphics, text, PillFont, pill, fg,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    var oldMode = e.Graphics.SmoothingMode;
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    using (var path = RoundedRect(pill, h / 2))
+                    using (var brush = new SolidBrush(bg))
+                        e.Graphics.FillPath(brush, path);
+                    e.Graphics.SmoothingMode = oldMode;
+
+                    TextRenderer.DrawText(e.Graphics, text, PillFont, pill, fg,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                }
+                e.Handled = true;
+                return;
             }
-            e.Handled = true;
+
+            if (colName == "Action")
+            {
+                var text = e.FormattedValue?.ToString() ?? "";
+                if (text == "Send follow-up")
+                {
+                    e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
+
+                    string btnText = "✉ Send follow-up";
+                    var textSize = TextRenderer.MeasureText(e.Graphics, btnText, PillFont);
+                    int h = 26;
+                    var pill = new Rectangle(e.CellBounds.X + 8,
+                        e.CellBounds.Y + (e.CellBounds.Height - h) / 2,
+                        textSize.Width + 18, h);
+
+                    var oldMode = e.Graphics.SmoothingMode;
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    using (var path = RoundedRect(pill, 6))
+                    using (var brush = new SolidBrush(Color.FromArgb(0xEA, 0xF2, 0xFD)))
+                    using (var pen = new Pen(Color.FromArgb(0x90, 0xCA, 0xF9), 1f))
+                    {
+                        e.Graphics.FillPath(brush, path);
+                        e.Graphics.DrawPath(pen, path);
+                    }
+                    e.Graphics.SmoothingMode = oldMode;
+
+                    TextRenderer.DrawText(e.Graphics, btnText, PillFont, pill, Color.FromArgb(0x15, 0x65, 0xC0),
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+                    e.Handled = true;
+                    return;
+                }
+            }
         }
 
         private static GraphicsPath RoundedRect(Rectangle r, int radius)

@@ -58,6 +58,10 @@ public class MasterErpDbContext : IdentityDbContext
             entity.Property(x => x.State).HasMaxLength(100);
             entity.Property(x => x.PostalCode).HasMaxLength(20);
             entity.Property(x => x.Country).HasMaxLength(100);
+
+            entity.Property(x => x.TermsAccepted).HasDefaultValue(false);
+            entity.Property(x => x.TermsAcceptedBy).HasMaxLength(200);
+            entity.Property(x => x.TermsAcceptedVersion).HasMaxLength(50);
         });
 
         builder.Entity<CompanyDatabase>(entity =>

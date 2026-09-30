@@ -12,7 +12,11 @@ var builder = WebApplication.CreateBuilder(args);
 // -----------------------------------------------------------------
 builder.Services.AddDbContext<MasterErpDbContext>(options =>
     options.UseSqlServer(
-        builder.Configuration.GetConnectionString("MasterErp")));
+        builder.Configuration.GetConnectionString("MasterErp"),
+        sql => sql.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(30),
+            errorNumbersToAdd: null)));
 
 // NOTE: TenantErpDbContext is intentionally NOT registered here.
 // It is created per-tenant by TenantDbContextFactory.

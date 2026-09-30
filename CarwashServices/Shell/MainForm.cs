@@ -196,7 +196,10 @@ namespace CarwashServices.Shell
             }
         }
 
-        public void NavigateToFollowUpsWithCustomers(List<int> customerIds)
+        public void NavigateToFollowUpsWithCustomers(
+            List<int> customerIds,
+            string? defaultReason = null,
+            Dictionary<int, Dtos.SegmentCustomerDto>? segmentInfo = null)
         {
             if (!CanAccess("Follow-Ups / Reminders")) return;
             NavigateTo("Follow-Ups / Reminders");
@@ -205,7 +208,7 @@ namespace CarwashServices.Shell
             {
                 if (c is FollowUpsView fuv)
                 {
-                    fuv.OpenAddDialogWithCustomers(customerIds);
+                    fuv.OpenAddDialogWithCustomers(customerIds, defaultReason, segmentInfo);
                     break;
                 }
             }

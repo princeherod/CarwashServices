@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -35,7 +35,9 @@ namespace CarwashServices.Dialogs
         private readonly List<TenantCustomerDto> _customers;
         private readonly FollowUpDto? _existing;
         private readonly List<int>? _preselectedIds;
+        private readonly string? _defaultReason;
         private readonly Dictionary<int, TenantCustomerDto> _custById;
+        private readonly Dictionary<int, SegmentCustomerDto> _segmentByCustId = new();
 
         // ---- Controls ----
         private TextBox _searchBox = null!;
@@ -43,6 +45,9 @@ namespace CarwashServices.Dialogs
         private LinkLabel _selectAllFilteredLbl = null!;
         private CheckedListBox _customerList = null!;
         private Label _badge = null!;
+        private Panel _retentionBanner = null!;
+        private Label _retentionBannerIcon = null!;
+        private Label _retentionBannerLbl = null!;
 
         private Button _emailBtn = null!;
         private Button _sendNowBtn = null!, _scheduleBtn = null!;
@@ -96,32 +101,56 @@ namespace CarwashServices.Dialogs
         //  CTORS
         // ============================================================
         public FollowUpEditDialog(List<TenantCustomerDto> customers)
-            : this(customers, null, null) { }
+            : this(customers, null, null, null, null) { }
 
         public FollowUpEditDialog(List<TenantCustomerDto> customers, List<int>? preselectedCustomerIds)
-            : this(customers, null, preselectedCustomerIds) { }
+            : this(customers, null, preselectedCustomerIds, null, null) { }
+
+        public FollowUpEditDialog(
+            List<TenantCustomerDto> customers,
+            List<int>? preselectedCustomerIds,
+            string? defaultReason,
+            Dictionary<int, SegmentCustomerDto>? segmentInfo)
+            : this(customers, null, preselectedCustomerIds, defaultReason, segmentInfo) { }
 
         public FollowUpEditDialog(List<TenantCustomerDto> customers, FollowUpDto? existing)
-            : this(customers, existing, null) { }
+            : this(customers, existing, null, null, null) { }
 
         private FollowUpEditDialog(
             List<TenantCustomerDto> customers,
             FollowUpDto? existing,
-            List<int>? preselectedCustomerIds)
+            List<int>? preselectedCustomerIds,
+            string? defaultReason,
+            Dictionary<int, SegmentCustomerDto>? segmentInfo)
         {
             _customers = customers ?? new();
             _existing = existing;
             _preselectedIds = preselectedCustomerIds;
+            _defaultReason = defaultReason;
             _custById = _customers.ToDictionary(c => c.TenantCustomerId);
+            if (segmentInfo != null)
+            {
+                foreach (var kvp in segmentInfo)
+                    _segmentByCustId[kvp.Key] = kvp.Value;
+            }
 
             InitializeForm();
 
             if (_existing != null) PreloadExisting();
             else if (_preselectedIds != null && _preselectedIds.Count > 0) PreselectCustomers();
 
+            if (!string.IsNullOrWhiteSpace(_defaultReason))
+                _reasonTxt.Text = _defaultReason;
+            else if (_existing == null)
+                AutoFillReasonIfEmpty();
+
+            _ = LoadCustomerSegmentsAsync();
+            _ = LoadCompanyPromotionsAsync();
+
             UpdateBadge();
             UpdateSelectAllLabel();
             UpdatePreview();
+            UpdateRetentionAlertBanner();
         }
 
         // ============================================================
@@ -390,11 +419,52 @@ namespace CarwashServices.Dialogs
                         UpdateBadge();
                         UpdateSelectAllLabel();
                         UpdatePreview();
+                        UpdateRetentionAlertBanner();
+                        AutoFillReasonIfEmpty();
                     }));
                 }
             };
             root.Controls.Add(_customerList);
-            y += _customerList.Height + 12;
+            y += _customerList.Height + 10;
+
+            // ---- Inactivity Alert / Retention Banner ----
+            _retentionBanner = new Panel
+            {
+                Location = new Point(0, y),
+                Size = new Size(ContentW, 44),
+                BackColor = Color.FromArgb(0xFF, 0xF9, 0xEB)
+            };
+            _retentionBanner.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using var p = RoundedRect(new Rectangle(0, 0, _retentionBanner.Width - 1, _retentionBanner.Height - 1), 6);
+                using var pen = new Pen(Color.FromArgb(0xFD, 0xDC, 0x8C), 1.2f);
+                e.Graphics.DrawPath(pen, p);
+            };
+
+            _retentionBannerIcon = new Label
+            {
+                Text = "⚠️",
+                Font = new Font("Segoe UI", 11f),
+                Location = new Point(10, 10),
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            _retentionBanner.Controls.Add(_retentionBannerIcon);
+
+            _retentionBannerLbl = new Label
+            {
+                Text = "Select customers to check days without visit and retention risk.",
+                Font = new Font("Segoe UI Semibold", 8.8f),
+                ForeColor = Color.FromArgb(0x8A, 0x53, 0x00),
+                Location = new Point(36, 6),
+                Size = new Size(ContentW - 46, 32),
+                TextAlign = ContentAlignment.MiddleLeft,
+                BackColor = Color.Transparent
+            };
+            _retentionBanner.Controls.Add(_retentionBannerLbl);
+            root.Controls.Add(_retentionBanner);
+            y += _retentionBanner.Height + 14;
 
             // ---- Send Via / When ----
             root.Controls.Add(Caption("SEND VIA", 0, y));
@@ -762,8 +832,133 @@ namespace CarwashServices.Dialogs
         }
 
         // ============================================================
-        //  CUSTOMER LIST
+        //  CUSTOMER LIST & INACTIVITY DISPLAY
         // ============================================================
+        private async Task LoadCustomerSegmentsAsync()
+        {
+            try
+            {
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var list = await _http.GetFromJsonAsync<List<SegmentCustomerDto>>(
+                    $"api/analytics/segment-customers?companyId={companyId}&segment=All");
+
+                if (list != null && list.Count > 0)
+                {
+                    foreach (var s in list)
+                    {
+                        if (!_segmentByCustId.ContainsKey(s.CustomerId))
+                            _segmentByCustId[s.CustomerId] = s;
+                    }
+
+                    if (!IsDisposed && IsHandleCreated)
+                    {
+                        BeginInvoke(new Action(() =>
+                        {
+                            ApplyCustomerFilter();
+                            UpdateRetentionAlertBanner();
+                            AutoFillReasonIfEmpty();
+                            UpdatePreview();
+                        }));
+                    }
+                }
+            }
+            catch
+            {
+                // Non-critical, fallback to basic customer display
+            }
+        }
+
+        private async Task LoadCompanyPromotionsAsync()
+        {
+            try
+            {
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var list = await _http.GetFromJsonAsync<List<ProductDto>>($"api/tenant/{companyId}/products");
+                if (list != null && list.Count > 0)
+                {
+                    var active = list.Where(p => !p.IsArchived && p.IsActive).ToList();
+                    if (active.Count == 0) active = list.Where(p => !p.IsArchived).ToList();
+
+                    if (active.Count > 0)
+                    {
+                        var action = new Action(() =>
+                        {
+                            var previousSelection = _discountCombo.SelectedItem?.ToString();
+                            _discountCombo.BeginUpdate();
+                            _discountCombo.Items.Clear();
+
+                            _discountCombo.Items.Add("No discount");
+                            _discountCombo.Items.Add("10% off entire service");
+                            _discountCombo.Items.Add("15% off next visit");
+
+                            // Dynamic company-tailored promotion offers based on the company's active services
+                            foreach (var p in active.Take(5))
+                            {
+                                _discountCombo.Items.Add($"20% off {p.ProductName}");
+                                _discountCombo.Items.Add($"Free {p.ProductName} add-on");
+                            }
+
+                            if (_existing != null && !string.IsNullOrWhiteSpace(_existing.DiscountOffer))
+                            {
+                                if (!_discountCombo.Items.Contains(_existing.DiscountOffer))
+                                    _discountCombo.Items.Add(_existing.DiscountOffer);
+                                _discountCombo.SelectedItem = _existing.DiscountOffer;
+                            }
+                            else if (!string.IsNullOrWhiteSpace(previousSelection) && _discountCombo.Items.Contains(previousSelection))
+                            {
+                                _discountCombo.SelectedItem = previousSelection;
+                            }
+                            else
+                            {
+                                _discountCombo.SelectedIndex = _discountCombo.Items.Count > 1 ? 1 : 0;
+                            }
+
+                            _discountCombo.EndUpdate();
+                            UpdatePreview();
+                        });
+
+                        if (!IsDisposed && IsHandleCreated)
+                        {
+                            BeginInvoke(action);
+                        }
+                        else
+                        {
+                            action();
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback discount items remain intact
+            }
+        }
+
+        private string FormatCustomerDisplay(TenantCustomerDto c)
+        {
+            string baseInfo = $"{c.CustomerName}  ·  {c.ContactNumber}";
+
+            if (_segmentByCustId.TryGetValue(c.TenantCustomerId, out var seg))
+            {
+                if (seg.DaysSince >= 9999 || seg.LastVisit == default)
+                {
+                    return $"{baseInfo}  ·  No visit history";
+                }
+                if (string.Equals(seg.Segment, "AtRisk", StringComparison.OrdinalIgnoreCase))
+                {
+                    string leftStr = seg.DaysLeft > 0 ? $" · {seg.DaysLeft}d left" : "";
+                    return $"{baseInfo}  ·  {seg.DaysSince} days without visit [At Risk{leftStr}]";
+                }
+                if (string.Equals(seg.Segment, "Lost", StringComparison.OrdinalIgnoreCase))
+                {
+                    return $"{baseInfo}  ·  {seg.DaysSince} days without visit [Lost]";
+                }
+                return $"{baseInfo}  ·  {seg.DaysSince} days ago [Active]";
+            }
+
+            return baseInfo;
+        }
+
         private void ApplyCustomerFilter()
         {
             _filterRefreshInProgress = true;
@@ -789,9 +984,8 @@ namespace CarwashServices.Dialogs
                 _customerList.Items.Clear();
                 foreach (var c in _filtered)
                 {
-                    _customerList.Items.Add(
-                        new CustomerItem(c.TenantCustomerId,
-                                         $"{c.CustomerName}  ·  {c.ContactNumber}"));
+                    string display = FormatCustomerDisplay(c);
+                    _customerList.Items.Add(new CustomerItem(c.TenantCustomerId, display));
                 }
                 _customerList.EndUpdate();
 
@@ -825,6 +1019,8 @@ namespace CarwashServices.Dialogs
             UpdateBadge();
             UpdateSelectAllLabel();
             UpdatePreview();
+            UpdateRetentionAlertBanner();
+            AutoFillReasonIfEmpty();
         }
 
         private bool AreAllFilteredChecked()
@@ -858,6 +1054,8 @@ namespace CarwashServices.Dialogs
                     _customerList.SetItemChecked(i, true);
             }
             UpdateSelectAllLabel();
+            UpdateRetentionAlertBanner();
+            AutoFillReasonIfEmpty();
         }
 
         private void UpdateBadge()
@@ -865,6 +1063,137 @@ namespace CarwashServices.Dialogs
             if (_badge == null || _customerList == null) return;
             if (IsDisposed || Disposing) return;
             _badge.Text = $"{_customerList.CheckedItems.Count} selected";
+        }
+
+        private void UpdateRetentionAlertBanner()
+        {
+            if (_retentionBanner == null || _retentionBannerLbl == null) return;
+
+            var checkedIds = new List<int>();
+            for (int i = 0; i < _customerList.Items.Count; i++)
+            {
+                if (_customerList.GetItemChecked(i) && _customerList.Items[i] is CustomerItem ci)
+                    checkedIds.Add(ci.CustomerId);
+            }
+
+            if (checkedIds.Count == 0)
+            {
+                _retentionBannerIcon.Text = "💡";
+                _retentionBannerLbl.Text = "Tip: Customers inactive for 61–120 days are At Risk of churning. Follow up to bring them back.";
+                _retentionBanner.BackColor = Color.FromArgb(0xF4, 0xF7, 0xFC);
+                _retentionBannerLbl.ForeColor = Navy;
+                return;
+            }
+
+            var atRiskSelected = checkedIds
+                .Where(id => _segmentByCustId.TryGetValue(id, out var s) && string.Equals(s.Segment, "AtRisk", StringComparison.OrdinalIgnoreCase))
+                .Select(id => _segmentByCustId[id])
+                .ToList();
+
+            if (checkedIds.Count == 1)
+            {
+                int id = checkedIds[0];
+                if (_segmentByCustId.TryGetValue(id, out var seg))
+                {
+                    string custName = _custById.TryGetValue(id, out var c) ? c.CustomerName : seg.Name;
+                    if (seg.DaysSince >= 9999 || seg.LastVisit == default)
+                    {
+                        _retentionBannerIcon.Text = "ℹ️";
+                        _retentionBannerLbl.Text = $"{custName} has no recorded past visits.";
+                        _retentionBanner.BackColor = Color.FromArgb(0xF4, 0xF7, 0xFC);
+                        _retentionBannerLbl.ForeColor = Navy;
+                    }
+                    else if (string.Equals(seg.Segment, "AtRisk", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _retentionBannerIcon.Text = "⚠️";
+                        _retentionBannerLbl.Text = $"At-Risk Customer: {custName} has not returned for {seg.DaysSince} days! ({seg.DaysLeft} days left before marked Lost).";
+                        _retentionBanner.BackColor = Color.FromArgb(0xFF, 0xF9, 0xEB);
+                        _retentionBannerLbl.ForeColor = Color.FromArgb(0x8A, 0x53, 0x00);
+                    }
+                    else if (string.Equals(seg.Segment, "Lost", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _retentionBannerIcon.Text = "🛑";
+                        _retentionBannerLbl.Text = $"Lost Customer: {custName} has not returned for {seg.DaysSince} days (past 120-day threshold).";
+                        _retentionBanner.BackColor = Color.FromArgb(0xFF, 0xF1, 0xF1);
+                        _retentionBannerLbl.ForeColor = Danger;
+                    }
+                    else
+                    {
+                        _retentionBannerIcon.Text = "✅";
+                        _retentionBannerLbl.Text = $"Active Customer: {custName} visited {seg.DaysSince} days ago.";
+                        _retentionBanner.BackColor = Color.FromArgb(0xED, 0xF8, 0xEF);
+                        _retentionBannerLbl.ForeColor = Color.FromArgb(0x1B, 0x5E, 0x20);
+                    }
+                }
+                else
+                {
+                    string custName = _custById.TryGetValue(id, out var c) ? c.CustomerName : "Selected customer";
+                    _retentionBannerIcon.Text = "ℹ️";
+                    _retentionBannerLbl.Text = $"{custName} selected for follow-up.";
+                    _retentionBanner.BackColor = Color.FromArgb(0xF4, 0xF7, 0xFC);
+                    _retentionBannerLbl.ForeColor = Navy;
+                }
+            }
+            else
+            {
+                // Multiple customers selected
+                if (atRiskSelected.Count > 0)
+                {
+                    int minDays = atRiskSelected.Min(s => s.DaysSince);
+                    int maxDays = atRiskSelected.Max(s => s.DaysSince);
+                    string rangeStr = minDays == maxDays ? $"{minDays} days" : $"{minDays}–{maxDays} days";
+
+                    _retentionBannerIcon.Text = "⚠️";
+                    _retentionBannerLbl.Text = $"Inactivity Alert: {atRiskSelected.Count} of {checkedIds.Count} selected customers are At Risk ({rangeStr} without visit). Send follow-up before they pass 120 days.";
+                    _retentionBanner.BackColor = Color.FromArgb(0xFF, 0xF9, 0xEB);
+                    _retentionBannerLbl.ForeColor = Color.FromArgb(0x8A, 0x53, 0x00);
+                }
+                else
+                {
+                    _retentionBannerIcon.Text = "ℹ️";
+                    _retentionBannerLbl.Text = $"{checkedIds.Count} customers selected for follow-up.";
+                    _retentionBanner.BackColor = Color.FromArgb(0xF4, 0xF7, 0xFC);
+                    _retentionBannerLbl.ForeColor = Navy;
+                }
+            }
+        }
+
+        private void AutoFillReasonIfEmpty()
+        {
+            if (_reasonTxt == null || !string.IsNullOrWhiteSpace(_reasonTxt.Text)) return;
+
+            var checkedIds = new List<int>();
+            for (int i = 0; i < _customerList.Items.Count; i++)
+            {
+                if (_customerList.GetItemChecked(i) && _customerList.Items[i] is CustomerItem ci)
+                    checkedIds.Add(ci.CustomerId);
+            }
+
+            if (checkedIds.Count == 1)
+            {
+                int id = checkedIds[0];
+                if (_segmentByCustId.TryGetValue(id, out var seg))
+                {
+                    string custName = _custById.TryGetValue(id, out var c) ? c.CustomerName : seg.Name;
+                    if (seg.DaysSince < 9999)
+                        _reasonTxt.Text = $"Customer {custName} has not returned for {seg.DaysSince} days ({seg.Segment} customer retention follow-up).";
+                }
+            }
+            else if (checkedIds.Count > 1)
+            {
+                var atRisk = checkedIds
+                    .Where(id => _segmentByCustId.TryGetValue(id, out var s) && string.Equals(s.Segment, "AtRisk", StringComparison.OrdinalIgnoreCase))
+                    .Select(id => _segmentByCustId[id])
+                    .ToList();
+
+                if (atRisk.Count > 0)
+                {
+                    int minD = atRisk.Min(s => s.DaysSince);
+                    int maxD = atRisk.Max(s => s.DaysSince);
+                    string rangeStr = minD == maxD ? $"{minD} days" : $"{minD}–{maxD} days";
+                    _reasonTxt.Text = $"Customers have not visited for {rangeStr} (At-Risk customer retention follow-up).";
+                }
+            }
         }
 
         // ============================================================
@@ -884,10 +1213,23 @@ namespace CarwashServices.Dialogs
                 ? ""
                 : $" and enjoy {offer.ToLower()}";
 
+            string whilePhrase = "it's been a while";
+            if (_customerList != null && _customerList.CheckedItems.Count > 0 &&
+                _customerList.CheckedItems[0] is CustomerItem ci &&
+                _segmentByCustId.TryGetValue(ci.CustomerId, out var seg) &&
+                seg.DaysSince > 0 && seg.DaysSince < 9999)
+            {
+                whilePhrase = $"it's been {seg.DaysSince} days";
+            }
+
+            var companyName = !string.IsNullOrWhiteSpace(CarwashServices.Auth.SessionUser.CompanyName)
+                ? CarwashServices.Auth.SessionUser.CompanyName
+                : "our carwash";
+
             _previewBox.Text =
-                $"Hi {firstChecked}, it's been a while since your last wash at AquaShine. " +
+                $"Hi {firstChecked}, {whilePhrase} since your last service at {companyName}. " +
                 $"We'd love to see you again{offerPhrase}, valid until {until}. " +
-                $"Book your next wash today!";
+                $"Book your next service today!";
         }
 
         private string FirstCheckedCustomerName()
@@ -1061,8 +1403,9 @@ namespace CarwashServices.Dialogs
 
                 try
                 {
+                    var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                     var resp = await _http.PutAsJsonAsync(
-                        $"api/follow-ups/{_existing.FollowUpId}", body);
+                        $"api/follow-ups/{_existing.FollowUpId}?companyId={companyId}", body);
 
                     if (resp.IsSuccessStatusCode) { DialogResult = DialogResult.OK; Close(); }
                     else
@@ -1102,7 +1445,8 @@ namespace CarwashServices.Dialogs
 
             try
             {
-                var resp = await _http.PostAsJsonAsync("api/follow-ups/bulk", payload);
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var resp = await _http.PostAsJsonAsync($"api/follow-ups/bulk?companyId={companyId}", payload);
 
                 if (resp.IsSuccessStatusCode)
                 {

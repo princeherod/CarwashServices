@@ -648,7 +648,7 @@ namespace CarwashServices.Roles
                 }
 
                 var ids = eligible.Select(r => r.CustomerId).ToList();
-                JumpToFollowUp(ids);
+                JumpToFollowUp(ids, eligible);
             }
             catch (Exception ex)
             {
@@ -659,7 +659,7 @@ namespace CarwashServices.Roles
             }
         }
 
-        private void JumpToFollowUp(List<int> customerIds)
+        private void JumpToFollowUp(List<int> customerIds, List<SegmentCustomerDto>? segmentRows = null)
         {
             if (customerIds == null || customerIds.Count == 0)
             {
@@ -671,7 +671,14 @@ namespace CarwashServices.Roles
             var mainForm = this.FindForm() as MainForm;
             if (mainForm == null) return;
 
-            mainForm.NavigateToFollowUpsWithCustomers(customerIds);
+            var segDict = segmentRows?.ToDictionary(r => r.CustomerId);
+            string reason = segmentRows != null && segmentRows.Count > 0
+                ? (segmentRows.Count == 1
+                    ? $"Customer {segmentRows[0].Name} has not returned for {segmentRows[0].DaysSince} days ({segmentRows[0].Segment} customer retention follow-up)."
+                    : $"Customers have not visited for 61–120 days (At-Risk customer retention follow-up).")
+                : "Customer retention follow-up (At-Risk).";
+
+            mainForm.NavigateToFollowUpsWithCustomers(customerIds, reason, segDict);
         }
 
         // ================================================================
