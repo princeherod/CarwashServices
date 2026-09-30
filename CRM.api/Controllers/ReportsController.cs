@@ -1,4 +1,4 @@
-﻿using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Data;
 using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -49,7 +49,7 @@ public class ReportsController : ControllerBase
                                .ToDictionary(g => g.Key, g => g.First().ProductName);
 
         // Only active requests within the range.
-        var requests = await _db.ServiceRequests
+        var requests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived
                      && r.RequestedDate >= from

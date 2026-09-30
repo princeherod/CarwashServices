@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Printing;
@@ -402,7 +402,7 @@ namespace CarwashServices.Controls.Reports
                 var displayRange = range ?? "This Year";
                 var r = displayRange.Replace(" ", "");
                 var data = await _http.GetFromJsonAsync<ComplaintsFeedbackReportDto>(
-                    $"api/reports/complaints-feedback?companyId=1&range={Uri.EscapeDataString(r)}")
+                    $"api/reports/complaints-feedback?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}&range={Uri.EscapeDataString(r)}")
                     ?? new ComplaintsFeedbackReportDto();
                 _data = data;
 

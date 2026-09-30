@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -440,7 +440,7 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
                 _data = await _http.GetFromJsonAsync<DashboardResponseDto>(
-                    "api/dashboard?companyId=1") ?? new DashboardResponseDto();
+                    $"api/dashboard?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}") ?? new DashboardResponseDto();
                 BindData();
             }
             catch (Exception ex)

@@ -104,23 +104,35 @@ namespace CarwashServices.Shell
             };
             Controls.Add(brandIcon);
 
+            string bTitle = SessionUser.Role == UserRole.SuperAdmin
+                ? "MASTER CRM"
+                : (!string.IsNullOrWhiteSpace(SessionUser.CompanyCode) ? SessionUser.CompanyCode.ToUpperInvariant() : "CARWASH");
+
+            string bSubtitle = SessionUser.Role == UserRole.SuperAdmin
+                ? "Super Admin"
+                : (!string.IsNullOrWhiteSpace(SessionUser.CompanyName) ? SessionUser.CompanyName : "CRM System");
+
             var brandTitle = new Label
             {
-                Text = "AQUASHINE",
+                Text = bTitle,
                 ForeColor = TextDim,
                 Font = new Font("Segoe UI Semibold", 8.5f),
                 Location = new Point(72, y + 2),
-                AutoSize = true
+                AutoSize = true,
+                MaximumSize = new Size(190, 18),
+                AutoEllipsis = true
             };
             Controls.Add(brandTitle);
 
             var brandSubtitle = new Label
             {
-                Text = "CRM System",
+                Text = bSubtitle,
                 ForeColor = TextMain,
-                Font = new Font("Segoe UI Semibold", 12f),
-                Location = new Point(70, y + 16),
-                AutoSize = true
+                Font = new Font("Segoe UI Semibold", 11f),
+                Location = new Point(70, y + 18),
+                AutoSize = true,
+                MaximumSize = new Size(195, 24),
+                AutoEllipsis = true
             };
             Controls.Add(brandSubtitle);
 

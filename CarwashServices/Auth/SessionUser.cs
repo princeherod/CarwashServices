@@ -44,6 +44,16 @@ namespace CarwashServices.Auth
             }
         }
 
+        public static int? CompanyId { get; set; }
+        public static string CompanyName { get; set; } = "";
+        public static string CompanyCode { get; set; } = "";
+
+        /// <summary>
+        /// Resolved company ID for tenant API operations.
+        /// Defaults to 1 if no specific tenant is assigned.
+        /// </summary>
+        public static int CurrentCompanyId => CompanyId.GetValueOrDefault(1) > 0 ? CompanyId.Value : 1;
+
         public static bool IsLoggedIn => UserId > 0;
 
         public static void Clear()
@@ -53,6 +63,9 @@ namespace CarwashServices.Auth
             Email = "";
             _role = UserRole.Unknown;
             _roleId = 0;
+            CompanyId = null;
+            CompanyName = "";
+            CompanyCode = "";
         }
     }
 }

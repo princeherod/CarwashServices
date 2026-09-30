@@ -1,4 +1,4 @@
-﻿using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Data;
 using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -43,7 +43,7 @@ public class DashboardController : ControllerBase
         var users = await _db.Users.AsNoTracking().ToListAsync();
         var userById = users.ToDictionary(u => u.UserId);
 
-        var requests = await _db.ServiceRequests
+        var requests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived)
             .ToListAsync();
@@ -91,7 +91,7 @@ public class DashboardController : ControllerBase
             .ToList();
 
         // ---- Follow-Up Queue with ids ----
-        var followUps = await _db.FollowUps
+        var followUps = await tenant.FollowUps
             .AsNoTracking()
             .Where(f => !f.IsArchived)
             .ToListAsync();

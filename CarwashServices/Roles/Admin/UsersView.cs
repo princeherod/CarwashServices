@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -55,11 +55,11 @@ namespace CarwashServices.Roles.Admin
         private const int GridTop = 280;
         private const int PageBottom = 24;
 
-        // Aligned with Auth/UserRole.cs: 3 = Manager, 4 = Service Staff.
+        // Aligned with Auth/UserRole.cs: 2 = Manager, 3 = Service Staff.
         private static readonly Dictionary<int, string> RoleNames = new()
         {
-            { 3, "Manager" },
-            { 4, "Service Staff" }
+            { 2, "Manager" },
+            { 3, "Service Staff" }
         };
 
         public UsersView()
@@ -276,7 +276,8 @@ namespace CarwashServices.Roles.Admin
                 Cursor = Cursors.WaitCursor;
                 _newUserBtn.Enabled = false;
 
-                var list = await _http.GetFromJsonAsync<List<UserListItemDto>>("api/users")
+                var list = await _http.GetFromJsonAsync<List<UserListItemDto>>(
+                    $"api/users?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}")
                            ?? new List<UserListItemDto>();
                 _all = list;
                 ApplyFilter();

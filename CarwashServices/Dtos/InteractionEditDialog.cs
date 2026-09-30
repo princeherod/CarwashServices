@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -304,7 +304,7 @@ namespace CarwashServices.Dialogs
             try
             {
                 var row = await Http.GetFromJsonAsync<CustomerInteractionDto>(
-                    $"api/tenant/1/customer-interactions/{id}");
+                    $"api/tenant/{CarwashServices.Auth.SessionUser.CurrentCompanyId}/customer-interactions/{id}");
 
                 if (row == null) return;
 
@@ -354,17 +354,18 @@ namespace CarwashServices.Dialogs
             {
                 HttpResponseMessage resp;
 
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 if (_interactionId.HasValue)
                 {
                     // Edit — only the fields sent are updated on the server.
                     resp = await Http.PutAsJsonAsync(
-                        $"api/tenant/1/customer-interactions/{_interactionId.Value}",
+                        $"api/tenant/{companyId}/customer-interactions/{_interactionId.Value}",
                         dto);
                 }
                 else
                 {
                     resp = await Http.PostAsJsonAsync(
-                        "api/tenant/1/customer-interactions",
+                        $"api/tenant/{companyId}/customer-interactions",
                         new
                         {
                             customerId = dto.customerId,

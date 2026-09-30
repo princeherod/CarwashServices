@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -376,7 +376,7 @@ namespace CarwashServices.Controls.Reports
                 var displayRange = range ?? "This Year";
                 var r = displayRange.Replace(" ", "");
                 var data = await _http.GetFromJsonAsync<CustomerActivityReportDto>(
-                    $"api/reports/customer-activity?companyId=1&range={Uri.EscapeDataString(r)}")
+                    $"api/reports/customer-activity?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}&range={Uri.EscapeDataString(r)}")
                     ?? new CustomerActivityReportDto();
                 _data = data;
 

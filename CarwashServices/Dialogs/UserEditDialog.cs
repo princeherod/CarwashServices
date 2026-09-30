@@ -30,11 +30,11 @@ namespace CarwashServices.Dialogs
         private const int X2b = PadX + W2 + Gap;
 
         // Only these two roles may be assigned from the Manage Users screen.
-        // Aligned with Auth/UserRole.cs: 3 = Manager, 4 = Service Staff.
+        // Aligned with Auth/UserRole.cs: 2 = Manager, 3 = Service Staff.
         private static readonly (int Id, string Name)[] AllowedRoles =
         {
-            (3, "Manager"),
-            (4, "Service Staff"),
+            (2, "Manager"),
+            (3, "Service Staff"),
         };
 
         // ---- State ----
@@ -66,6 +66,11 @@ namespace CarwashServices.Dialogs
         {
             _userId = userId;
             _isEdit = userId.HasValue;
+            if (CarwashServices.Auth.SessionUser.IsLoggedIn)
+            {
+                _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Current-User-Id", CarwashServices.Auth.SessionUser.UserId.ToString());
+                _http.DefaultRequestHeaders.TryAddWithoutValidation("X-User-Id", CarwashServices.Auth.SessionUser.UserId.ToString());
+            }
             InitializeForm();
 
             if (_isEdit)
@@ -463,7 +468,8 @@ namespace CarwashServices.Dialogs
                             email = _emailTxt.Text.Trim(),
                             roleId = role.Id,
                             status,
-                            password
+                            password,
+                            companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId
                         };
 
                     resp = await _http.PutAsJsonAsync($"api/users/{_userId!.Value}", body);
@@ -478,7 +484,8 @@ namespace CarwashServices.Dialogs
                         email = _emailTxt.Text.Trim(),
                         roleId = role.Id,
                         status,
-                        password
+                        password,
+                        companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId
                     };
                     resp = await _http.PostAsJsonAsync("api/users", body);
                 }

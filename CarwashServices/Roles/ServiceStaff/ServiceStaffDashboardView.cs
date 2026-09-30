@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -818,7 +818,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 Cursor = Cursors.WaitCursor;
 
                 var resp = await _http.GetFromJsonAsync<StaffDashboardResponse>(
-                    $"api/dashboard/staff?companyId=1&staffId={staffId}");
+                    $"api/dashboard/staff?companyId={SessionUser.CurrentCompanyId}&staffId={staffId}");
 
                 if (resp is null) return;
 

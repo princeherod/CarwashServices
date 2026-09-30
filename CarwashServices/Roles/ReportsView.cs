@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -25,7 +25,7 @@ namespace CarwashServices.Roles
     public class ReportsView : UserControl
     {
         public static string ApiBaseUrl { get; set; } = "http://localhost:5180/";
-        public static int CompanyId { get; set; } = 1;
+        public static int CompanyId => CarwashServices.Auth.SessionUser.CurrentCompanyId;
 
         private readonly HttpClient _http;
         private readonly CancellationTokenSource _cts = new();

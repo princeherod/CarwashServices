@@ -34,6 +34,7 @@ public class AuthController : ControllerBase
         var email = req.Email.Trim().ToLowerInvariant();
 
         var user = await _db.Users
+            .Include(u => u.Company)
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Email.ToLower() == email);
 
@@ -59,7 +60,10 @@ public class AuthController : ControllerBase
             lastName = user.LastName,
             fullName = user.FullName,
             email = user.Email,
-            roleId = user.RoleId
+            roleId = user.RoleId,
+            companyId = user.CompanyId,
+            companyName = user.Company?.CompanyName ?? "",
+            companyCode = user.Company?.CompanyCode ?? ""
         });
     }
 }

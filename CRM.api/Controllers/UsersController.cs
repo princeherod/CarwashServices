@@ -17,14 +17,19 @@ public class UsersController : ControllerBase
     }
 
     // Roles allowed on the Manage Users screen.
-    // Super Admin (1) and Admin (2) are intentionally excluded.
-    private static readonly int[] AllowedRoleIds = { 3, 4 };   // 3=Service Staff, 4=Manager
+    // Super Admin (4) and Admin (1) are intentionally excluded.
+    private static readonly int[] AllowedRoleIds = { 2, 3 };   // 2=Manager, 3=Service Staff
 
-    // GET: api/users?roleIds=1,4
+    // GET: api/users?roleIds=2,3&companyId=1
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] string? roleIds = null)
+    public async Task<IActionResult> GetAll([FromQuery] string? roleIds = null, [FromQuery] int? companyId = null)
     {
         IQueryable<User> query = _db.Users.AsNoTracking();
+
+        if (companyId.HasValue && companyId.Value > 0)
+        {
+            query = query.Where(u => u.CompanyId == companyId.Value || u.CompanyId == null);
+        }
 
         if (!string.IsNullOrWhiteSpace(roleIds))
         {
@@ -56,7 +61,8 @@ public class UsersController : ControllerBase
                 u.RoleId,
                 u.Email,
                 u.Status,
-                u.CreatedAt
+                u.CreatedAt,
+                u.CompanyId
             })
             .ToListAsync();
 
@@ -83,7 +89,8 @@ public class UsersController : ControllerBase
             row.RoleId,
             row.Email,
             row.Status,
-            row.CreatedAt
+            row.CreatedAt,
+            row.CompanyId
         });
     }
 
@@ -96,6 +103,8 @@ public class UsersController : ControllerBase
         public int RoleId { get; set; }
         public string Status { get; set; } = "Active";
         public string? Password { get; set; }
+        public int? CompanyId { get; set; }
+        public int? CurrentUserId { get; set; }
     }
 
     // POST: api/users
@@ -147,6 +156,7 @@ public class UsersController : ControllerBase
             LastName = last,
             Email = req.Email.Trim(),
             RoleId = req.RoleId,
+            CompanyId = req.CompanyId,
             Status = string.IsNullOrWhiteSpace(req.Status) ? "Active" : req.Status,
             PasswordHash = req.Password ?? string.Empty,   // never null in the DB
             IdentityUserId = string.Empty,                 // never null in the DB
@@ -188,7 +198,8 @@ public class UsersController : ControllerBase
             user.RoleId,
             user.Email,
             user.Status,
-            user.CreatedAt
+            user.CreatedAt,
+            user.CompanyId
         });
     }
 
@@ -201,6 +212,8 @@ public class UsersController : ControllerBase
         public int RoleId { get; set; }
         public string Status { get; set; } = "Active";
         public string? Password { get; set; }   // blank = keep existing
+        public int? CompanyId { get; set; }
+        public int? CurrentUserId { get; set; }
     }
 
     // PUT: api/users/5
@@ -210,6 +223,52 @@ public class UsersController : ControllerBase
         var existing = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id);
         if (existing is null)
             return NotFound(new { message = $"User {id} not found." });
+
+        // Resolve caller user ID from headers, request body, or query string
+        int currentUserId = 0;
+        if (Request.Headers.TryGetValue("X-Current-User-Id", out var hVal) && int.TryParse(hVal, out var uid) && uid > 0)
+        {
+            currentUserId = uid;
+        }
+        else if (Request.Headers.TryGetValue("X-User-Id", out var hVal2) && int.TryParse(hVal2, out var uid2) && uid2 > 0)
+        {
+            currentUserId = uid2;
+        }
+        else if (req.CurrentUserId.HasValue && req.CurrentUserId.Value > 0)
+        {
+            currentUserId = req.CurrentUserId.Value;
+        }
+        else if (Request.Query.TryGetValue("currentUserId", out var qVal) && int.TryParse(qVal, out var qUid) && qUid > 0)
+        {
+            currentUserId = qUid;
+        }
+
+        bool isSelfEdit = (currentUserId > 0 && currentUserId == id);
+        bool isSuperAdminSelfEdit = isSelfEdit && existing.RoleId == 4;
+
+        if (isSuperAdminSelfEdit)
+        {
+            // Requirement 2: RoleId must remain Super Admin (4). User must not change their own role.
+            if (req.RoleId != 4 && req.RoleId != 0)
+            {
+                return BadRequest(new { message = "You cannot change your own Super Admin role." });
+            }
+            req.RoleId = 4;
+
+            // Requirement 3: Super Admin must NOT be able to change their own email. Existing email remains unchanged.
+            if (!string.IsNullOrWhiteSpace(req.Email) && !string.Equals(req.Email.Trim(), existing.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "You cannot change your own email address." });
+            }
+            req.Email = existing.Email;
+
+            // Requirement 4: Super Admin must NOT be able to change their own account status.
+            if (!string.IsNullOrWhiteSpace(req.Status) && !string.Equals(req.Status.Trim(), existing.Status, StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "You cannot change your own account status." });
+            }
+            req.Status = existing.Status;
+        }
 
         var first = req.FirstName?.Trim();
         var last = req.LastName?.Trim();
@@ -249,9 +308,11 @@ public class UsersController : ControllerBase
 
         existing.FirstName = first;
         existing.LastName = last;
-        existing.Email = req.Email.Trim();
-        existing.RoleId = req.RoleId;
-        existing.Status = string.IsNullOrWhiteSpace(req.Status) ? "Active" : req.Status;
+        existing.Email = isSuperAdminSelfEdit ? existing.Email : req.Email.Trim();
+        existing.RoleId = isSuperAdminSelfEdit ? 4 : req.RoleId;
+        existing.Status = isSuperAdminSelfEdit ? existing.Status : (string.IsNullOrWhiteSpace(req.Status) ? "Active" : req.Status);
+        if (req.CompanyId.HasValue && !isSuperAdminSelfEdit)
+            existing.CompanyId = req.CompanyId.Value;
 
         // Only replace the password if the caller actually sent a non-empty one.
         if (!string.IsNullOrEmpty(req.Password))
@@ -284,7 +345,8 @@ public class UsersController : ControllerBase
             existing.RoleId,
             existing.Email,
             existing.Status,
-            existing.CreatedAt
+            existing.CreatedAt,
+            existing.CompanyId
         });
     }
 
@@ -295,6 +357,26 @@ public class UsersController : ControllerBase
         var row = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id);
         if (row is null)
             return NotFound(new { message = $"User {id} not found." });
+
+        // Resolve caller user ID
+        int currentUserId = 0;
+        if (Request.Headers.TryGetValue("X-Current-User-Id", out var hVal) && int.TryParse(hVal, out var uid) && uid > 0)
+        {
+            currentUserId = uid;
+        }
+        else if (Request.Headers.TryGetValue("X-User-Id", out var hVal2) && int.TryParse(hVal2, out var uid2) && uid2 > 0)
+        {
+            currentUserId = uid2;
+        }
+        else if (Request.Query.TryGetValue("currentUserId", out var qVal) && int.TryParse(qVal, out var qUid) && qUid > 0)
+        {
+            currentUserId = qUid;
+        }
+
+        if (currentUserId > 0 && currentUserId == id && row.RoleId == 4)
+        {
+            return BadRequest(new { message = "Super Admin cannot delete their own account." });
+        }
 
         _db.Users.Remove(row);
 

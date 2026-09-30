@@ -56,10 +56,25 @@ namespace CarwashServices.Roles.SuperAdmin
         private ComboBox _statusFilterCombo = null!;
         private Button _registerBtn = null!;
 
+        // Layout controls
+        private Panel _totalCard = null!;
+        private Panel _activeCard = null!;
+        private Panel _inactiveCard = null!;
+        private Panel _filterBar = null!;
+        private Button _refreshBtn = null!;
+
         // KPI labels
         private Label _kpiTotalNum = null!;
         private Label _kpiActiveNum = null!;
         private Label _kpiInactiveNum = null!;
+
+        private const int PadX = 36;
+        private const int KpiY = 82;
+        private const int KpiH = 80;
+        private const int FilterY = 176;
+        private const int FilterH = 44;
+        private const int GridY = 232;
+        private const int Gap = 16;
 
         public ManageBusinessesView()
         {
@@ -99,8 +114,7 @@ namespace CarwashServices.Roles.SuperAdmin
             {
                 Dock = DockStyle.Fill,
                 BackColor = PageBg,
-                AutoScroll = true,
-                Padding = new Padding(36, 24, 36, 24)
+                AutoScroll = false
             };
             Controls.Add(_contentPanel);
 
@@ -110,7 +124,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 Text = "Tenant Businesses",
                 Font = FontTitle,
                 ForeColor = Navy,
-                Location = new Point(36, 20),
+                Location = new Point(PadX, 20),
                 AutoSize = true
             };
             var subtitleLbl = new Label
@@ -118,7 +132,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 Text = "Onboard new businesses, configure tenant details, and manage platform access.",
                 Font = FontSubtitle,
                 ForeColor = Muted,
-                Location = new Point(36, 48),
+                Location = new Point(PadX, 48),
                 AutoSize = true
             };
             _contentPanel.Controls.Add(titleLbl);
@@ -130,9 +144,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 Font = new Font("Segoe UI Semibold", 9.5f),
                 ForeColor = Color.White,
                 BackColor = Blue,
-                Size = new Size(195, 38),
-                Location = new Point(_contentPanel.Width - 195 - 36, 26),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Size = new Size(205, 38),
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand
             };
@@ -144,33 +156,27 @@ namespace CarwashServices.Roles.SuperAdmin
             _contentPanel.Controls.Add(_registerBtn);
 
             // ---- KPI Cards Row ----
-            int kpiY = 82;
-            int cardW = 210;
-            int cardH = 80;
+            _totalCard = CreateKpiCard("TOTAL BUSINESSES", out _kpiTotalNum, Navy);
+            _activeCard = CreateKpiCard("ACTIVE TENANTS", out _kpiActiveNum, Green);
+            _inactiveCard = CreateKpiCard("INACTIVE TENANTS", out _kpiInactiveNum, Red);
 
-            var totalCard = CreateKpiCard("TOTAL BUSINESSES", out _kpiTotalNum, 36, kpiY, cardW, cardH, Navy);
-            var activeCard = CreateKpiCard("ACTIVE TENANTS", out _kpiActiveNum, 36 + cardW + 16, kpiY, cardW, cardH, Green);
-            var inactiveCard = CreateKpiCard("INACTIVE TENANTS", out _kpiInactiveNum, 36 + (cardW + 16) * 2, kpiY, cardW, cardH, Red);
-
-            _contentPanel.Controls.Add(totalCard);
-            _contentPanel.Controls.Add(activeCard);
-            _contentPanel.Controls.Add(inactiveCard);
+            _contentPanel.Controls.Add(_totalCard);
+            _contentPanel.Controls.Add(_activeCard);
+            _contentPanel.Controls.Add(_inactiveCard);
 
             // ---- Filter & Search Bar ----
-            int barY = 176;
-            var filterBar = new Panel
+            _filterBar = new Panel
             {
-                Location = new Point(36, barY),
-                Size = new Size(_contentPanel.Width - 72, 44),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 BackColor = Color.White
             };
-            filterBar.Paint += (s, e) =>
+            _filterBar.Paint += (s, e) =>
             {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using var pen = new Pen(CardBorder, 1);
-                using var p = RoundedRect(new Rectangle(0, 0, filterBar.Width - 1, filterBar.Height - 1), 8);
+                using var p = RoundedRect(new Rectangle(0, 0, _filterBar.Width - 1, _filterBar.Height - 1), 8);
                 e.Graphics.DrawPath(pen, p);
             };
+            _filterBar.Resize += (s, e) => _filterBar.Invalidate();
 
             var searchIcon = new Label
             {
@@ -180,7 +186,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 AutoSize = true,
                 ForeColor = Muted
             };
-            filterBar.Controls.Add(searchIcon);
+            _filterBar.Controls.Add(searchIcon);
 
             _searchTxt = new TextBox
             {
@@ -191,7 +197,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 ForeColor = Navy
             };
             _searchTxt.TextChanged += (s, e) => ApplyFilter();
-            filterBar.Controls.Add(_searchTxt);
+            _filterBar.Controls.Add(_searchTxt);
 
             var filterLbl = new Label
             {
@@ -201,7 +207,7 @@ namespace CarwashServices.Roles.SuperAdmin
                 Location = new Point(320, 12),
                 AutoSize = true
             };
-            filterBar.Controls.Add(filterLbl);
+            _filterBar.Controls.Add(filterLbl);
 
             _statusFilterCombo = new ComboBox
             {
@@ -213,33 +219,27 @@ namespace CarwashServices.Roles.SuperAdmin
             _statusFilterCombo.Items.AddRange(new object[] { "All Statuses", "Active", "Inactive" });
             _statusFilterCombo.SelectedIndex = 0;
             _statusFilterCombo.SelectedIndexChanged += (s, e) => ApplyFilter();
-            filterBar.Controls.Add(_statusFilterCombo);
+            _filterBar.Controls.Add(_statusFilterCombo);
 
-            var refreshBtn = new Button
+            _refreshBtn = new Button
             {
                 Text = "Refresh",
                 Font = new Font("Segoe UI Semibold", 8.5f),
                 ForeColor = Navy,
                 BackColor = Color.FromArgb(0xF1, 0xF5, 0xF9),
                 Size = new Size(76, 28),
-                Location = new Point(filterBar.Width - 88, 8),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand
             };
-            refreshBtn.FlatAppearance.BorderColor = CardBorder;
-            refreshBtn.Click += async (s, e) => await LoadCompaniesAsync();
-            filterBar.Controls.Add(refreshBtn);
+            _refreshBtn.FlatAppearance.BorderColor = CardBorder;
+            _refreshBtn.Click += async (s, e) => await LoadCompaniesAsync();
+            _filterBar.Controls.Add(_refreshBtn);
 
-            _contentPanel.Controls.Add(filterBar);
+            _contentPanel.Controls.Add(_filterBar);
 
             // ---- DataGridView ----
-            int gridY = 232;
             _grid = new DataGridView
             {
-                Location = new Point(36, gridY),
-                Size = new Size(_contentPanel.Width - 72, _contentPanel.Height - gridY - 24),
-                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 BackgroundColor = Color.White,
                 BorderStyle = BorderStyle.None,
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
@@ -252,7 +252,8 @@ namespace CarwashServices.Roles.SuperAdmin
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
                 RowTemplate = { Height = 52 },
-                EnableHeadersVisualStyles = false
+                EnableHeadersVisualStyles = false,
+                ScrollBars = ScrollBars.Both
             };
 
             _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
@@ -276,28 +277,70 @@ namespace CarwashServices.Roles.SuperAdmin
                 Padding = new Padding(12, 0, 0, 0)
             };
 
-            _grid.ScrollBars = ScrollBars.Both;
-
-            // Columns (ID, Code, Name, Contact, Location, Associated Admin, Status, Registered, Actions)
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "CompanyId", HeaderText = "ID", Width = 65 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "CompanyCode", HeaderText = "CODE", Width = 90 });
+            // Columns (ID, Code, Business Name, Contact, Location, Associated Admin, Status, Registered Date, Actions)
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "CompanyId",
+                HeaderText = "ID",
+                Width = 55,
+                MinimumWidth = 50
+            });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "CompanyCode",
+                HeaderText = "CODE",
+                Width = 85,
+                MinimumWidth = 75
+            });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "CompanyName",
                 HeaderText = "BUSINESS NAME",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 150
+                MinimumWidth = 150,
+                FillWeight = 120
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Contact", HeaderText = "CONTACT", Width = 145 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Location", HeaderText = "LOCATION", Width = 125 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "AssociatedAdmin", HeaderText = "ASSOCIATED ADMIN", Width = 175 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "STATUS", Width = 85 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "CreatedAt", HeaderText = "REGISTERED", Width = 95 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Contact",
+                HeaderText = "CONTACT",
+                Width = 150,
+                MinimumWidth = 125
+            });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Location",
+                HeaderText = "LOCATION",
+                Width = 130,
+                MinimumWidth = 110
+            });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "AssociatedAdmin",
+                HeaderText = "ASSOCIATED ADMIN",
+                Width = 185,
+                MinimumWidth = 160
+            });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Status",
+                HeaderText = "STATUS",
+                Width = 90,
+                MinimumWidth = 85
+            });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "CreatedAt",
+                HeaderText = "REGISTERED DATE",
+                Width = 125,
+                MinimumWidth = 110
+            });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Actions",
                 HeaderText = "ACTIONS",
-                Width = 195
+                Width = 220,
+                MinimumWidth = 215
             });
 
             _grid.CellPainting += Grid_CellPainting;
@@ -317,23 +360,67 @@ namespace CarwashServices.Roles.SuperAdmin
 
             _contentPanel.Controls.Add(_grid);
 
+            _contentPanel.Resize += (s, e) => Relayout();
+            Resize += (s, e) => Relayout();
+            Relayout();
+
             ResumeLayout(true);
         }
 
-        private static Panel CreateKpiCard(string title, out Label numLbl, int x, int y, int w, int h, Color numColor)
+        private void Relayout()
+        {
+            if (_contentPanel == null || _grid == null) return;
+
+            int w = _contentPanel.ClientSize.Width;
+            int h = _contentPanel.ClientSize.Height;
+            if (w <= 0 || h <= 0) return;
+
+            int totalW = Math.Max(700, w - (PadX * 2));
+
+            // Align "+ Register New Business" to top right
+            if (_registerBtn != null)
+            {
+                _registerBtn.Location = new Point(Math.Max(PadX + 350, w - _registerBtn.Width - PadX), 24);
+            }
+
+            // Distribute 3 KPI cards evenly across totalW
+            int cardW = Math.Max(180, (totalW - (Gap * 2)) / 3);
+            if (_totalCard != null && _activeCard != null && _inactiveCard != null)
+            {
+                _totalCard.SetBounds(PadX, KpiY, cardW, KpiH);
+                _activeCard.SetBounds(PadX + cardW + Gap, KpiY, cardW, KpiH);
+                _inactiveCard.SetBounds(PadX + (cardW + Gap) * 2, KpiY, cardW, KpiH);
+            }
+
+            // Filter bar spans the full content width
+            if (_filterBar != null)
+            {
+                _filterBar.SetBounds(PadX, FilterY, totalW, FilterH);
+                if (_refreshBtn != null)
+                {
+                    _refreshBtn.Location = new Point(_filterBar.Width - _refreshBtn.Width - 12, 8);
+                }
+            }
+
+            // Grid stretches horizontally and fills remaining vertical space
+            int gridH = Math.Max(180, h - GridY - 24);
+            _grid.SetBounds(PadX, GridY, totalW, gridH);
+        }
+
+        private static Panel CreateKpiCard(string title, out Label numLbl, Color numColor)
         {
             var p = new Panel
             {
-                Location = new Point(x, y),
-                Size = new Size(w, h),
                 BackColor = Color.White
             };
             p.Paint += (s, e) =>
             {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using var pen = new Pen(CardBorder, 1);
                 using var path = RoundedRect(new Rectangle(0, 0, p.Width - 1, p.Height - 1), 8);
                 e.Graphics.DrawPath(pen, path);
             };
+            p.Resize += (s, e) => p.Invalidate();
 
             var titleL = new Label
             {

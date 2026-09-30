@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -540,10 +540,11 @@ namespace CarwashServices.Roles
         {
             try
             {
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 if (segment == "AtRisk" || segment == "Active" || segment == "Lost")
                 {
                     var rows = await _http.GetFromJsonAsync<List<SegmentCustomerDto>>(
-                        $"api/analytics/segment-customers?companyId=1&segment={Uri.EscapeDataString(segment)}")
+                        $"api/analytics/segment-customers?companyId={companyId}&segment={Uri.EscapeDataString(segment)}")
                         ?? new List<SegmentCustomerDto>();
 
                     _drillDownCustomerIds = rows.Select(r => r.CustomerId).ToHashSet();
@@ -553,9 +554,9 @@ namespace CarwashServices.Roles
                 {
                     // Same tier classifier the Wash Frequency chart uses.
                     var customers = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                        "api/tenant/1/tenant-customers") ?? new List<TenantCustomerDto>();
+                        $"api/tenant/{companyId}/tenant-customers") ?? new List<TenantCustomerDto>();
                     var requests = await _http.GetFromJsonAsync<List<ServiceRequestDto>>(
-                        "api/service-requests") ?? new List<ServiceRequestDto>();
+                        $"api/service-requests?companyId={companyId}") ?? new List<ServiceRequestDto>();
 
                     var ids = new HashSet<int>();
                     foreach (var c in customers)
@@ -578,9 +579,9 @@ namespace CarwashServices.Roles
                 {
                     // Returning = 2+ completed visits ever.
                     var customers = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                        "api/tenant/1/tenant-customers") ?? new List<TenantCustomerDto>();
+                        $"api/tenant/{companyId}/tenant-customers") ?? new List<TenantCustomerDto>();
                     var requests = await _http.GetFromJsonAsync<List<ServiceRequestDto>>(
-                        "api/service-requests") ?? new List<ServiceRequestDto>();
+                        $"api/service-requests?companyId={companyId}") ?? new List<ServiceRequestDto>();
 
                     var ids = new HashSet<int>();
                     foreach (var c in customers)
@@ -613,16 +614,17 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
 
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 if (_tab == ListTab.Active)
                 {
                     var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                        "api/tenant/1/tenant-customers");
+                        $"api/tenant/{companyId}/tenant-customers");
                     _allCustomers = list ?? new List<TenantCustomerDto>();
                 }
                 else
                 {
                     var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                        "api/tenant/1/tenant-customers/archived");
+                        $"api/tenant/{companyId}/tenant-customers/archived");
                     _archivedCustomers = list ?? new List<TenantCustomerDto>();
                 }
 
@@ -1058,7 +1060,7 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
                 var resp = await _http.PutAsJsonAsync(
-                    $"api/tenant/1/tenant-customers/{c.TenantCustomerId}/archive",
+                    $"api/tenant/{CarwashServices.Auth.SessionUser.CurrentCompanyId}/tenant-customers/{c.TenantCustomerId}/archive",
                     new { archivedBy = CurrentUserName });
 
                 if (!resp.IsSuccessStatusCode)
@@ -1087,7 +1089,7 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
                 var resp = await _http.PutAsync(
-                    $"api/tenant/1/tenant-customers/{c.TenantCustomerId}/restore", null);
+                    $"api/tenant/{CarwashServices.Auth.SessionUser.CurrentCompanyId}/tenant-customers/{c.TenantCustomerId}/restore", null);
 
                 if (!resp.IsSuccessStatusCode)
                 {
@@ -1487,7 +1489,7 @@ namespace CarwashServices.Roles
                 try
                 {
                     items = await _http.GetFromJsonAsync<List<CustomerInteractionDto>>(
-                        $"api/tenant/1/customer-interactions?customerId={c.TenantCustomerId}")
+                        $"api/tenant/{CarwashServices.Auth.SessionUser.CurrentCompanyId}/customer-interactions?customerId={c.TenantCustomerId}")
                         ?? new List<CustomerInteractionDto>();
                 }
                 catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)

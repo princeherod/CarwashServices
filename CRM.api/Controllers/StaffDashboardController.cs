@@ -1,4 +1,4 @@
-﻿using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Data;
 using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -62,7 +62,7 @@ public class StaffDashboardController : ControllerBase
         var userById = users.ToDictionary(u => u.UserId);
 
         // ---- Every request assigned to this staff member ----
-        var myRequests = await _db.ServiceRequests
+        var myRequests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived && r.AssignedStaffId == staffId)
             .OrderByDescending(r => r.RequestId)
@@ -123,7 +123,7 @@ public class StaffDashboardController : ControllerBase
         // currently assigned to this staff member.
         var myRequestIds = myRequests.Select(r => r.RequestId).ToHashSet();
 
-        var recentLogsRaw = await _db.ServiceStatusLogs
+        var recentLogsRaw = await tenant.ServiceStatusLogs
             .AsNoTracking()
             .Where(l => myRequestIds.Contains(l.RequestId))
             .OrderByDescending(l => l.LogId)
@@ -164,7 +164,7 @@ public class StaffDashboardController : ControllerBase
         // in the dashboard depends on those numbers.
         var myCustomersIds = myRequests.Select(r => r.CustomerId).Distinct().ToHashSet();
 
-        var myFollowUps = await _db.FollowUps
+        var myFollowUps = await tenant.FollowUps
             .AsNoTracking()
             .Where(f => !f.IsArchived && myCustomersIds.Contains(f.CustomerId))
             .ToListAsync();

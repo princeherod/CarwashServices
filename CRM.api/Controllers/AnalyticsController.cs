@@ -1,4 +1,4 @@
-﻿using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Data;
 using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -36,7 +36,7 @@ public class AnalyticsController : ControllerBase
         var totalCustomers = customers.Count;
 
         // Only active service requests count.
-        var requests = await _db.ServiceRequests
+        var requests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived)
             .ToListAsync();
@@ -109,7 +109,7 @@ public class AnalyticsController : ControllerBase
             .Where(c => !c.IsArchived)
             .ToListAsync();
 
-        var requests = await _db.ServiceRequests
+        var requests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived)
             .ToListAsync();
@@ -156,7 +156,7 @@ public class AnalyticsController : ControllerBase
             .Where(c => !c.IsArchived)
             .ToListAsync();
 
-        var requests = await _db.ServiceRequests
+        var requests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived)
             .ToListAsync();
@@ -197,7 +197,7 @@ public class AnalyticsController : ControllerBase
             .Where(c => !c.IsArchived)
             .ToListAsync();
 
-        var requests = await _db.ServiceRequests
+        var requests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived)
             .ToListAsync();
@@ -210,7 +210,7 @@ public class AnalyticsController : ControllerBase
         {
             var ids = rows.Select(r => r.CustomerId).ToHashSet();
 
-            var latestFollowUps = await _db.FollowUps
+            var latestFollowUps = await tenant.FollowUps
                 .AsNoTracking()
                 .Where(f => ids.Contains(f.CustomerId) && !f.IsArchived)
                 .GroupBy(f => f.CustomerId)
@@ -261,7 +261,7 @@ public class AnalyticsController : ControllerBase
             .ToDictionary(g => g.Key, g => g.First().UnitPrice);
 
         // Only non-archived completed requests whose service is still active.
-        var requests = await _db.ServiceRequests
+        var requests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived
                      && r.Status == "Completed"
@@ -309,9 +309,10 @@ public class AnalyticsController : ControllerBase
 
     // GET: api/analytics/recent
     [HttpGet("recent")]
-    public async Task<IActionResult> GetRecent()
+    public async Task<IActionResult> GetRecent([FromQuery] int companyId = 1)
     {
-        var list = await _db.ServiceRequests
+        var tenant = await _tenantFactory.CreateAsync(companyId);
+        var list = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived)
             .OrderByDescending(r => r.RequestId)
@@ -351,7 +352,7 @@ public class AnalyticsController : ControllerBase
             .ToListAsync();
 
         // Only completed, non-archived service requests inside the period.
-        var completed = await _db.ServiceRequests
+        var completed = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived
                      && r.Status == "Completed"

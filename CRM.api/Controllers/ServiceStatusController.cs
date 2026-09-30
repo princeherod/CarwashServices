@@ -1,4 +1,4 @@
-﻿using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Data;
 using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -41,7 +41,7 @@ public class ServiceStatusController : ControllerBase
             .AsNoTracking()
             .ToListAsync();
 
-        var requests = await _db.ServiceRequests
+        var requests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived)
             .OrderByDescending(r => r.RequestId)
@@ -50,7 +50,7 @@ public class ServiceStatusController : ControllerBase
         var requestIds = requests.Select(r => r.RequestId).ToHashSet();
 
         // One query for all logs — used by BOTH panels.
-        var allLogs = await _db.ServiceStatusLogs
+        var allLogs = await tenant.ServiceStatusLogs
             .AsNoTracking()
             .Where(l => requestIds.Contains(l.RequestId))
             .OrderByDescending(l => l.LogId)

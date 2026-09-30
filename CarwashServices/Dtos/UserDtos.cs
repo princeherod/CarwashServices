@@ -16,6 +16,7 @@ namespace CarwashServices.Dtos
         public string LastName { get; set; } = "";
         public string FullName { get; set; } = "";
         public int RoleId { get; set; }
+        public int? CompanyId { get; set; }
     }
 
     public class AuthUserDto
@@ -26,6 +27,9 @@ namespace CarwashServices.Dtos
         public string FullName { get; set; } = "";
         public string Email { get; set; } = "";
         public int RoleId { get; set; }
+        public int? CompanyId { get; set; }
+        public string? CompanyName { get; set; }
+        public string? CompanyCode { get; set; }
     }
 
     public class UserListItemDto
@@ -38,6 +42,7 @@ namespace CarwashServices.Dtos
         public string Email { get; set; } = "";
         public string Status { get; set; } = "Active";
         public DateTime CreatedAt { get; set; }
+        public int? CompanyId { get; set; }
     }
 
     public class UserDetailDto : UserListItemDto

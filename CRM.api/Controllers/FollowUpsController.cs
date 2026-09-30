@@ -1,4 +1,4 @@
-﻿using CRM.Domain.Entities;
+using CRM.Domain.Entities;
 using CRM.domain.Entities;
 using CRM.Infrastructure.Data;
 using CRM.Infrastructure.Services;
@@ -12,6 +12,7 @@ namespace CRM.api.Controllers;
 
 [ApiController]
 [Route("api/follow-ups")]
+[Route("api/tenant/{companyId}/follow-ups")]
 public class FollowUpsController : ControllerBase
 {
     private readonly MasterErpDbContext _db;
@@ -31,8 +32,7 @@ public class FollowUpsController : ControllerBase
         _smtpOptions = smtpOptions;
     }
 
-    private const int DefaultCompanyId = 1;
-    private const int RoleServiceStaff = 4;
+    private const int RoleServiceStaff = 3;
 
     private static readonly string[] AllowedStatuses =
     {
@@ -48,15 +48,35 @@ public class FollowUpsController : ControllerBase
         }
     }
 
+    private int ResolveCompanyId(int? companyId = null)
+    {
+        if (companyId.HasValue && companyId.Value > 0)
+            return companyId.Value;
+
+        if (Request.Query.TryGetValue("companyId", out var qVal) &&
+            int.TryParse(qVal.FirstOrDefault(), out var qId) && qId > 0)
+            return qId;
+
+        if (RouteData.Values.TryGetValue("companyId", out var rVal) &&
+            int.TryParse(rVal?.ToString(), out var rId) && rId > 0)
+            return rId;
+
+        if (Request.Headers.TryGetValue("X-Company-Id", out var hVal) &&
+            int.TryParse(hVal.FirstOrDefault(), out var hId) && hId > 0)
+            return hId;
+
+        return 1;
+    }
+
     // ================================================================
     //  AUTO-EXPIRE / AUTO-SEND
     // ================================================================
-    private async Task<int> AutoExpireAsync()
+    private async Task<int> AutoExpireAsync(TenantErpDbContext tenant)
     {
         var today = DateTime.Today;
         var now = DateTime.Now;
 
-        var toExpire = await _db.FollowUps
+        var toExpire = await tenant.FollowUps
             .Where(f => !f.IsArchived
                      && f.Status != "Draft"
                      && f.Status != "Redeemed"
@@ -70,7 +90,7 @@ public class FollowUpsController : ControllerBase
         foreach (var f in toExpire)
             f.Status = "Expired";
 
-        var toSend = await _db.FollowUps
+        var toSend = await tenant.FollowUps
             .Where(f => !f.IsArchived
                      && f.Status == "Scheduled"
                      && f.ApprovalStatus != "Pending"
@@ -81,8 +101,6 @@ public class FollowUpsController : ControllerBase
         int sentCount = 0;
         if (toSend.Count > 0)
         {
-            await using var tenant = await _tenantFactory.CreateAsync(DefaultCompanyId);
-
             foreach (var f in toSend)
             {
                 var customer = await tenant.TenantCustomers
@@ -116,7 +134,7 @@ public class FollowUpsController : ControllerBase
         }
 
         int changed = toExpire.Count + sentCount;
-        if (changed > 0) await _db.SaveChangesAsync();
+        if (changed > 0) await tenant.SaveChangesAsync();
         return changed;
     }
 
@@ -124,11 +142,13 @@ public class FollowUpsController : ControllerBase
     //  LISTS
     // ================================================================
     [HttpGet]
-    public async Task<IActionResult> GetAll()
+    public async Task<IActionResult> GetAll([FromQuery] int? companyId = null)
     {
-        await AutoExpireAsync();
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+        await AutoExpireAsync(tenant);
 
-        var list = await _db.FollowUps
+        var list = await tenant.FollowUps
             .AsNoTracking()
             .Where(f => !f.IsArchived)
             .OrderByDescending(f => f.FollowUpId)
@@ -137,13 +157,15 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpGet("mine")]
-    public async Task<IActionResult> GetMine([FromQuery] int staffId)
+    public async Task<IActionResult> GetMine([FromQuery] int staffId, [FromQuery] int? companyId = null)
     {
         if (staffId <= 0) return BadRequest(new { message = "staffId is required." });
 
-        await AutoExpireAsync();
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+        await AutoExpireAsync(tenant);
 
-        var list = await _db.FollowUps
+        var list = await tenant.FollowUps
             .AsNoTracking()
             .Where(f => !f.IsArchived && f.CreatedBy == staffId)
             .OrderByDescending(f => f.FollowUpId)
@@ -152,9 +174,12 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpGet("pending-approval")]
-    public async Task<IActionResult> GetPendingApproval()
+    public async Task<IActionResult> GetPendingApproval([FromQuery] int? companyId = null)
     {
-        var list = await _db.FollowUps
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var list = await tenant.FollowUps
             .AsNoTracking()
             .Where(f => !f.IsArchived && f.ApprovalStatus == "Pending")
             .OrderBy(f => f.CreatedAt)
@@ -164,11 +189,14 @@ public class FollowUpsController : ControllerBase
 
     [HttpGet("my-customers")]
     public async Task<IActionResult> GetMyCustomers([FromQuery] int staffId,
-                                                    [FromQuery] int companyId = 1)
+                                                    [FromQuery] int? companyId = null)
     {
         if (staffId <= 0) return BadRequest(new { message = "staffId is required." });
 
-        var myCustomerIds = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var myCustomerIds = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived && r.AssignedStaffId == staffId)
             .Select(r => r.CustomerId)
@@ -176,8 +204,6 @@ public class FollowUpsController : ControllerBase
             .ToListAsync();
 
         if (myCustomerIds.Count == 0) return Ok(Array.Empty<object>());
-
-        await using var tenant = await _tenantFactory.CreateAsync(companyId);
 
         var customers = await tenant.TenantCustomers
             .AsNoTracking()
@@ -188,10 +214,42 @@ public class FollowUpsController : ControllerBase
         return Ok(customers);
     }
 
-    [HttpGet("archived")]
-    public async Task<IActionResult> GetArchived()
+    [HttpGet("customers")]
+    public async Task<IActionResult> GetCustomers([FromQuery] int? companyId = null)
     {
-        var list = await _db.FollowUps
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var customers = await tenant.TenantCustomers
+            .AsNoTracking()
+            .Where(c => !c.IsArchived)
+            .OrderBy(c => c.CustomerName)
+            .Select(c => new
+            {
+                c.TenantCustomerId,
+                c.CustomerCode,
+                CustomerName = c.CustomerName ?? (c.FirstName + " " + c.LastName).Trim(),
+                c.ContactNumber,
+                c.EmailAddress,
+                c.PlateNumber,
+                c.VehicleMake,
+                c.VehicleModel,
+                c.VehicleColor,
+                c.VehicleType,
+                c.Source
+            })
+            .ToListAsync();
+
+        return Ok(customers);
+    }
+
+    [HttpGet("archived")]
+    public async Task<IActionResult> GetArchived([FromQuery] int? companyId = null)
+    {
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var list = await tenant.FollowUps
             .AsNoTracking()
             .Where(f => f.IsArchived)
             .OrderByDescending(f => f.ArchivedAt)
@@ -200,12 +258,14 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpGet("due-today")]
-    public async Task<IActionResult> GetDueToday()
+    public async Task<IActionResult> GetDueToday([FromQuery] int? companyId = null)
     {
-        await AutoExpireAsync();
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+        await AutoExpireAsync(tenant);
         var today = DateTime.Today;
 
-        var list = await _db.FollowUps
+        var list = await tenant.FollowUps
             .AsNoTracking()
             .Where(f => !f.IsArchived
                      && f.Status == "Scheduled"
@@ -217,21 +277,26 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpGet("{id:int}")]
-    public async Task<IActionResult> GetById(int id)
+    public async Task<IActionResult> GetById(int id, [FromQuery] int? companyId = null)
     {
-        await AutoExpireAsync();
-        var row = await _db.FollowUps.AsNoTracking().FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+        await AutoExpireAsync(tenant);
+
+        var row = await tenant.FollowUps.AsNoTracking().FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (row is null) return NotFound(new { message = $"FollowUp {id} not found." });
         return Ok(row);
     }
 
     [HttpGet("stats")]
-    public async Task<IActionResult> GetStats()
+    public async Task<IActionResult> GetStats([FromQuery] int? companyId = null)
     {
-        await AutoExpireAsync();
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+        await AutoExpireAsync(tenant);
         var today = DateTime.Today;
 
-        var dueToday = await _db.FollowUps
+        var dueToday = await tenant.FollowUps
             .CountAsync(f => !f.IsArchived
                           && f.ScheduledDate.Date == today
                           && f.Status != "Draft"
@@ -241,11 +306,11 @@ public class FollowUpsController : ControllerBase
                           && f.ApprovalStatus != "Pending"
                           && f.ApprovalStatus != "Rejected");
 
-        var offersSent = await _db.FollowUps
+        var offersSent = await tenant.FollowUps
             .CountAsync(f => !f.IsArchived && (f.Status == "Sent" || f.Status == "Contacted"));
-        var redeemed = await _db.FollowUps
+        var redeemed = await tenant.FollowUps
             .CountAsync(f => !f.IsArchived && f.Status == "Redeemed");
-        var expired = await _db.FollowUps
+        var expired = await tenant.FollowUps
             .CountAsync(f => !f.IsArchived && f.Status == "Expired");
 
         return Ok(new { dueToday, offersSent, redeemed, expired });
@@ -255,11 +320,14 @@ public class FollowUpsController : ControllerBase
     //  CREATE
     // ================================================================
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] FollowUpRequest req)
+    public async Task<IActionResult> Create([FromBody] FollowUpRequest req, [FromQuery] int? companyId = null)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
         if (string.IsNullOrWhiteSpace(req.Reason))
             return BadRequest(new { message = "Reason is required." });
+
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
 
         int? creatorId = req.CreatedBy;
         bool isServiceStaff = false;
@@ -271,13 +339,10 @@ public class FollowUpsController : ControllerBase
                 isServiceStaff = true;
         }
 
-        await using (var tenant = await _tenantFactory.CreateAsync(DefaultCompanyId))
-        {
-            bool exists = await tenant.TenantCustomers
-                .AnyAsync(c => c.TenantCustomerId == req.CustomerId && !c.IsArchived);
-            if (!exists)
-                return BadRequest(new { message = $"Customer {req.CustomerId} not found." });
-        }
+        bool exists = await tenant.TenantCustomers
+            .AnyAsync(c => c.TenantCustomerId == req.CustomerId && !c.IsArchived);
+        if (!exists)
+            return BadRequest(new { message = $"Customer {req.CustomerId} not found." });
 
         var scheduled = req.ScheduledDate ?? DateTime.Now;
 
@@ -304,14 +369,14 @@ public class FollowUpsController : ControllerBase
 
         if (entity.Status == "Sent") entity.SentAt = DateTime.Now;
 
-        try { _db.FollowUps.Add(entity); await _db.SaveChangesAsync(); }
+        try { tenant.FollowUps.Add(entity); await tenant.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
             return StatusCode(500, new { message = "Create failed.", detail = inner });
         }
 
-        return CreatedAtAction(nameof(GetById), new { id = entity.FollowUpId }, entity);
+        return CreatedAtAction(nameof(GetById), new { id = entity.FollowUpId, companyId = cid }, entity);
     }
 
     private static string DeriveStatusOnCreate(
@@ -327,12 +392,15 @@ public class FollowUpsController : ControllerBase
     //  BULK CREATE
     // ================================================================
     [HttpPost("bulk")]
-    public async Task<IActionResult> BulkCreate([FromBody] BulkFollowUpRequest req)
+    public async Task<IActionResult> BulkCreate([FromBody] BulkFollowUpRequest req, [FromQuery] int? companyId = null)
     {
         if (req.CustomerIds == null || req.CustomerIds.Count == 0)
             return BadRequest(new { message = "At least one customer is required." });
         if (string.IsNullOrWhiteSpace(req.Reason))
             return BadRequest(new { message = "Reason is required." });
+
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
 
         int? creatorId = req.CreatedBy;
         bool isServiceStaff = false;
@@ -346,8 +414,6 @@ public class FollowUpsController : ControllerBase
 
         var requestedIds = req.CustomerIds.Distinct().ToList();
 
-        await using var tenant = await _tenantFactory.CreateAsync(DefaultCompanyId);
-
         var existingIds = await tenant.TenantCustomers
             .AsNoTracking()
             .Where(c => requestedIds.Contains(c.TenantCustomerId) && !c.IsArchived)
@@ -358,7 +424,7 @@ public class FollowUpsController : ControllerBase
         if (requestedIds.Count == 0)
             return BadRequest(new { message = "None of the selected customers exist." });
 
-        var blockedIds = await _db.FollowUps
+        var blockedIds = await tenant.FollowUps
             .Where(f => requestedIds.Contains(f.CustomerId)
                      && !f.IsArchived
                      && f.Status != "Expired"
@@ -368,115 +434,50 @@ public class FollowUpsController : ControllerBase
             .Distinct()
             .ToListAsync();
 
-        var allowedIds = requestedIds.Except(blockedIds).ToList();
-        if (allowedIds.Count == 0)
+        var eligibleIds = requestedIds.Except(blockedIds).ToList();
+        if (eligibleIds.Count == 0)
         {
             return Conflict(new
             {
-                message = "All selected customers already have an open follow-up.",
-                blockedIds,
-                skipped = blockedIds.Count,
-                count = 0
+                message = "All selected customers already have active follow-ups.",
+                blockedCount = blockedIds.Count
             });
         }
 
-        var type = Clamp(req.Type, 50, "Service Reminder");
-        var reason = ClampNullable(req.Reason, 200);
-        var offer = ClampNullable(req.DiscountOffer, 200);
-        var notes = ClampNullable(req.Notes, 1000);
         var scheduled = req.ScheduledDate ?? DateTime.Now;
+        var approvalStatus = isServiceStaff ? "Pending" : "NotRequired";
+        var status = isServiceStaff
+            ? "Pending"
+            : DeriveStatusOnCreate(scheduled, req.ValidUntil, req.ScheduledNow, isDraft: false);
 
-        var customers = await tenant.TenantCustomers
-            .AsNoTracking()
-            .Where(c => allowedIds.Contains(c.TenantCustomerId))
-            .ToListAsync();
-        var custById = customers.ToDictionary(c => c.TenantCustomerId);
-
-        var created = new List<FollowUp>(allowedIds.Count);
-        var failures = new List<object>();
-        int sentCount = 0;
-
-        foreach (var cid in allowedIds)
+        var created = new List<FollowUp>(eligibleIds.Count);
+        foreach (var cId in eligibleIds)
         {
-            string status;
-            string approval;
-
-            if (isServiceStaff)
-            {
-                approval = "Pending";
-                status = req.IsDraft ? "Draft" : "Pending";
-            }
-            else
-            {
-                approval = "NotRequired";
-                status = DeriveStatusOnCreate(scheduled, req.ValidUntil, req.ScheduledNow, isDraft: req.IsDraft);
-            }
-
-            if (!AllowedStatuses.Contains(status)) status = "Scheduled";
-
             var entity = new FollowUp
             {
-                CustomerId = cid,
-                Type = type,
+                CustomerId = cId,
+                Type = Clamp(req.Type, 50, "Service Reminder"),
                 ContactMethod = "Email",
-                Reason = reason,
-                DiscountOffer = offer,
-                Notes = notes,
+                Reason = ClampNullable(req.Reason, 200),
+                DiscountOffer = ClampNullable(req.DiscountOffer, 200),
+                Notes = ClampNullable(req.Notes, 1000),
                 ScheduledDate = scheduled,
                 ValidUntil = req.ValidUntil,
-                Status = status,
-                ApprovalStatus = approval,
-                SentAt = null,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = creatorId,
                 IsArchived = false,
                 ArchivedAt = null,
-                ArchivedBy = null
+                ArchivedBy = null,
+                ApprovalStatus = approvalStatus,
+                Status = status
             };
 
-            if (!isServiceStaff && status == "Sent")
-            {
-                if (!custById.TryGetValue(cid, out var cust) ||
-                    string.IsNullOrWhiteSpace(cust.EmailAddress))
-                {
-                    failures.Add(new { customerId = cid, error = "No email address on file." });
-                    entity.Status = "Scheduled";
-                }
-                else
-                {
-                    var subject = FollowUpEmailTemplate.BuildSubject(BusinessName);
-                    var html = FollowUpEmailTemplate.BuildHtml(
-                        customerName: cust.CustomerName ?? "there",
-                        messagePreview: notes ?? "",
-                        discountOffer: offer,
-                        validUntil: req.ValidUntil,
-                        businessName: BusinessName);
-
-                    var result = await _emailSender.SendAsync(
-                        toEmail: cust.EmailAddress,
-                        toName: cust.CustomerName ?? cust.EmailAddress,
-                        subject: subject,
-                        htmlBody: html);
-
-                    if (result.Success)
-                    {
-                        entity.Status = "Sent";
-                        entity.SentAt = DateTime.Now;
-                        sentCount++;
-                    }
-                    else
-                    {
-                        failures.Add(new { customerId = cid, error = result.ErrorMessage ?? "Send failed." });
-                        entity.Status = "Scheduled";
-                    }
-                }
-            }
-
-            _db.FollowUps.Add(entity);
+            if (status == "Sent") entity.SentAt = DateTime.Now;
+            tenant.FollowUps.Add(entity);
             created.Add(entity);
         }
 
-        try { await _db.SaveChangesAsync(); }
+        try { await tenant.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
@@ -485,12 +486,9 @@ public class FollowUpsController : ControllerBase
 
         return Ok(new
         {
-            count = created.Count,
-            sent = sentCount,
-            skipped = blockedIds.Count,
-            skippedIds = blockedIds,
-            failures,
-            pendingApproval = created.Count(f => f.ApprovalStatus == "Pending")
+            createdCount = created.Count,
+            blockedCount = blockedIds.Count,
+            createdIds = created.Select(f => f.FollowUpId).ToList()
         });
     }
 
@@ -511,9 +509,12 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] FollowUpUpdateRequest req)
+    public async Task<IActionResult> Update(int id, [FromBody] FollowUpUpdateRequest req, [FromQuery] int? companyId = null)
     {
-        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (existing is null) return NotFound(new { message = $"FollowUp {id} not found." });
 
         if (existing.ApprovalStatus == "Pending")
@@ -525,13 +526,12 @@ public class FollowUpsController : ControllerBase
             if (req.ScheduledDate.HasValue) existing.ScheduledDate = req.ScheduledDate.Value;
             if (req.ValidUntil.HasValue) existing.ValidUntil = req.ValidUntil.Value;
 
-            await _db.SaveChangesAsync();
+            await tenant.SaveChangesAsync();
             return Ok(existing);
         }
 
         if (req.CustomerId.HasValue && req.CustomerId.Value != existing.CustomerId)
         {
-            await using var tenant = await _tenantFactory.CreateAsync(DefaultCompanyId);
             bool exists = await tenant.TenantCustomers
                 .AnyAsync(c => c.TenantCustomerId == req.CustomerId.Value && !c.IsArchived);
             if (!exists)
@@ -574,7 +574,7 @@ public class FollowUpsController : ControllerBase
 
         if (string.Equals(existing.Status, "Draft", StringComparison.OrdinalIgnoreCase))
         {
-            await _db.SaveChangesAsync();
+            await tenant.SaveChangesAsync();
             return Ok(existing);
         }
 
@@ -597,7 +597,7 @@ public class FollowUpsController : ControllerBase
             }
         }
 
-        try { await _db.SaveChangesAsync(); }
+        try { await tenant.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
@@ -613,9 +613,12 @@ public class FollowUpsController : ControllerBase
     public class SendFollowUpRequest { public int? CompanyId { get; set; } }
 
     [HttpPost("{id:int}/send")]
-    public async Task<IActionResult> SendEmail(int id, [FromBody] SendFollowUpRequest? req)
+    public async Task<IActionResult> SendEmail(int id, [FromBody] SendFollowUpRequest? req, [FromQuery] int? companyId = null)
     {
-        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var cid = ResolveCompanyId(req?.CompanyId ?? companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (existing is null) return NotFound(new { message = $"FollowUp {id} not found." });
 
         if (existing.IsArchived)
@@ -630,9 +633,6 @@ public class FollowUpsController : ControllerBase
             return Conflict(new { message = "Already sent." });
         if (string.Equals(existing.Status, "Expired", StringComparison.OrdinalIgnoreCase))
             return Conflict(new { message = "Already expired." });
-
-        var companyId = req?.CompanyId ?? DefaultCompanyId;
-        await using var tenant = await _tenantFactory.CreateAsync(companyId);
 
         var customer = await tenant.TenantCustomers
             .AsNoTracking()
@@ -668,7 +668,7 @@ public class FollowUpsController : ControllerBase
 
         existing.Status = "Sent";
         existing.SentAt = DateTime.Now;
-        await _db.SaveChangesAsync();
+        await tenant.SaveChangesAsync();
 
         return Ok(new
         {
@@ -690,9 +690,12 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpPost("{id:int}/submit-for-approval")]
-    public async Task<IActionResult> SubmitForApproval(int id, [FromBody] SubmitApprovalRequest? req)
+    public async Task<IActionResult> SubmitForApproval(int id, [FromBody] SubmitApprovalRequest? req, [FromQuery] int? companyId = null)
     {
-        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (existing is null) return NotFound(new { message = $"FollowUp {id} not found." });
 
         if (existing.IsArchived)
@@ -726,7 +729,7 @@ public class FollowUpsController : ControllerBase
         existing.ApprovedAt = null;
         existing.ApprovedBy = null;
 
-        await _db.SaveChangesAsync();
+        await tenant.SaveChangesAsync();
         return Ok(existing);
     }
 
@@ -740,10 +743,13 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpPost("{id:int}/approve")]
-    public async Task<IActionResult> Approve(int id, [FromBody] ApproveRequest req)
+    public async Task<IActionResult> Approve(int id, [FromBody] ApproveRequest req, [FromQuery] int? companyId = null)
     {
         if (req.ApprovedBy <= 0)
             return BadRequest(new { message = "ApprovedBy is required." });
+
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
 
         var approver = await _db.Users.AsNoTracking()
             .FirstOrDefaultAsync(u => u.UserId == req.ApprovedBy);
@@ -751,7 +757,7 @@ public class FollowUpsController : ControllerBase
         if (approver.RoleId == RoleServiceStaff)
             return Conflict(new { message = "Service Staff cannot approve follow-ups." });
 
-        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var existing = await tenant.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (existing is null) return NotFound(new { message = $"FollowUp {id} not found." });
 
         if (existing.ApprovalStatus != "Pending")
@@ -766,7 +772,6 @@ public class FollowUpsController : ControllerBase
 
         if (req.SendNow)
         {
-            await using var tenant = await _tenantFactory.CreateAsync(DefaultCompanyId);
             var customer = await tenant.TenantCustomers
                 .AsNoTracking()
                 .FirstOrDefaultAsync(c => c.TenantCustomerId == existing.CustomerId);
@@ -774,7 +779,7 @@ public class FollowUpsController : ControllerBase
             if (customer is null || string.IsNullOrWhiteSpace(customer.EmailAddress))
             {
                 existing.Status = "Scheduled";
-                await _db.SaveChangesAsync();
+                await tenant.SaveChangesAsync();
                 return Ok(new
                 {
                     message = "Approved. Customer has no email — follow-up left Scheduled.",
@@ -801,7 +806,7 @@ public class FollowUpsController : ControllerBase
             {
                 existing.Status = "Sent";
                 existing.SentAt = DateTime.Now;
-                await _db.SaveChangesAsync();
+                await tenant.SaveChangesAsync();
                 return Ok(new
                 {
                     message = "Approved and sent.",
@@ -812,7 +817,7 @@ public class FollowUpsController : ControllerBase
             }
 
             existing.Status = "Scheduled";
-            await _db.SaveChangesAsync();
+            await tenant.SaveChangesAsync();
             return Ok(new
             {
                 message = "Approved. Send failed — left Scheduled.",
@@ -824,7 +829,7 @@ public class FollowUpsController : ControllerBase
         else
         {
             existing.Status = "Scheduled";
-            await _db.SaveChangesAsync();
+            await tenant.SaveChangesAsync();
             return Ok(new
             {
                 message = "Approved. Follow-up will be sent when the scheduled time is reached.",
@@ -844,10 +849,13 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpPost("{id:int}/reject")]
-    public async Task<IActionResult> Reject(int id, [FromBody] RejectRequest req)
+    public async Task<IActionResult> Reject(int id, [FromBody] RejectRequest req, [FromQuery] int? companyId = null)
     {
         if (req.RejectedBy <= 0)
             return BadRequest(new { message = "RejectedBy is required." });
+
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
 
         var rejector = await _db.Users.AsNoTracking()
             .FirstOrDefaultAsync(u => u.UserId == req.RejectedBy);
@@ -855,7 +863,7 @@ public class FollowUpsController : ControllerBase
         if (rejector.RoleId == RoleServiceStaff)
             return Conflict(new { message = "Service Staff cannot reject follow-ups." });
 
-        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var existing = await tenant.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (existing is null) return NotFound(new { message = $"FollowUp {id} not found." });
 
         if (existing.ApprovalStatus != "Pending")
@@ -869,7 +877,7 @@ public class FollowUpsController : ControllerBase
         existing.ApprovedBy = null;
         existing.ApprovedAt = null;
 
-        await _db.SaveChangesAsync();
+        await tenant.SaveChangesAsync();
         return Ok(existing);
     }
 
@@ -877,9 +885,12 @@ public class FollowUpsController : ControllerBase
     //  MARK-SENT, REDEEM, ARCHIVE, RESTORE, DELETE
     // ================================================================
     [HttpPost("{id:int}/mark-sent")]
-    public async Task<IActionResult> MarkSent(int id)
+    public async Task<IActionResult> MarkSent(int id, [FromQuery] int? companyId = null)
     {
-        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (existing is null) return NotFound(new { message = $"FollowUp {id} not found." });
 
         if (existing.ApprovalStatus == "Pending" || existing.ApprovalStatus == "Rejected")
@@ -890,7 +901,7 @@ public class FollowUpsController : ControllerBase
         existing.Status = "Sent";
         existing.SentAt ??= DateTime.Now;
 
-        try { await _db.SaveChangesAsync(); }
+        try { await tenant.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
@@ -900,16 +911,19 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpPost("{id:int}/redeem")]
-    public async Task<IActionResult> Redeem(int id)
+    public async Task<IActionResult> Redeem(int id, [FromQuery] int? companyId = null)
     {
-        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (existing is null) return NotFound(new { message = $"FollowUp {id} not found." });
 
         if (existing.ValidUntil.HasValue && existing.ValidUntil.Value.Date < DateTime.Today)
             return Conflict(new { message = "This offer has already expired." });
 
         existing.Status = "Redeemed";
-        try { await _db.SaveChangesAsync(); }
+        try { await tenant.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
@@ -921,9 +935,12 @@ public class FollowUpsController : ControllerBase
     public class ArchiveRequest { public string? ArchivedBy { get; set; } }
 
     [HttpPut("{id:int}/archive")]
-    public async Task<IActionResult> Archive(int id, [FromBody] ArchiveRequest? req)
+    public async Task<IActionResult> Archive(int id, [FromBody] ArchiveRequest? req, [FromQuery] int? companyId = null)
     {
-        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (existing is null) return NotFound(new { message = $"FollowUp {id} not found." });
         if (existing.IsArchived) return Conflict(new { message = "Already archived." });
 
@@ -931,7 +948,7 @@ public class FollowUpsController : ControllerBase
         existing.ArchivedAt = DateTime.UtcNow;
         existing.ArchivedBy = string.IsNullOrWhiteSpace(req?.ArchivedBy) ? "Admin" : req!.ArchivedBy;
 
-        try { await _db.SaveChangesAsync(); }
+        try { await tenant.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
@@ -941,9 +958,12 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpPut("{id:int}/restore")]
-    public async Task<IActionResult> Restore(int id)
+    public async Task<IActionResult> Restore(int id, [FromQuery] int? companyId = null)
     {
-        var existing = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (existing is null) return NotFound(new { message = $"FollowUp {id} not found." });
         if (!existing.IsArchived) return Conflict(new { message = "Not archived." });
 
@@ -951,7 +971,7 @@ public class FollowUpsController : ControllerBase
         existing.ArchivedAt = null;
         existing.ArchivedBy = null;
 
-        try { await _db.SaveChangesAsync(); }
+        try { await tenant.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;
@@ -961,13 +981,16 @@ public class FollowUpsController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, [FromQuery] int? companyId = null)
     {
-        var row = await _db.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var row = await tenant.FollowUps.FirstOrDefaultAsync(f => f.FollowUpId == id);
         if (row is null) return NotFound(new { message = $"FollowUp {id} not found." });
 
-        _db.FollowUps.Remove(row);
-        try { await _db.SaveChangesAsync(); }
+        tenant.FollowUps.Remove(row);
+        try { await tenant.SaveChangesAsync(); }
         catch (DbUpdateException ex)
         {
             var inner = ex.InnerException?.Message ?? ex.Message;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -756,7 +756,7 @@ namespace CarwashServices.Dialogs
             {
                 Cursor = Cursors.WaitCursor;
 
-                var resp = await _http.PostAsJsonAsync("api/follow-ups/bulk", payload);
+                var resp = await _http.PostAsJsonAsync($"api/follow-ups/bulk?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}", payload);
 
                 if (resp.IsSuccessStatusCode)
                 {

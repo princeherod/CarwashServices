@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -523,7 +523,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 if (staffId <= 0) return;
 
                 var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                    $"api/follow-ups/my-customers?staffId={staffId}&companyId=1") ?? new();
+                    $"api/follow-ups/my-customers?staffId={staffId}&companyId={SessionUser.CurrentCompanyId}") ?? new();
 
                 _myCustomers = list;
                 _custById = list.ToDictionary(c => c.TenantCustomerId);
@@ -550,7 +550,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 }
 
                 _all = await _http.GetFromJsonAsync<List<FollowUpDto>>(
-                    $"api/follow-ups/mine?staffId={staffId}") ?? new();
+                    $"api/follow-ups/mine?staffId={staffId}&companyId={SessionUser.CurrentCompanyId}") ?? new();
 
                 RenderGrid();
                 RenderPager(CurrentTotalPages());
@@ -1142,7 +1142,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 Cursor = Cursors.WaitCursor;
 
                 var resp = await _http.PostAsJsonAsync(
-                    $"api/follow-ups/{f.FollowUpId}/submit-for-approval",
+                    $"api/follow-ups/{f.FollowUpId}/submit-for-approval?companyId={SessionUser.CurrentCompanyId}",
                     new
                     {
                         submittedBy = SessionUser.UserId,
@@ -1182,7 +1182,7 @@ namespace CarwashServices.Roles.ServiceStaff
             {
                 Cursor = Cursors.WaitCursor;
                 var resp = await _http.PutAsJsonAsync(
-                    $"api/follow-ups/{f.FollowUpId}/archive",
+                    $"api/follow-ups/{f.FollowUpId}/archive?companyId={SessionUser.CurrentCompanyId}",
                     new { archivedBy = CurrentUserName });
 
                 if (resp.IsSuccessStatusCode)

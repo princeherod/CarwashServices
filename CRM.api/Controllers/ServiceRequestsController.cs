@@ -1,6 +1,7 @@
-﻿using CRM.domain.Entities;
+using CRM.domain.Entities;
 using CRM.Domain.Entities;
 using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,20 +9,46 @@ namespace CRM.api.Controllers;
 
 [ApiController]
 [Route("api/service-requests")]
+[Route("api/tenant/{companyId}/service-requests")]
 public class ServiceRequestsController : ControllerBase
 {
-    private readonly MasterErpDbContext _db;
+    private readonly MasterErpDbContext _masterDb;
+    private readonly ITenantDbContextFactory _tenantFactory;
 
-    public ServiceRequestsController(MasterErpDbContext db)
+    public ServiceRequestsController(MasterErpDbContext masterDb, ITenantDbContextFactory tenantFactory)
     {
-        _db = db;
+        _masterDb = masterDb;
+        _tenantFactory = tenantFactory;
+    }
+
+    private int ResolveCompanyId(int? companyId = null)
+    {
+        if (companyId.HasValue && companyId.Value > 0)
+            return companyId.Value;
+
+        if (Request.Query.TryGetValue("companyId", out var qVal) &&
+            int.TryParse(qVal.FirstOrDefault(), out var qId) && qId > 0)
+            return qId;
+
+        if (RouteData.Values.TryGetValue("companyId", out var val) &&
+            int.TryParse(val?.ToString(), out var rId) && rId > 0)
+            return rId;
+
+        if (Request.Headers.TryGetValue("X-Company-Id", out var hVal) &&
+            int.TryParse(hVal.FirstOrDefault(), out var hId) && hId > 0)
+            return hId;
+
+        return 1;
     }
 
     // GET: api/service-requests          → active only
     [HttpGet]
-    public async Task<IActionResult> GetAll()
+    public async Task<IActionResult> GetAll([FromQuery] int? companyId = null)
     {
-        var list = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var list = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived)
             .OrderByDescending(r => r.RequestId)
@@ -49,9 +76,12 @@ public class ServiceRequestsController : ControllerBase
 
     // GET: api/service-requests/archived  → archived only
     [HttpGet("archived")]
-    public async Task<IActionResult> GetArchived()
+    public async Task<IActionResult> GetArchived([FromQuery] int? companyId = null)
     {
-        var list = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var list = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => r.IsArchived)
             .OrderByDescending(r => r.ArchivedAt)
@@ -79,23 +109,32 @@ public class ServiceRequestsController : ControllerBase
 
     // GET: api/service-requests/5
     [HttpGet("{requestId:int}")]
-    public async Task<IActionResult> GetById(int requestId)
+    public async Task<IActionResult> GetById(int requestId, [FromQuery] int? companyId = null)
     {
-        var row = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var row = await tenant.ServiceRequests
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.RequestId == requestId);
 
         if (row is null)
-            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+            return NotFound(new { message = $"ServiceRequest {requestId} not found in tenant database." });
 
         return Ok(row);
     }
 
     // POST: api/service-requests
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] ServiceRequest req)
+    public async Task<IActionResult> Create([FromBody] ServiceRequest req, [FromQuery] int? companyId = null)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        // Default requested date if not specified
+        if (req.RequestedDate == default) req.RequestedDate = DateTime.Now;
 
         // ---- Backend date validation ----
         if (req.RequestedDate.Date < DateTime.Today)
@@ -104,34 +143,31 @@ public class ServiceRequestsController : ControllerBase
         if (req.ScheduledDate.HasValue && req.ScheduledDate.Value < req.RequestedDate)
             return BadRequest(new { message = "Scheduled date must be on or after the requested date." });
 
-        // Create is always Pending, and CompletedDate is always null on create.
         req.Status = "Pending";
         req.CompletedDate = null;
-        if (req.RequestedDate == default) req.RequestedDate = DateTime.Now;
 
         req.AssignedStaffId = null;
         req.IsArchived = false;
         req.ArchivedAt = null;
         req.ArchivedBy = null;
 
-        req.CreatedBy = await _db.Users
-            .OrderBy(u => u.UserId)
-            .Select(u => u.UserId)
-            .FirstOrDefaultAsync();
+        if (req.CreatedBy <= 0)
+        {
+            var defaultUser = await _masterDb.Users
+                .Where(u => u.CompanyId == cid || u.CompanyId == null)
+                .OrderBy(u => u.UserId)
+                .Select(u => u.UserId)
+                .FirstOrDefaultAsync();
 
-        if (req.CreatedBy == 0)
-            return BadRequest(new { message = "No users exist in the database. Seed a user first." });
+            req.CreatedBy = defaultUser > 0 ? defaultUser : 1;
+        }
 
-        _db.ServiceRequests.Add(req);
-        await _db.SaveChangesAsync();
+        tenant.ServiceRequests.Add(req);
+        await tenant.SaveChangesAsync();
 
-        return CreatedAtAction(nameof(GetById), new { requestId = req.RequestId }, req);
+        return CreatedAtAction(nameof(GetById), new { requestId = req.RequestId, companyId = cid }, req);
     }
 
-    // ================================================================
-    //  UPDATE — accepts the full editable surface of a request,
-    //  including assignment (AssignedStaffId or ClearAssignment).
-    // ================================================================
     public class UpdateRequest
     {
         public int CustomerId { get; set; }
@@ -143,26 +179,24 @@ public class ServiceRequestsController : ControllerBase
         public DateTime? CompletedDate { get; set; }
         public string? Notes { get; set; }
 
-        // Assignment fields.
-        //  - AssignedStaffId != null  → assign to that Service Staff user.
-        //  - ClearAssignment == true  → unassign.
-        //  - Both null/false          → leave existing value untouched.
         public int? AssignedStaffId { get; set; }
         public bool ClearAssignment { get; set; }
     }
 
     [HttpPut("{requestId:int}")]
-    public async Task<IActionResult> Update(int requestId, [FromBody] UpdateRequest req)
+    public async Task<IActionResult> Update(int requestId, [FromBody] UpdateRequest req, [FromQuery] int? companyId = null)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var existing = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.ServiceRequests
             .FirstOrDefaultAsync(r => r.RequestId == requestId);
 
         if (existing is null)
-            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+            return NotFound(new { message = $"ServiceRequest {requestId} not found in tenant database." });
 
-        // ---- Backend date validation ----
         if (req.RequestedDate.Date < DateTime.Today)
             return BadRequest(new { message = "Requested date cannot be in the past." });
 
@@ -181,27 +215,25 @@ public class ServiceRequestsController : ControllerBase
             && !string.Equals(req.Status, "Completed", StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { message = "A completed date can only be set when the status is Completed." });
 
-        // ---- Assignment validation ----
         if (req.ClearAssignment)
         {
             existing.AssignedStaffId = null;
         }
         else if (req.AssignedStaffId.HasValue)
         {
-            var staffUser = await _db.Users
+            var staffUser = await _masterDb.Users
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.UserId == req.AssignedStaffId.Value);
 
             if (staffUser == null)
                 return BadRequest(new { message = $"User {req.AssignedStaffId} not found." });
 
-            if (staffUser.RoleId != 4)
-                return BadRequest(new { message = "Assigned staff must be an existing Service Staff user." });
+            if (staffUser.RoleId != 3 && staffUser.RoleId != 1 && staffUser.RoleId != 2)
+                return BadRequest(new { message = "Assigned staff must be a valid staff or admin user." });
 
             existing.AssignedStaffId = req.AssignedStaffId.Value;
         }
 
-        // Editable fields
         existing.CustomerId = req.CustomerId;
         existing.ServiceId = req.ServiceId;
         existing.Priority = req.Priority;
@@ -210,7 +242,7 @@ public class ServiceRequestsController : ControllerBase
         existing.CompletedDate = req.CompletedDate;
         existing.Notes = req.Notes;
 
-        // Status is accepted from the Edit form only.
+        var previousStatus = existing.Status;
         if (!string.IsNullOrWhiteSpace(req.Status))
         {
             var allowed = new[] { "Pending", "Assigned", "InProgress", "Completed", "Cancelled" };
@@ -219,33 +251,63 @@ public class ServiceRequestsController : ControllerBase
 
             existing.Status = req.Status;
 
-            if (req.Status == "Completed" && existing.CompletedDate is null)
-                existing.CompletedDate = DateTime.Now;
+            if (req.Status == "Completed")
+            {
+                if (existing.CompletedDate is null)
+                    existing.CompletedDate = DateTime.Now;
+
+                // Ensure billing transaction exists
+                var existingTx = await tenant.BillingTransactions.FirstOrDefaultAsync(b => b.RequestId == existing.RequestId);
+                if (existingTx == null)
+                {
+                    var product = await tenant.Products.FirstOrDefaultAsync(p => p.ProductId == existing.ServiceId);
+                    decimal price = product?.UnitPrice ?? 0m;
+                    tenant.BillingTransactions.Add(new BillingTransaction
+                    {
+                        RequestId = existing.RequestId,
+                        Amount = price,
+                        PaymentStatus = "Paid",
+                        TransactionDate = existing.CompletedDate ?? DateTime.Now
+                    });
+                }
+            }
 
             if (req.Status != "Completed")
                 existing.CompletedDate = null;
         }
 
-        await _db.SaveChangesAsync();
+        if (previousStatus != existing.Status)
+        {
+            tenant.ServiceStatusLogs.Add(new ServiceStatusLog
+            {
+                RequestId = existing.RequestId,
+                Status = existing.Status,
+                UpdatedBy = existing.AssignedStaffId ?? existing.CreatedBy,
+                UpdatedAt = DateTime.Now,
+                Notes = $"Status updated to {existing.Status}."
+            });
+        }
+
+        await tenant.SaveChangesAsync();
         return Ok(existing);
     }
 
-    // ================================================================
-    //  ASSIGN ENDPOINT — used by the Manager's Assign Service Staff view.
-    // ================================================================
     public class AssignRequest
     {
         public int? AssignedStaffId { get; set; }
     }
 
     [HttpPut("{requestId:int}/assign")]
-    public async Task<IActionResult> Assign(int requestId, [FromBody] AssignRequest req)
+    public async Task<IActionResult> Assign(int requestId, [FromBody] AssignRequest req, [FromQuery] int? companyId = null)
     {
-        var existing = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.ServiceRequests
             .FirstOrDefaultAsync(r => r.RequestId == requestId);
 
         if (existing is null)
-            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+            return NotFound(new { message = $"ServiceRequest {requestId} not found in tenant database." });
 
         if (existing.IsArchived)
             return Conflict(new { message = "Cannot assign staff to an archived request." });
@@ -253,60 +315,78 @@ public class ServiceRequestsController : ControllerBase
         if (!req.AssignedStaffId.HasValue)
         {
             existing.AssignedStaffId = null;
-            await _db.SaveChangesAsync();
+            await tenant.SaveChangesAsync();
             return Ok(existing);
         }
 
-        var staffUser = await _db.Users
+        var staffUser = await _masterDb.Users
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.UserId == req.AssignedStaffId.Value);
 
         if (staffUser == null)
             return BadRequest(new { message = $"User {req.AssignedStaffId} not found." });
 
-        if (staffUser.RoleId != 4)
-            return BadRequest(new { message = "Assigned staff must be an existing Service Staff user." });
-
         existing.AssignedStaffId = req.AssignedStaffId.Value;
 
         if (string.Equals(existing.Status, "Pending", StringComparison.OrdinalIgnoreCase))
             existing.Status = "Assigned";
 
-        await _db.SaveChangesAsync();
+        await tenant.SaveChangesAsync();
         return Ok(existing);
     }
 
-    // ================================================================
-    //  STATUS — generic update (used by Admin/Manager edit)
-    // ================================================================
     [HttpPut("{requestId:int}/status")]
-    public async Task<IActionResult> UpdateStatus(int requestId, [FromBody] StatusUpdateDto dto)
+    public async Task<IActionResult> UpdateStatus(int requestId, [FromBody] StatusUpdateDto dto, [FromQuery] int? companyId = null)
     {
         var allowed = new[] { "Pending", "Assigned", "InProgress", "Completed", "Cancelled" };
         if (string.IsNullOrWhiteSpace(dto.Status) || !allowed.Contains(dto.Status))
             return BadRequest(new { message = $"Status must be one of: {string.Join(", ", allowed)}." });
 
-        var existing = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.ServiceRequests
             .FirstOrDefaultAsync(r => r.RequestId == requestId);
 
         if (existing is null)
-            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+            return NotFound(new { message = $"ServiceRequest {requestId} not found in tenant database." });
 
         existing.Status = dto.Status;
-        if (dto.Status == "Completed" && existing.CompletedDate is null)
+        if (string.Equals(dto.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+        {
             existing.CompletedDate = DateTime.Now;
+            var existingTx = await tenant.BillingTransactions.FirstOrDefaultAsync(b => b.RequestId == existing.RequestId);
+            if (existingTx == null)
+            {
+                var product = await tenant.Products.FirstOrDefaultAsync(p => p.ProductId == existing.ServiceId);
+                decimal price = product?.UnitPrice ?? 0m;
+                tenant.BillingTransactions.Add(new BillingTransaction
+                {
+                    RequestId = existing.RequestId,
+                    Amount = price,
+                    PaymentStatus = "Paid",
+                    TransactionDate = DateTime.Now
+                });
+            }
+        }
+        else
+        {
+            existing.CompletedDate = null;
+        }
 
-        await _db.SaveChangesAsync();
+        tenant.ServiceStatusLogs.Add(new ServiceStatusLog
+        {
+            RequestId = existing.RequestId,
+            Status = existing.Status,
+            UpdatedBy = existing.AssignedStaffId ?? existing.CreatedBy,
+            UpdatedAt = DateTime.Now,
+            Notes = $"Status updated to {existing.Status}."
+        });
+
+        await tenant.SaveChangesAsync();
         return Ok(existing);
     }
 
-    // ================================================================
-    //  SERVICE STAFF — Update Status (scoped, validated, logged)
-    //
-    //  Only the Service Staff assigned to the request can call this.
-    //  Only valid transitions are accepted. Every change writes a
-    //  ServiceStatusLog entry. No other fields are touched.
-    // ================================================================
     public class StaffStatusUpdateRequest
     {
         public int StaffId { get; set; }
@@ -316,7 +396,8 @@ public class ServiceRequestsController : ControllerBase
 
     [HttpPut("{requestId:int}/staff-status")]
     public async Task<IActionResult> UpdateStatusByStaff(int requestId,
-                                                          [FromBody] StaffStatusUpdateRequest req)
+                                                          [FromBody] StaffStatusUpdateRequest req,
+                                                          [FromQuery] int? companyId = null)
     {
         if (req.StaffId <= 0)
             return BadRequest(new { message = "StaffId is required." });
@@ -325,20 +406,21 @@ public class ServiceRequestsController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.Status) || !allowed.Contains(req.Status))
             return BadRequest(new { message = $"Status must be one of: {string.Join(", ", allowed)}." });
 
-        var existing = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.ServiceRequests
             .FirstOrDefaultAsync(r => r.RequestId == requestId);
 
         if (existing is null)
-            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+            return NotFound(new { message = $"ServiceRequest {requestId} not found in tenant database." });
 
         if (existing.IsArchived)
             return Conflict(new { message = "Cannot update an archived request." });
 
-        // ---- Scoping: only the assigned Service Staff may update ----
         if (existing.AssignedStaffId != req.StaffId)
             return StatusCode(403, new { message = "This request is not assigned to you." });
 
-        // ---- Transition validation ----
         var from = (existing.Status ?? "Pending").Trim();
         var to = req.Status.Trim();
 
@@ -351,19 +433,32 @@ public class ServiceRequestsController : ControllerBase
         }
 
         var now = DateTime.Now;
-
         existing.Status = to;
 
         if (string.Equals(to, "Completed", StringComparison.OrdinalIgnoreCase))
+        {
             existing.CompletedDate = now;
+            var existingTx = await tenant.BillingTransactions.FirstOrDefaultAsync(b => b.RequestId == existing.RequestId);
+            if (existingTx == null)
+            {
+                var product = await tenant.Products.FirstOrDefaultAsync(p => p.ProductId == existing.ServiceId);
+                decimal price = product?.UnitPrice ?? 0m;
+                tenant.BillingTransactions.Add(new BillingTransaction
+                {
+                    RequestId = existing.RequestId,
+                    Amount = price,
+                    PaymentStatus = "Paid",
+                    TransactionDate = now
+                });
+            }
+        }
 
         if (string.Equals(to, "Pending", StringComparison.OrdinalIgnoreCase)
             || string.Equals(to, "InProgress", StringComparison.OrdinalIgnoreCase)
             || string.Equals(to, "Cancelled", StringComparison.OrdinalIgnoreCase))
             existing.CompletedDate = null;
 
-        // ---- Log ----
-        _db.ServiceStatusLogs.Add(new ServiceStatusLog
+        tenant.ServiceStatusLogs.Add(new ServiceStatusLog
         {
             RequestId = existing.RequestId,
             Status = to,
@@ -374,15 +469,7 @@ public class ServiceRequestsController : ControllerBase
                 : req.Notes!.Trim()
         });
 
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
-        catch (DbUpdateException ex)
-        {
-            var inner = ex.InnerException?.Message ?? ex.Message;
-            return StatusCode(500, new { message = "Save failed.", detail = inner });
-        }
+        await tenant.SaveChangesAsync();
 
         return Ok(new
         {
@@ -393,13 +480,6 @@ public class ServiceRequestsController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Allowed transitions for the Service Staff workflow.
-    ///   Pending / Assigned → InProgress
-    ///   InProgress         → Completed
-    ///   Any non-terminal   → Cancelled
-    ///   Completed / Cancelled are terminal.
-    /// </summary>
     private static bool IsValidTransition(string from, string to)
     {
         from = from?.Trim() ?? "Pending";
@@ -424,17 +504,19 @@ public class ServiceRequestsController : ControllerBase
         return false;
     }
 
-    // PUT: api/service-requests/5/archive
     public class ArchiveRequest { public string? ArchivedBy { get; set; } }
 
     [HttpPut("{requestId:int}/archive")]
-    public async Task<IActionResult> Archive(int requestId, [FromBody] ArchiveRequest? req)
+    public async Task<IActionResult> Archive(int requestId, [FromBody] ArchiveRequest? req, [FromQuery] int? companyId = null)
     {
-        var existing = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.ServiceRequests
             .FirstOrDefaultAsync(r => r.RequestId == requestId);
 
         if (existing is null)
-            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+            return NotFound(new { message = $"ServiceRequest {requestId} not found in tenant database." });
         if (existing.IsArchived)
             return Conflict(new { message = "This request is already archived." });
 
@@ -442,19 +524,21 @@ public class ServiceRequestsController : ControllerBase
         existing.ArchivedAt = DateTime.UtcNow;
         existing.ArchivedBy = string.IsNullOrWhiteSpace(req?.ArchivedBy) ? "Admin" : req!.ArchivedBy;
 
-        await _db.SaveChangesAsync();
+        await tenant.SaveChangesAsync();
         return Ok(existing);
     }
 
-    // PUT: api/service-requests/5/restore
     [HttpPut("{requestId:int}/restore")]
-    public async Task<IActionResult> Restore(int requestId)
+    public async Task<IActionResult> Restore(int requestId, [FromQuery] int? companyId = null)
     {
-        var existing = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var existing = await tenant.ServiceRequests
             .FirstOrDefaultAsync(r => r.RequestId == requestId);
 
         if (existing is null)
-            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+            return NotFound(new { message = $"ServiceRequest {requestId} not found in tenant database." });
         if (!existing.IsArchived)
             return Conflict(new { message = "This request is not archived." });
 
@@ -462,22 +546,24 @@ public class ServiceRequestsController : ControllerBase
         existing.ArchivedAt = null;
         existing.ArchivedBy = null;
 
-        await _db.SaveChangesAsync();
+        await tenant.SaveChangesAsync();
         return Ok(existing);
     }
 
-    // DELETE: api/service-requests/5
     [HttpDelete("{requestId:int}")]
-    public async Task<IActionResult> Delete(int requestId)
+    public async Task<IActionResult> Delete(int requestId, [FromQuery] int? companyId = null)
     {
-        var row = await _db.ServiceRequests
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var row = await tenant.ServiceRequests
             .FirstOrDefaultAsync(r => r.RequestId == requestId);
 
         if (row is null)
-            return NotFound(new { message = $"ServiceRequest {requestId} not found." });
+            return NotFound(new { message = $"ServiceRequest {requestId} not found in tenant database." });
 
-        _db.ServiceRequests.Remove(row);
-        await _db.SaveChangesAsync();
+        tenant.ServiceRequests.Remove(row);
+        await tenant.SaveChangesAsync();
         return NoContent();
     }
 }

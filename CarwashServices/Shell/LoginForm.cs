@@ -387,6 +387,9 @@ namespace CarwashServices.Shell
                             SessionUser.Email = user.Email;
                             SessionUser.RoleId = user.RoleId;
                             SessionUser.Role = (UserRole)user.RoleId;
+                            SessionUser.CompanyId = user.CompanyId;
+                            SessionUser.CompanyName = user.CompanyName ?? "";
+                            SessionUser.CompanyCode = user.CompanyCode ?? "";
                         }
                     }
                     catch { }

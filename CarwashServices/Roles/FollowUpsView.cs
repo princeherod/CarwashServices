@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -1333,17 +1333,18 @@ namespace CarwashServices.Roles
         // ================================================================
         private async Task LoadLookupsAsync()
         {
+            var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
             try
             {
                 _customers = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                    "api/tenant/1/tenant-customers") ?? new();
+                    $"api/tenant/{companyId}/tenant-customers") ?? new();
                 _custById = _customers.ToDictionary(c => c.TenantCustomerId);
             }
             catch { _customers = new(); _custById = new(); }
 
             try
             {
-                _users = await _http.GetFromJsonAsync<List<UserDto>>("api/users") ?? new();
+                _users = await _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}") ?? new();
                 _userById = _users.ToDictionary(u => u.UserId);
             }
             catch { _users = new(); _userById = new(); }
@@ -1355,12 +1356,13 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
 
-                var url = _tab == ListTab.Active ? "api/follow-ups" : "api/follow-ups/archived";
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var url = _tab == ListTab.Active ? $"api/follow-ups?companyId={companyId}" : $"api/follow-ups/archived?companyId={companyId}";
                 _all = await _http.GetFromJsonAsync<List<FollowUpDto>>(url) ?? new();
 
                 if (_tab == ListTab.Active)
                 {
-                    _stats = await _http.GetFromJsonAsync<FollowUpStatsDto>("api/follow-ups/stats")
+                    _stats = await _http.GetFromJsonAsync<FollowUpStatsDto>($"api/follow-ups/stats?companyId={companyId}")
                                 ?? new FollowUpStatsDto();
                     BuildStats();
                 }
@@ -1728,8 +1730,9 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
 
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 var resp = await _http.PostAsJsonAsync(
-                    $"api/follow-ups/{f.FollowUpId}/approve",
+                    $"api/follow-ups/{f.FollowUpId}/approve?companyId={companyId}",
                     new
                     {
                         approvedBy = SessionUser.UserId,
@@ -1775,8 +1778,9 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
 
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 var resp = await _http.PostAsJsonAsync(
-                    $"api/follow-ups/{f.FollowUpId}/reject",
+                    $"api/follow-ups/{f.FollowUpId}/reject?companyId={companyId}",
                     new
                     {
                         rejectedBy = SessionUser.UserId,
@@ -1828,7 +1832,7 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
                 var resp = await _http.PutAsJsonAsync(
-                    $"api/follow-ups/{f.FollowUpId}/archive",
+                    $"api/follow-ups/{f.FollowUpId}/archive?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}",
                     new { archivedBy = CurrentUserName });
 
                 if (!resp.IsSuccessStatusCode)
@@ -1857,7 +1861,7 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
                 var resp = await _http.PutAsync(
-                    $"api/follow-ups/{f.FollowUpId}/restore", null);
+                    $"api/follow-ups/{f.FollowUpId}/restore?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}", null);
 
                 if (!resp.IsSuccessStatusCode)
                 {

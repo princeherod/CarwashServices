@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -467,7 +467,7 @@ namespace CarwashServices.Roles
                 Cursor = Cursors.WaitCursor;
 
                 _data = await _http.GetFromJsonAsync<ServiceStatusResponseDto>(
-                    "api/service-status?companyId=1") ?? new();
+                    $"api/service-status?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}") ?? new();
 
                 _kpiPending.Text = _data.Pending.ToString();
                 _kpiInProgress.Text = _data.InProgress.ToString();

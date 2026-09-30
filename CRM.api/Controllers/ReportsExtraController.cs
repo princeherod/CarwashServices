@@ -1,4 +1,4 @@
-﻿using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Data;
 using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -113,7 +113,7 @@ public class ReportsExtraController : ControllerBase
 
         var priceById = products.GroupBy(p => p.ProductId).ToDictionary(g => g.Key, g => g.First().UnitPrice);
 
-        var requests = await _db.ServiceRequests
+        var requests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived
                      && r.RequestedDate >= from
@@ -209,7 +209,7 @@ public class ReportsExtraController : ControllerBase
 
         var priceById = products.GroupBy(p => p.ProductId).ToDictionary(g => g.Key, g => g.First().UnitPrice);
 
-        var requests = await _db.ServiceRequests
+        var requests = await tenant.ServiceRequests
             .AsNoTracking()
             .Where(r => !r.IsArchived)
             .ToListAsync();

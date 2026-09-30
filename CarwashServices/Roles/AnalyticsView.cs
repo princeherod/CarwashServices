@@ -1,4 +1,4 @@
-﻿#nullable disable
+#nullable disable
 
 using System;
 using System.Collections.Generic;
@@ -584,16 +584,17 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
 
-                var summaryT = _http.GetFromJsonAsync<AnalyticsSummaryDto>("api/analytics/summary?companyId=1");
-                var retentionT = _http.GetFromJsonAsync<List<RetentionPointDto>>("api/analytics/retention?companyId=1");
-                var segmentsT = _http.GetFromJsonAsync<SegmentCountsDto>("api/analytics/segments?companyId=1");
-                var revenueT = _http.GetFromJsonAsync<RevenueResponseDto>("api/analytics/revenue?companyId=1");
-                var recentT = _http.GetFromJsonAsync<List<ServiceRequestDto>>("api/analytics/recent");
-                var customersT = _http.GetFromJsonAsync<List<TenantCustomerDto>>("api/tenant/1/tenant-customers");
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var summaryT = _http.GetFromJsonAsync<AnalyticsSummaryDto>($"api/analytics/summary?companyId={companyId}");
+                var retentionT = _http.GetFromJsonAsync<List<RetentionPointDto>>($"api/analytics/retention?companyId={companyId}");
+                var segmentsT = _http.GetFromJsonAsync<SegmentCountsDto>($"api/analytics/segments?companyId={companyId}");
+                var revenueT = _http.GetFromJsonAsync<RevenueResponseDto>($"api/analytics/revenue?companyId={companyId}");
+                var recentT = _http.GetFromJsonAsync<List<ServiceRequestDto>>($"api/analytics/recent?companyId={companyId}");
+                var customersT = _http.GetFromJsonAsync<List<TenantCustomerDto>>($"api/tenant/{companyId}/tenant-customers");
 
                 // NEW — wash frequency endpoint
                 var washT = _http.GetFromJsonAsync<List<WashFrequencyPointDto>>(
-                    "api/analytics/wash-frequency?companyId=1&range=ThisYear");
+                    $"api/analytics/wash-frequency?companyId={companyId}&range=ThisYear");
 
                 await Task.WhenAll(summaryT, retentionT, segmentsT, revenueT, recentT, customersT, washT);
 
@@ -627,8 +628,9 @@ namespace CarwashServices.Roles
             try
             {
                 Cursor = Cursors.WaitCursor;
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 var rows = await _http.GetFromJsonAsync<List<SegmentCustomerDto>>(
-                    $"api/analytics/segment-customers?companyId=1&segment={segment}")
+                    $"api/analytics/segment-customers?companyId={companyId}&segment={segment}")
                     ?? new List<SegmentCustomerDto>();
 
                 Cursor = Cursors.Default;

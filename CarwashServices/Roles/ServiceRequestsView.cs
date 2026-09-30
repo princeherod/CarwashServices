@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -783,10 +783,11 @@ namespace CarwashServices.Roles
         // ================================================================
         private async Task LoadLookupsAsync()
         {
+            var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
             try
             {
                 _tenantCustomers = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                    "api/tenant/1/tenant-customers") ?? new();
+                    $"api/tenant/{companyId}/tenant-customers") ?? new();
 
                 _customerLookup = _tenantCustomers
                     .Select(c => new CustomerDto
@@ -804,7 +805,7 @@ namespace CarwashServices.Roles
             try
             {
                 _tenantProducts = await _http.GetFromJsonAsync<List<ProductDto>>(
-                    "api/tenant/1/products") ?? new();
+                    $"api/tenant/{companyId}/products") ?? new();
 
                 _serviceLookup = _tenantProducts
                     .Select(p => new ServiceDto
@@ -818,7 +819,7 @@ namespace CarwashServices.Roles
             }
             catch { _tenantProducts = new(); _serviceLookup = new(); }
 
-            try { _users = await _http.GetFromJsonAsync<List<UserDto>>("api/users") ?? new(); }
+            try { _users = await _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}") ?? new(); }
             catch { _users = new(); }
         }
 
@@ -829,9 +830,10 @@ namespace CarwashServices.Roles
                 _newRequestBtn.Enabled = false;
                 Cursor = Cursors.WaitCursor;
 
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 var url = _tab == ListTab.Active
-                    ? "api/service-requests"
-                    : "api/service-requests/archived";
+                    ? $"api/service-requests?companyId={companyId}"
+                    : $"api/service-requests/archived?companyId={companyId}";
 
                 _all = await _http.GetFromJsonAsync<List<ServiceRequestDto>>(url) ?? new();
 
@@ -1481,7 +1483,7 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
                 var resp = await _http.PutAsJsonAsync(
-                    $"api/service-requests/{req.RequestId}/archive",
+                    $"api/service-requests/{req.RequestId}/archive?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}",
                     new { archivedBy = CurrentUserName });
 
                 if (!resp.IsSuccessStatusCode)
@@ -1510,7 +1512,7 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
                 var resp = await _http.PutAsync(
-                    $"api/service-requests/{req.RequestId}/restore", null);
+                    $"api/service-requests/{req.RequestId}/restore?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}", null);
 
                 if (!resp.IsSuccessStatusCode)
                 {

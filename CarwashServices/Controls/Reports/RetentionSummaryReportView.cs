@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Printing;
@@ -374,7 +374,7 @@ namespace CarwashServices.Controls.Reports
                 var displayRange = range ?? "This Year";
                 var r = displayRange.Replace(" ", "");
                 var data = await _http.GetFromJsonAsync<RetentionSummaryReportDto>(
-                    $"api/reports/retention-summary?companyId=1&range={Uri.EscapeDataString(r)}")
+                    $"api/reports/retention-summary?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}&range={Uri.EscapeDataString(r)}")
                     ?? new RetentionSummaryReportDto();
                 _data = data;
 

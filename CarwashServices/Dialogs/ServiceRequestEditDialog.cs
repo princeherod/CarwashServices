@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Net.Http;
@@ -446,7 +446,7 @@ namespace CarwashServices.Dialogs
             try
             {
                 var req = await _http.GetFromJsonAsync<ServiceRequestDto>(
-                    $"api/service-requests/{id}");
+                    $"api/service-requests/{id}?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}");
 
                 if (req == null) return;
 
@@ -579,15 +579,16 @@ namespace CarwashServices.Dialogs
             {
                 HttpResponseMessage resp;
 
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 if (_requestId.HasValue)
                 {
                     resp = await _http.PutAsJsonAsync(
-                        $"api/service-requests/{_requestId.Value}", dto);
+                        $"api/service-requests/{_requestId.Value}?companyId={companyId}", dto);
                 }
                 else
                 {
                     resp = await _http.PostAsJsonAsync(
-                        "api/service-requests", dto);
+                        $"api/service-requests?companyId={companyId}", dto);
                 }
 
                 if (resp.IsSuccessStatusCode)

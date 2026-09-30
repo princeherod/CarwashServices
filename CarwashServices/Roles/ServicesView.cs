@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -610,9 +610,10 @@ namespace CarwashServices.Roles
                 _addBtn.Enabled = false;
                 Cursor = Cursors.WaitCursor;
 
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 var url = _tab == ListTab.Active
-                    ? "api/tenant/1/products"
-                    : "api/tenant/1/products/archived";
+                    ? $"api/tenant/{companyId}/products"
+                    : $"api/tenant/{companyId}/products/archived";
 
                 var list = await _http.GetFromJsonAsync<List<ProductDto>>(url);
                 _allServices = list ?? new List<ProductDto>();
@@ -1070,7 +1071,7 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
                 var resp = await _http.PutAsJsonAsync(
-                    $"api/tenant/1/products/{svc.ProductId}/archive",
+                    $"api/tenant/{CarwashServices.Auth.SessionUser.CurrentCompanyId}/products/{svc.ProductId}/archive",
                     new { archivedBy = CurrentUserName });
 
                 if (!resp.IsSuccessStatusCode)
@@ -1099,7 +1100,7 @@ namespace CarwashServices.Roles
             {
                 Cursor = Cursors.WaitCursor;
                 var resp = await _http.PutAsync(
-                    $"api/tenant/1/products/{svc.ProductId}/restore", null);
+                    $"api/tenant/{CarwashServices.Auth.SessionUser.CurrentCompanyId}/products/{svc.ProductId}/restore", null);
 
                 if (!resp.IsSuccessStatusCode)
                 {

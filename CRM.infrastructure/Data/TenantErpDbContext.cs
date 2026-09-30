@@ -1,3 +1,4 @@
+using CRM.domain.Entities;
 using CRM.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,11 +14,12 @@ public class TenantErpDbContext : DbContext
     public DbSet<Product> Products => Set<Product>();
     public DbSet<TenantCustomer> TenantCustomers => Set<TenantCustomer>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
-
     public DbSet<Inventory> Inventories => Set<Inventory>();
-
-    // NEW — complaints / feedback recorded against a tenant customer
     public DbSet<CustomerInteraction> CustomerInteractions => Set<CustomerInteraction>();
+    public DbSet<ServiceRequest> ServiceRequests => Set<ServiceRequest>();
+    public DbSet<BillingTransaction> BillingTransactions => Set<BillingTransaction>();
+    public DbSet<ServiceStatusLog> ServiceStatusLogs => Set<ServiceStatusLog>();
+    public DbSet<FollowUp> FollowUps => Set<FollowUp>();
 
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -158,6 +160,63 @@ public class TenantErpDbContext : DbContext
             // NOTE: no FK constraint to TenantCustomer on purpose.
             // Interactions can outlive a customer deletion if you ever
             // add soft-delete — the CustomerId is just a logical link.
+        });
+
+        builder.Entity<ServiceRequest>(entity =>
+        {
+            entity.HasKey(x => x.RequestId);
+            entity.Ignore(x => x.AssignedStaff);
+            entity.Ignore(x => x.CreatedByUser);
+
+            entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
+            entity.Property(x => x.Priority).HasMaxLength(20);
+            entity.Property(x => x.Notes).HasMaxLength(1000);
+            entity.Property(x => x.ArchivedBy).HasMaxLength(200);
+
+            entity.HasIndex(x => x.CustomerId);
+            entity.HasIndex(x => x.ServiceId);
+            entity.HasIndex(x => x.IsArchived);
+
+            entity.HasMany(x => x.StatusLogs)
+                .WithOne(x => x.ServiceRequest)
+                .HasForeignKey(x => x.RequestId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(x => x.BillingTransactions)
+                .WithOne(x => x.ServiceRequest)
+                .HasForeignKey(x => x.RequestId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<ServiceStatusLog>(entity =>
+        {
+            entity.HasKey(x => x.LogId);
+            entity.Ignore(x => x.UpdatedByUser);
+            entity.Property(x => x.Status).IsRequired();
+            entity.Property(x => x.Notes).IsRequired();
+        });
+
+        builder.Entity<BillingTransaction>(entity =>
+        {
+            entity.HasKey(x => x.TransactionId);
+            entity.Ignore(x => x.CustomerSubscription);
+            entity.Property(x => x.Amount).HasPrecision(18, 2);
+            entity.Property(x => x.PaymentStatus).IsRequired();
+        });
+
+        builder.Entity<FollowUp>(entity =>
+        {
+            entity.HasKey(x => x.FollowUpId);
+            entity.Property(x => x.Type).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.ContactMethod).HasMaxLength(50).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(200);
+            entity.Property(x => x.DiscountOffer).HasMaxLength(200);
+            entity.Property(x => x.Notes).HasMaxLength(1000);
+            entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
+            entity.Property(x => x.ArchivedBy).HasMaxLength(200);
+            entity.Property(x => x.ApprovalStatus).IsRequired();
+            entity.HasIndex(x => x.CustomerId);
+            entity.HasIndex(x => x.IsArchived);
         });
     }
 }

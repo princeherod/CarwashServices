@@ -31,7 +31,9 @@ namespace CarwashServices.Shell
 
         public MainForm()
         {
-            Text = "AquaShine CRM";
+            Text = !string.IsNullOrWhiteSpace(SessionUser.CompanyName)
+                ? $"{SessionUser.CompanyName} - Management System"
+                : (SessionUser.Role == UserRole.SuperAdmin ? "Super Admin Platform - Carwash CRM" : "Carwash CRM");
             StartPosition = FormStartPosition.CenterScreen;
             WindowState = FormWindowState.Maximized;
             BackColor = Color.FromArgb(0xF0, 0xF4, 0xFA);

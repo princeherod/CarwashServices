@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -375,24 +375,25 @@ namespace CarwashServices.Roles
         // ================================================================
         private async Task LoadLookupsAsync()
         {
+            var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
             try
             {
                 _customers = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                    "api/tenant/1/tenant-customers") ?? new();
+                    $"api/tenant/{companyId}/tenant-customers") ?? new();
             }
             catch { _customers = new(); }
 
             try
             {
                 _services = await _http.GetFromJsonAsync<List<ProductDto>>(
-                    "api/tenant/1/products") ?? new();
+                    $"api/tenant/{companyId}/products") ?? new();
             }
             catch { _services = new(); }
 
             try
             {
-                var all = await _http.GetFromJsonAsync<List<UserDto>>("api/users") ?? new();
-                _staff = all.Where(u => u.RoleId == 4).ToList();
+                var all = await _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}") ?? new();
+                _staff = all.Where(u => u.RoleId == 3).ToList();
             }
             catch { _staff = new(); }
 
@@ -426,7 +427,7 @@ namespace CarwashServices.Roles
                 Cursor = Cursors.WaitCursor;
 
                 var all = await _http.GetFromJsonAsync<List<ServiceRequestDto>>(
-                    "api/service-requests") ?? new();
+                    $"api/service-requests?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}") ?? new();
 
                 _unassigned = all
                     .Where(IsAwaitingAssignment)
@@ -728,7 +729,7 @@ namespace CarwashServices.Roles
                 _assignBtn.Text = "Saving…";
 
                 var resp = await _http.PutAsJsonAsync(
-                    $"api/service-requests/{requestId}/assign",
+                    $"api/service-requests/{requestId}/assign?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}",
                     new { assignedStaffId = picked.Id.Value });
 
                 if (!resp.IsSuccessStatusCode)

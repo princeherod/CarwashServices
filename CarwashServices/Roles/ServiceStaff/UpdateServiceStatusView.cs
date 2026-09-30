@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -290,10 +290,11 @@ namespace CarwashServices.Roles.ServiceStaff
                     return;
                 }
 
-                var reqsT = _http.GetFromJsonAsync<List<ServiceRequestDto>>("api/service-requests");
-                var custsT = _http.GetFromJsonAsync<List<TenantCustomerDto>>("api/tenant/1/tenant-customers");
-                var svcsT = _http.GetFromJsonAsync<List<ProductDto>>("api/tenant/1/products");
-                var usersT = _http.GetFromJsonAsync<List<UserDto>>("api/users");
+                var companyId = SessionUser.CurrentCompanyId;
+                var reqsT = _http.GetFromJsonAsync<List<ServiceRequestDto>>($"api/service-requests?companyId={companyId}");
+                var custsT = _http.GetFromJsonAsync<List<TenantCustomerDto>>($"api/tenant/{companyId}/tenant-customers");
+                var svcsT = _http.GetFromJsonAsync<List<ProductDto>>($"api/tenant/{companyId}/products");
+                var usersT = _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}");
 
                 await Task.WhenAll(reqsT, custsT, svcsT, usersT);
 
@@ -486,7 +487,7 @@ namespace CarwashServices.Roles.ServiceStaff
             try
             {
                 var all = await _http.GetFromJsonAsync<ServiceStatusResponseDto>(
-                    "api/service-status?companyId=1") ?? new();
+                    $"api/service-status?companyId={SessionUser.CurrentCompanyId}") ?? new();
 
                 _history = all.History
                     .Where(h => h.RequestId == requestId)
@@ -1126,7 +1127,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 };
 
                 var resp = await _http.PutAsJsonAsync(
-                    $"api/service-requests/{_selected.RequestId}/staff-status", payload);
+                    $"api/service-requests/{_selected.RequestId}/staff-status?companyId={SessionUser.CurrentCompanyId}", payload);
 
                 if (resp.IsSuccessStatusCode)
                 {

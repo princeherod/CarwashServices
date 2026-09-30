@@ -600,7 +600,7 @@ namespace CarwashServices.Dialogs
             try
             {
                 var list = await _http.GetFromJsonAsync<List<TenantCustomerDto>>(
-                    "api/tenant/1/tenant-customers");
+                    $"api/tenant/{CarwashServices.Auth.SessionUser.CurrentCompanyId}/tenant-customers");
 
                 if (list == null) return;
                 var c = list.Find(x => x.TenantCustomerId == id);
@@ -960,9 +960,10 @@ namespace CarwashServices.Dialogs
 
             try
             {
+                var companyId = CarwashServices.Auth.SessionUser.CurrentCompanyId;
                 HttpResponseMessage resp = _isEdit
-                    ? await _http.PutAsJsonAsync($"api/tenant/1/tenant-customers/{_customerId!.Value}", dto)
-                    : await _http.PostAsJsonAsync("api/tenant/1/tenant-customers", dto);
+                    ? await _http.PutAsJsonAsync($"api/tenant/{companyId}/tenant-customers/{_customerId!.Value}", dto)
+                    : await _http.PostAsJsonAsync($"api/tenant/{companyId}/tenant-customers", dto);
 
                 if (resp.IsSuccessStatusCode)
                 {
@@ -1008,7 +1009,7 @@ namespace CarwashServices.Dialogs
 
             try
             {
-                var resp = await _http.DeleteAsync($"api/tenant/1/tenant-customers/{_customerId!.Value}");
+                var resp = await _http.DeleteAsync($"api/tenant/{CarwashServices.Auth.SessionUser.CurrentCompanyId}/tenant-customers/{_customerId!.Value}");
                 if (resp.IsSuccessStatusCode)
                 {
                     MessageBox.Show("Customer deleted.", "Success",
