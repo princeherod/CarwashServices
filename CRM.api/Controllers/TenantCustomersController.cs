@@ -1,4 +1,5 @@
 using CRM.Domain.Entities;
+using CRM.Infrastructure.Data;
 using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,10 +10,12 @@ namespace CRM.api.Controllers;
 [Route("api/tenant/{companyId:int}/tenant-customers")]
 public class TenantCustomersController : ControllerBase
 {
+    private readonly MasterErpDbContext _masterDb;
     private readonly ITenantDbContextFactory _tenantFactory;
 
-    public TenantCustomersController(ITenantDbContextFactory tenantFactory)
+    public TenantCustomersController(MasterErpDbContext masterDb, ITenantDbContextFactory tenantFactory)
     {
+        _masterDb = masterDb;
         _tenantFactory = tenantFactory;
     }
 
@@ -20,6 +23,13 @@ public class TenantCustomersController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll(int companyId, [FromQuery] int? branchId = null)
     {
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_masterDb, HttpContext, companyId, branchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+        branchId = sec.EffectiveBranchId;
+
         await using var tenantDb = await _tenantFactory.CreateAsync(companyId);
         var query = tenantDb.TenantCustomers
             .AsNoTracking()
@@ -40,6 +50,13 @@ public class TenantCustomersController : ControllerBase
     [HttpGet("archived")]
     public async Task<IActionResult> GetArchived(int companyId, [FromQuery] int? branchId = null)
     {
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_masterDb, HttpContext, companyId, branchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+        branchId = sec.EffectiveBranchId;
+
         await using var tenantDb = await _tenantFactory.CreateAsync(companyId);
         var query = tenantDb.TenantCustomers
             .AsNoTracking()
@@ -124,6 +141,17 @@ public class TenantCustomersController : ControllerBase
         customer.ArchivedAt = null;
         customer.ArchivedBy = null;
 
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_masterDb, HttpContext, companyId, customer.BranchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+
+        if (sec.EffectiveBranchId.HasValue && sec.EffectiveBranchId.Value > 0)
+        {
+            customer.BranchId = sec.EffectiveBranchId.Value;
+        }
+
         if (!customer.BranchId.HasValue || customer.BranchId.Value <= 0)
         {
             var defBranch = await tenantDb.Branches.FirstOrDefaultAsync(b => b.IsMainBranch && !b.IsArchived)
@@ -131,6 +159,16 @@ public class TenantCustomersController : ControllerBase
             if (defBranch != null)
             {
                 customer.BranchId = defBranch.BranchId;
+            }
+        }
+
+        // Validate branch is active and not archived
+        if (customer.BranchId.HasValue && customer.BranchId.Value > 0)
+        {
+            var targetBranch = await tenantDb.Branches.AsNoTracking().FirstOrDefaultAsync(b => b.BranchId == customer.BranchId.Value);
+            if (targetBranch == null || targetBranch.IsArchived || !targetBranch.IsActive)
+            {
+                return BadRequest(new { message = "Cannot register a customer to an archived or inactive branch." });
             }
         }
 

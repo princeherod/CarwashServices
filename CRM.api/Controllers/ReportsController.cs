@@ -27,6 +27,13 @@ public class ReportsController : ControllerBase
         [FromQuery] string service = "All",
         [FromQuery] string vehicle = "All")
     {
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, companyId, branchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+        branchId = sec.EffectiveBranchId;
+
         var today = DateTime.Today;
         var (from, to) = ResolveRange(range, today);
 

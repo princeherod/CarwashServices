@@ -114,6 +114,17 @@ public class BranchesController : ControllerBase
             .Select(g => new { BranchId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.BranchId, x => x.Count);
 
+        // Fetch assigned administrators from MasterDb for this tenant company
+        var assignedUsers = await _masterDb.Users
+            .AsNoTracking()
+            .Where(u => u.CompanyId == cid && u.BranchId.HasValue && u.Status == "Active")
+            .OrderBy(u => u.RoleId)
+            .ToListAsync();
+
+        var adminDict = assignedUsers
+            .GroupBy(u => u.BranchId!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
+
         var result = branches.Select(b => new
         {
             b.BranchId,
@@ -131,7 +142,10 @@ public class BranchesController : ControllerBase
             b.ArchivedBy,
             b.CreatedAt,
             serviceRequestsCount = requestCounts.TryGetValue(b.BranchId, out var rc) ? rc : 0,
-            customersCount = customerCounts.TryGetValue(b.BranchId, out var cc) ? cc : 0
+            customersCount = customerCounts.TryGetValue(b.BranchId, out var cc) ? cc : 0,
+            assignedAdminId = adminDict.TryGetValue(b.BranchId, out var adm) ? (int?)adm.UserId : null,
+            assignedAdminName = adminDict.TryGetValue(b.BranchId, out var adm2) ? adm2.FullName : "Unassigned",
+            assignedAdminEmail = adminDict.TryGetValue(b.BranchId, out var adm3) ? adm3.Email : ""
         });
 
         return Ok(result);
@@ -153,6 +167,12 @@ public class BranchesController : ControllerBase
         var reqCount = await tenant.ServiceRequests.CountAsync(r => !r.IsArchived && r.BranchId == id);
         var custCount = await tenant.TenantCustomers.CountAsync(c => !c.IsArchived && c.BranchId == id);
 
+        var assignedAdmin = await _masterDb.Users
+            .AsNoTracking()
+            .Where(u => u.CompanyId == cid && u.BranchId == id && u.Status == "Active")
+            .OrderBy(u => u.RoleId)
+            .FirstOrDefaultAsync();
+
         return Ok(new
         {
             b.BranchId,
@@ -170,7 +190,10 @@ public class BranchesController : ControllerBase
             b.ArchivedBy,
             b.CreatedAt,
             serviceRequestsCount = reqCount,
-            customersCount = custCount
+            customersCount = custCount,
+            assignedAdminId = assignedAdmin?.UserId,
+            assignedAdminName = assignedAdmin?.FullName ?? "Unassigned",
+            assignedAdminEmail = assignedAdmin?.Email ?? ""
         });
     }
 
@@ -369,5 +392,203 @@ public class BranchesController : ControllerBase
         await tenant.SaveChangesAsync();
 
         return Ok(new { message = $"Branch '{branch.BranchName}' successfully restored." });
+    }
+
+    // GET: api/tenant/{companyId}/branches/{id}/eligible-users
+    [HttpGet("{id:int}/eligible-users")]
+    public async Task<IActionResult> GetEligibleUsers(
+        int id,
+        [FromRoute] int? companyId = null)
+    {
+        var cid = ResolveCompanyId(companyId);
+
+        // Fetch eligible users belonging to THIS tenant company only
+        var users = await _masterDb.Users
+            .AsNoTracking()
+            .Where(u => u.CompanyId == cid && (u.RoleId == 1 || u.RoleId == 2 || u.RoleId == 3) && u.Status == "Active")
+            .OrderBy(u => u.FullName)
+            .Select(u => new
+            {
+                u.UserId,
+                u.FullName,
+                u.Email,
+                u.RoleId,
+                RoleName = (u.RoleId == 1 || u.RoleId == 2) ? "Admin" : (u.RoleId == 3 ? "Manager" : "Service Staff"),
+                u.BranchId,
+                IsAssignedToThisBranch = u.BranchId == id
+            })
+            .ToListAsync();
+
+        return Ok(users);
+    }
+
+    public class AssignAdminRequest
+    {
+        public int? UserId { get; set; }
+    }
+
+    // POST: api/tenant/{companyId}/branches/{id}/assign-admin
+    [HttpPost("{id:int}/assign-admin")]
+    public async Task<IActionResult> AssignAdmin(
+        int id,
+        [FromBody] AssignAdminRequest req,
+        [FromRoute] int? companyId = null)
+    {
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        var branch = await tenant.Branches.FirstOrDefaultAsync(b => b.BranchId == id);
+        if (branch == null)
+            return NotFound(new { message = $"Branch with ID {id} not found." });
+
+        if (branch.IsArchived)
+            return BadRequest(new { message = "Cannot assign an administrator to an archived branch." });
+
+        if (req.UserId.HasValue && req.UserId.Value > 0)
+        {
+            var user = await _masterDb.Users.FirstOrDefaultAsync(u => u.UserId == req.UserId.Value);
+            if (user == null)
+                return NotFound(new { message = $"User with ID {req.UserId.Value} not found." });
+
+            // CRITICAL TENANT CHECK: Strictly forbid cross-tenant assignment
+            if (user.CompanyId != cid)
+            {
+                return StatusCode(403, new { message = "Security Violation: Cross-tenant branch assignment is strictly forbidden. User belongs to another company." });
+            }
+
+            // Unassign other users from this branch if any
+            var existingAssigned = await _masterDb.Users
+                .Where(u => u.CompanyId == cid && u.BranchId == id && u.UserId != user.UserId)
+                .ToListAsync();
+            foreach (var eu in existingAssigned)
+            {
+                eu.BranchId = null;
+            }
+
+            user.BranchId = id;
+            await _masterDb.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = $"Administrator '{user.FullName}' ({user.Email}) successfully assigned to branch '{branch.BranchName}'.",
+                branchId = id,
+                userId = user.UserId,
+                adminName = user.FullName
+            });
+        }
+        else
+        {
+            // Unassign current branch admin
+            var currentlyAssigned = await _masterDb.Users
+                .Where(u => u.CompanyId == cid && u.BranchId == id)
+                .ToListAsync();
+            foreach (var u in currentlyAssigned)
+            {
+                u.BranchId = null;
+            }
+            await _masterDb.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = $"Branch '{branch.BranchName}' administrator unassigned.",
+                branchId = id,
+                userId = (int?)null,
+                adminName = "Unassigned"
+            });
+        }
+    }
+
+    public class CreateBranchAdminRequest
+    {
+        public string FirstName { get; set; } = string.Empty;
+        public string LastName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public int RoleId { get; set; } = 2; // Default to Admin (2)
+        public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
+    }
+
+    // POST: api/tenant/{companyId}/branches/{id}/create-admin
+    [HttpPost("{id:int}/create-admin")]
+    public async Task<IActionResult> CreateBranchAdmin(
+        int id,
+        [FromBody] CreateBranchAdminRequest req,
+        [FromRoute] int? companyId = null)
+    {
+        var cid = ResolveCompanyId(companyId);
+        await using var tenant = await _tenantFactory.CreateAsync(cid);
+
+        int targetBranchId = (req.BranchId.HasValue && req.BranchId.Value > 0) ? req.BranchId.Value : id;
+        var branch = await tenant.Branches.FirstOrDefaultAsync(b => b.BranchId == targetBranchId);
+        if (branch == null)
+            return NotFound(new { message = $"Branch with ID {targetBranchId} not found." });
+
+        if (branch.IsArchived)
+            return BadRequest(new { message = "Cannot create an administrator for an archived branch." });
+
+        if (string.IsNullOrWhiteSpace(req.FirstName) || string.IsNullOrWhiteSpace(req.LastName))
+            return BadRequest(new { message = "First Name and Last Name are required." });
+
+        if (string.IsNullOrWhiteSpace(req.Email))
+            return BadRequest(new { message = "Email is required." });
+
+        if (string.IsNullOrWhiteSpace(req.Password))
+            return BadRequest(new { message = "Password is required." });
+
+        var email = req.Email.Trim().ToLowerInvariant();
+        var exists = await _masterDb.Users.AnyAsync(u => u.Email.ToLower() == email);
+        if (exists)
+            return Conflict(new { message = $"A user account with email '{req.Email}' already exists." });
+
+        // Expected Role IDs:
+        // 1 = SuperAdmin, 2 = Admin, 3 = Manager, 4 = ServiceStaff
+        int assignedRoleId = req.RoleId switch
+        {
+            2 => 2, // Admin
+            3 => 3, // Manager
+            4 => 4, // Service Staff
+            _ => 2  // Default to Admin (2)
+        };
+
+        // Unassign any previous admin for this branch when role is Admin
+        if (assignedRoleId == 2)
+        {
+            var prevAdmins = await _masterDb.Users
+                .Where(u => u.CompanyId == cid && u.BranchId == targetBranchId && (u.RoleId == 1 || u.RoleId == 2))
+                .ToListAsync();
+            foreach (var pa in prevAdmins)
+            {
+                pa.BranchId = null;
+            }
+        }
+
+        var newUser = new User
+        {
+            FirstName = req.FirstName.Trim(),
+            LastName = req.LastName.Trim(),
+            Email = req.Email.Trim(),
+            RoleId = assignedRoleId, // Saved as RoleId = 2 for Admin
+            CompanyId = cid,         // Automatically locked to current tenant
+            BranchId = targetBranchId, // Automatically locked to this branch
+            Status = "Active",
+            PasswordHash = req.Password,
+            IdentityUserId = string.Empty,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _masterDb.Users.Add(newUser);
+        await _masterDb.SaveChangesAsync();
+
+        return Ok(new
+        {
+            userId = newUser.UserId,
+            fullName = newUser.FullName,
+            email = newUser.Email,
+            roleId = newUser.RoleId,
+            companyId = newUser.CompanyId,
+            branchId = newUser.BranchId,
+            message = $"Branch Administrator '{newUser.FullName}' successfully created and assigned to '{branch.BranchName}'."
+        });
     }
 }

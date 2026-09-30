@@ -735,6 +735,15 @@ namespace CarwashServices.Shell
             _headerPanel.Controls.Add(_branchSwitcherContainer);
             _branchSwitcherContainer.BringToFront();
 
+            if (SessionUser.IsSingleBranchUser)
+            {
+                _branchSwitcherCombo.Items.Clear();
+                _branchSwitcherCombo.Items.Add(new ComboItem(SessionUser.AssignedBranchId!.Value, SessionUser.AssignedBranchName ?? "Assigned Branch"));
+                _branchSwitcherCombo.SelectedIndex = 0;
+                _branchSwitcherCombo.Enabled = false;
+                return;
+            }
+
             SessionUser.BranchChanged += () =>
             {
                 if (_branchSwitcherCombo != null && !_branchSwitcherCombo.IsDisposed)
@@ -751,6 +760,8 @@ namespace CarwashServices.Shell
 
         private async Task LoadBranchesIntoSwitcherAsync()
         {
+            if (SessionUser.IsSingleBranchUser) return;
+
             try
             {
                 int companyId = SessionUser.CurrentCompanyId;

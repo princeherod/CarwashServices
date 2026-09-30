@@ -1,4 +1,5 @@
 using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,10 +10,12 @@ namespace CRM.api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly MasterErpDbContext _db;
+    private readonly ITenantDbContextFactory _tenantFactory;
 
-    public AuthController(MasterErpDbContext db)
+    public AuthController(MasterErpDbContext db, ITenantDbContextFactory tenantFactory)
     {
         _db = db;
+        _tenantFactory = tenantFactory;
     }
 
     public class LoginRequest
@@ -78,6 +81,21 @@ public class AuthController : ControllerBase
             }
         }
 
+        string branchName = "";
+        if (user.BranchId.HasValue && user.BranchId.Value > 0 && user.CompanyId.HasValue && user.CompanyId.Value > 0)
+        {
+            try
+            {
+                await using var tenant = await _tenantFactory.CreateAsync(user.CompanyId.Value);
+                var br = await tenant.Branches.AsNoTracking().FirstOrDefaultAsync(b => b.BranchId == user.BranchId.Value);
+                if (br != null)
+                {
+                    branchName = br.BranchName;
+                }
+            }
+            catch { }
+        }
+
         return Ok(new
         {
             userId = user.UserId,
@@ -89,6 +107,8 @@ public class AuthController : ControllerBase
             companyId = user.CompanyId,
             companyName = user.Company?.CompanyName ?? "",
             companyCode = user.Company?.CompanyCode ?? "",
+            branchId = user.BranchId,
+            branchName = branchName,
             termsAccepted = termsAccepted,
             termsAcceptedVersion = termsAcceptedVersion,
             termsAcceptedAt = termsAcceptedAt,

@@ -362,11 +362,12 @@ namespace CarwashServices.Roles
 
             AddCol("BranchCode", "CODE", 10);
             AddCol("BranchName", "BRANCH NAME", 18);
-            AddCol("Location", "LOCATION / CITY", 24);
-            AddCol("Contact", "CONTACT", 14);
-            AddCol("Type", "BRANCH TYPE", 14);
+            AddCol("Location", "LOCATION / CITY", 22);
+            AddCol("Contact", "CONTACT", 13);
+            AddCol("Type", "BRANCH TYPE", 13);
+            AddCol("Admin", "ADMIN", 16);
             AddCol("Status", "STATUS", 10);
-            AddCol("Activity", "ACTIVITY", 16);
+            AddCol("Activity", "ACTIVITY", 14);
 
             // Fixed-width, centered "⋮" column
             var actionsCol = new DataGridViewTextBoxColumn
@@ -475,6 +476,7 @@ namespace CarwashServices.Roles
             {
                 string loc = b.DisplayLocation;
                 string type = b.IsMainBranch ? "★ Main Branch" : "Secondary Branch";
+                string admin = !string.IsNullOrWhiteSpace(b.AssignedAdminName) ? b.AssignedAdminName : "Unassigned";
                 string status = b.IsArchived ? "Archived" : (b.IsActive ? "Active" : "Inactive");
                 string activity = $"{b.ServiceRequestsCount} reqs • {b.CustomersCount} cust";
                 string actions = "⋮";
@@ -485,12 +487,15 @@ namespace CarwashServices.Roles
                     loc,
                     b.ContactNumber ?? "—",
                     type,
+                    admin,
                     status,
                     activity,
                     actions
                 );
                 _grid.Rows[idx].Tag = b;
                 _grid.Rows[idx].Cells["Location"].ToolTipText = loc;
+                if (!string.IsNullOrWhiteSpace(b.AssignedAdminEmail))
+                    _grid.Rows[idx].Cells["Admin"].ToolTipText = $"{b.AssignedAdminName} ({b.AssignedAdminEmail})";
             }
         }
 
@@ -511,6 +516,19 @@ namespace CarwashServices.Roles
                 else
                 {
                     e.CellStyle.ForeColor = Muted;
+                }
+            }
+            else if (colName == "Admin")
+            {
+                if (string.IsNullOrWhiteSpace(b.AssignedAdminName) || b.AssignedAdminName == "Unassigned")
+                {
+                    e.CellStyle.ForeColor = Muted;
+                    e.CellStyle.Font = new Font("Segoe UI", 9f, FontStyle.Italic);
+                }
+                else
+                {
+                    e.CellStyle.ForeColor = Navy;
+                    e.CellStyle.Font = new Font("Segoe UI Semibold", 9.5f);
                 }
             }
             else if (colName == "Status")
@@ -575,8 +593,10 @@ namespace CarwashServices.Roles
             if (_currentTab == TabState.Active)
             {
                 _actionMenu.Items.Add(Item("Edit", () => EditBranchAsync(b)));
+                _actionMenu.Items.Add(Item("Assign Admin", () => AssignAdminAsync(b), Blue));
 
                 bool isCurrent = SessionUser.CurrentBranchId == b.BranchId;
+                bool canSwitch = !isCurrent && !SessionUser.IsSingleBranchUser;
                 _actionMenu.Items.Add(Item(
                     isCurrent ? "Current Context" : "Switch To",
                     () =>
@@ -590,7 +610,7 @@ namespace CarwashServices.Roles
                         return Task.CompletedTask;
                     },
                     Blue,
-                    enabled: !isCurrent));
+                    enabled: canSwitch));
 
                 _actionMenu.Items.Add(new ToolStripSeparator());
                 _actionMenu.Items.Add(Item("Archive", () => ArchiveBranchAsync(b), SlateArchived));
@@ -612,7 +632,16 @@ namespace CarwashServices.Roles
             if (dlg.ShowDialog() == DialogResult.OK)
             {
                 _kpiCurrentBranchNum.Text = SessionUser.CurrentBranchName;
-                PopulateGrid();
+                _ = LoadBranchesAsync();
+            }
+        }
+
+        private async Task AssignAdminAsync(BranchDto b)
+        {
+            using var dlg = new AssignBranchAdminDialog(b);
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                await LoadBranchesAsync();
             }
         }
 

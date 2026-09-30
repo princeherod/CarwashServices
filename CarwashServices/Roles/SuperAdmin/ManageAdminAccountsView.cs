@@ -421,6 +421,12 @@ namespace CarwashServices.Roles.SuperAdmin
                     PaintStatusCell(e);
                     break;
                 case "Actions":
+                    if (e.RowIndex >= 0 && e.RowIndex < _admins.Count && SessionUser.IsLoggedIn && _admins[e.RowIndex].UserId == SessionUser.UserId)
+                    {
+                        e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border | DataGridViewPaintParts.SelectionBackground);
+                        e.Handled = true;
+                        break;
+                    }
                     bool hover = _hoverAction == (e.RowIndex << 2);
                     SuperAdminActionMenuHelper.PaintActionsCell(e, hover);
                     break;
@@ -633,6 +639,11 @@ namespace CarwashServices.Roles.SuperAdmin
         private void ShowActionsMenu(int rowIndex, UserListItemDto admin)
         {
             CloseActiveMenu();
+
+            if (SessionUser.IsLoggedIn && admin.UserId == SessionUser.UserId)
+            {
+                return;
+            }
 
             var menu = SuperAdminActionMenuHelper.CreateMenu();
 

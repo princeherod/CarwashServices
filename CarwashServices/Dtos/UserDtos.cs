@@ -17,6 +17,8 @@ namespace CarwashServices.Dtos
         public string FullName { get; set; } = "";
         public int RoleId { get; set; }
         public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
+        public string? BranchName { get; set; }
     }
 
     public class AuthUserDto
@@ -34,6 +36,8 @@ namespace CarwashServices.Dtos
         public string? TermsAcceptedVersion { get; set; }
         public DateTime? TermsAcceptedAt { get; set; }
         public bool MultiBranchEnabled { get; set; }
+        public int? BranchId { get; set; }
+        public string? BranchName { get; set; }
     }
 
     public class UserListItemDto
@@ -47,6 +51,8 @@ namespace CarwashServices.Dtos
         public string Status { get; set; } = "Active";
         public DateTime CreatedAt { get; set; }
         public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
+        public string? BranchName { get; set; }
     }
 
     public class UserDetailDto : UserListItemDto

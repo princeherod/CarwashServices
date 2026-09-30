@@ -88,7 +88,7 @@ namespace CarwashServices.Dialogs
             var detailsCard = new Panel
             {
                 Location = new Point(24, y),
-                Size = new Size(456, 260),
+                Size = new Size(456, 294),
                 BackColor = CardBg
             };
             detailsCard.Paint += (s, e) =>
@@ -101,6 +101,11 @@ namespace CarwashServices.Dialogs
             AddDetailRow(detailsCard, "Branch Status", _b.IsArchived ? "Archived" : (_b.IsActive ? "Active" : "Inactive"), dy);
             dy += 34;
             AddDetailRow(detailsCard, "Branch Type", _b.IsMainBranch ? "Primary / Main Branch" : "Secondary Branch", dy);
+            dy += 34;
+            string adminText = !string.IsNullOrWhiteSpace(_b.AssignedAdminName)
+                ? (!string.IsNullOrWhiteSpace(_b.AssignedAdminEmail) ? $"{_b.AssignedAdminName} ({_b.AssignedAdminEmail})" : _b.AssignedAdminName)
+                : "Unassigned";
+            AddDetailRow(detailsCard, "Branch Admin", adminText, dy);
             dy += 34;
             AddDetailRow(detailsCard, "City / Municipality", string.IsNullOrWhiteSpace(_b.City) ? "—" : _b.City, dy);
             dy += 34;
@@ -126,13 +131,14 @@ namespace CarwashServices.Dialogs
             var switchBtn = new Button
             {
                 Text = "Set Active Branch",
-                Size = new Size(140, 36),
+                Size = new Size(130, 36),
                 Location = new Point(24, 12),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Blue,
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI Semibold", 9f),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Enabled = !SessionUser.IsSingleBranchUser
             };
             switchBtn.FlatAppearance.BorderSize = 0;
             switchBtn.Click += (s, e) =>
@@ -141,6 +147,28 @@ namespace CarwashServices.Dialogs
                 MessageBox.Show($"Active branch set to '{_b.BranchName}'. Operational views will now filter to this branch.", "Active Branch Changed", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 DialogResult = DialogResult.OK;
                 Close();
+            };
+
+            var assignBtn = new Button
+            {
+                Text = "Assign Admin",
+                Size = new Size(120, 36),
+                Location = new Point(164, 12),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.White,
+                ForeColor = Navy,
+                Font = new Font("Segoe UI Semibold", 9f),
+                Cursor = Cursors.Hand
+            };
+            assignBtn.FlatAppearance.BorderColor = CardBorder;
+            assignBtn.Click += (s, e) =>
+            {
+                using var dlg = new AssignBranchAdminDialog(_b);
+                if (dlg.ShowDialog() == DialogResult.OK)
+                {
+                    DialogResult = DialogResult.OK;
+                    Close();
+                }
             };
 
             var closeBtn = new Button
@@ -156,7 +184,7 @@ namespace CarwashServices.Dialogs
             closeBtn.FlatAppearance.BorderColor = CardBorder;
             closeBtn.Click += (s, e) => Close();
 
-            footer.Controls.AddRange(new Control[] { switchBtn, closeBtn });
+            footer.Controls.AddRange(new Control[] { switchBtn, assignBtn, closeBtn });
             Controls.Add(footer);
         }
 

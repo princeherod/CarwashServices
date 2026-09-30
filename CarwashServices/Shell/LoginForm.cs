@@ -386,14 +386,25 @@ namespace CarwashServices.Shell
                             SessionUser.UserId = user.UserId;
                             SessionUser.FullName = user.FullName;
                             SessionUser.Email = user.Email;
-                            SessionUser.RoleId = user.RoleId;
-                            SessionUser.Role = (UserRole)user.RoleId;
                             SessionUser.CompanyId = user.CompanyId;
                             SessionUser.CompanyName = user.CompanyName ?? "";
                             SessionUser.CompanyCode = user.CompanyCode ?? "";
+                            SessionUser.RoleId = user.RoleId;
+                            SessionUser.Role = SessionUser.ResolveRole(user.RoleId, user.Email, user.CompanyId);
                             SessionUser.TermsAccepted = user.TermsAccepted;
                             SessionUser.TermsAcceptedVersion = user.TermsAcceptedVersion;
                             SessionUser.MultiBranchEnabled = user.MultiBranchEnabled;
+                            SessionUser.AssignedBranchId = user.BranchId;
+                            SessionUser.AssignedBranchName = user.BranchName;
+
+                            if (user.BranchId.HasValue && user.BranchId.Value > 0)
+                            {
+                                SessionUser.SetBranch(user.BranchId.Value, user.BranchName);
+                            }
+                            else
+                            {
+                                SessionUser.SetBranch(null, "All Branches");
+                            }
                         }
                     }
                     catch { }

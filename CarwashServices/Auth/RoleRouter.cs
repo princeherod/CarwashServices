@@ -95,28 +95,36 @@ namespace CarwashServices.Auth
                 }
 
                 // Tenant C: CleanRide -> Branching, Business Intelligence & Actions
-                if (code.Contains("CLEAN") || code == "COMP003" || name.Contains("cleanride") || email == "admin@cleanride.com")
+                if (code.Contains("CLEAN") || code == "COMP003" || name.Contains("cleanride") || email.Contains("cleanride"))
                 {
-                    return new[]
+                    var sections = new List<ModuleSection>();
+
+                    if (!SessionUser.IsSingleBranchUser)
                     {
-                        new ModuleSection("BRANCHING", new[]
+                        sections.Add(new ModuleSection("BRANCHING", new[]
                         {
                             "Branches"
-                        }),
-                        new ModuleSection("BUSINESS INTELLIGENCE", new[]
-                        {
-                            "View Dashboard",
-                            "Analytics",
-                            "View Reports"
-                        }),
-                        new ModuleSection("ACTIONS", new[]
-                        {
-                            "Manage Service Requests",
-                            "Follow-Ups / Reminders",
-                            "Manage Users",
-                            "Terms & Conditions"
-                        })
-                    };
+                        }));
+                    }
+
+                    sections.Add(new ModuleSection("BUSINESS INTELLIGENCE", new[]
+                    {
+                        "View Dashboard",
+                        "Analytics",
+                        "View Reports"
+                    }));
+
+                    sections.Add(new ModuleSection("ACTIONS", new[]
+                    {
+                        "Manage Service Requests",
+                        "Manage Customers",
+                        "Manage Services",
+                        "Follow-Ups / Reminders",
+                        "Manage Users",
+                        "Terms & Conditions"
+                    }));
+
+                    return sections.ToArray();
                 }
 
                 // Restored / Old Admin test account (admin@carwashcrm.com) & Default full Admin modules

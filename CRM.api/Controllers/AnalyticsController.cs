@@ -24,6 +24,13 @@ public class AnalyticsController : ControllerBase
         [FromQuery] int companyId = 1,
         [FromQuery] int? branchId = null)
     {
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, companyId, branchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+        branchId = sec.EffectiveBranchId;
+
         var today = DateTime.Today;
         var monthStart = new DateTime(today.Year, today.Month, 1);
 

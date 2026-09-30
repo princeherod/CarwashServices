@@ -1,5 +1,11 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using CRM.api.Services;
 using CRM.domain.Entities;
 using CRM.Infrastructure.Data;
+using CRM.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,27 +16,121 @@ namespace CRM.api.Controllers;
 public class UsersController : ControllerBase
 {
     private readonly MasterErpDbContext _db;
+    private readonly ITenantDbContextFactory _tenantFactory;
 
-    public UsersController(MasterErpDbContext db)
+    public UsersController(MasterErpDbContext db, ITenantDbContextFactory tenantFactory)
     {
         _db = db;
+        _tenantFactory = tenantFactory;
     }
 
-    // Roles allowed on the Manage Users screen.
-    // Super Admin (4) and Admin (1) are intentionally excluded.
-    private static readonly int[] AllowedRoleIds = { 2, 3 };   // 2=Manager, 3=Service Staff
+    // Default tenant roles managed on Manage Users: Admin (1,2), Manager (3), Service Staff (4)
+    private static readonly int[] DefaultRoleIds = { 1, 2, 3, 4 };
 
-    // GET: api/users?roleIds=2,3&companyId=1
+    // GET: api/users?companyId=3&branchId=2
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] string? roleIds = null, [FromQuery] int? companyId = null)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] string? roleIds = null,
+        [FromQuery] int? companyId = null,
+        [FromQuery] int? branchId = null)
     {
-        IQueryable<User> query = _db.Users.AsNoTracking();
+        int targetCompanyId = companyId ?? 0;
 
-        if (companyId.HasValue && companyId.Value > 0)
+        // 1. Resolve calling User ID
+        int callingUserId = 0;
+        if (Request.Headers.TryGetValue("X-Current-User-Id", out var hVal) && int.TryParse(hVal.FirstOrDefault(), out var uid) && uid > 0)
+            callingUserId = uid;
+        else if (Request.Headers.TryGetValue("X-User-Id", out var hVal2) && int.TryParse(hVal2.FirstOrDefault(), out var uid2) && uid2 > 0)
+            callingUserId = uid2;
+
+        User? callingUser = null;
+        if (callingUserId > 0)
         {
-            query = query.Where(u => u.CompanyId == companyId.Value);
+            callingUser = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.UserId == callingUserId);
         }
 
+        // 2. Tenant isolation enforcement
+        if (callingUser != null && callingUser.RoleId != 4 && callingUser.CompanyId.HasValue)
+        {
+            if (targetCompanyId > 0 && targetCompanyId != callingUser.CompanyId.Value)
+            {
+                return StatusCode(403, new { message = $"Security Violation: Cross-tenant access forbidden. You cannot access company {targetCompanyId}'s users." });
+            }
+            targetCompanyId = callingUser.CompanyId.Value;
+        }
+
+        // 3. Branch access validation
+        if (targetCompanyId > 0)
+        {
+            var branchCheck = await BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, targetCompanyId, branchId);
+            if (!branchCheck.Allowed)
+            {
+                return StatusCode(403, new { message = branchCheck.ErrorMessage ?? "Forbidden: You are not authorized to access this branch." });
+            }
+            if (branchCheck.EffectiveBranchId.HasValue)
+            {
+                branchId = branchCheck.EffectiveBranchId.Value;
+            }
+        }
+
+        // 4. Resolve branch metadata from tenant DB
+        bool isMainBranch = false;
+        Dictionary<int, string> branchNames = new();
+        if (targetCompanyId > 0)
+        {
+            try
+            {
+                await using var tenant = await _tenantFactory.CreateAsync(targetCompanyId);
+                var tenantBranches = await tenant.Branches.AsNoTracking().ToListAsync();
+                foreach (var b in tenantBranches)
+                {
+                    branchNames[b.BranchId] = b.BranchName;
+                }
+
+                if (branchId.HasValue && branchId.Value > 0)
+                {
+                    var requestedBranch = tenantBranches.FirstOrDefault(b => b.BranchId == branchId.Value);
+                    if (requestedBranch == null && tenantBranches.Count > 0)
+                    {
+                        return NotFound(new { message = $"Branch with ID {branchId.Value} does not exist for this company." });
+                    }
+                    if (requestedBranch != null)
+                    {
+                        isMainBranch = requestedBranch.IsMainBranch;
+                    }
+                }
+            }
+            catch
+            {
+                // Single-tenant or table not yet migrated
+            }
+        }
+
+        // 5. Query users
+        IQueryable<User> query = _db.Users.AsNoTracking();
+
+        if (targetCompanyId > 0)
+        {
+            query = query.Where(u => u.CompanyId == targetCompanyId);
+        }
+
+        // Branch-scoped filtering
+        if (branchId.HasValue && branchId.Value > 0)
+        {
+            int bId = branchId.Value;
+            if (isMainBranch)
+            {
+                // Main Branch displays existing tenant users (assigned to Main Branch or legacy users with NULL BranchId)
+                query = query.Where(u => u.BranchId == bId || u.BranchId == null);
+            }
+            else
+            {
+                // Any other branch (Calinan, Matina, etc.) strictly returns ONLY users assigned to that branch
+                query = query.Where(u => u.BranchId == bId);
+            }
+        }
+
+        // Role filtering
         if (!string.IsNullOrWhiteSpace(roleIds))
         {
             var ids = roleIds
@@ -45,9 +145,9 @@ public class UsersController : ControllerBase
                 query = query.Where(u => ids.Contains(u.RoleId));
             }
         }
-        else
+        else if (targetCompanyId > 0)
         {
-            query = query.Where(u => AllowedRoleIds.Contains(u.RoleId));
+            query = query.Where(u => DefaultRoleIds.Contains(u.RoleId));
         }
 
         var list = await query
@@ -62,11 +162,40 @@ public class UsersController : ControllerBase
                 u.Email,
                 u.Status,
                 u.CreatedAt,
-                u.CompanyId
+                u.CompanyId,
+                u.BranchId
             })
             .ToListAsync();
 
-        return Ok(list);
+        var result = list.Select(u =>
+        {
+            string bName = "";
+            if (u.BranchId.HasValue && branchNames.TryGetValue(u.BranchId.Value, out var bn))
+            {
+                bName = bn;
+            }
+            else if (!u.BranchId.HasValue && isMainBranch && branchNames.Count > 0)
+            {
+                bName = branchNames.Values.FirstOrDefault() ?? "Main Branch";
+            }
+
+            return new
+            {
+                u.UserId,
+                u.FirstName,
+                u.LastName,
+                u.FullName,
+                u.RoleId,
+                u.Email,
+                u.Status,
+                u.CreatedAt,
+                u.CompanyId,
+                u.BranchId,
+                BranchName = bName
+            };
+        });
+
+        return Ok(result);
     }
 
     // GET: api/users/5
@@ -80,6 +209,18 @@ public class UsersController : ControllerBase
         if (row is null)
             return NotFound(new { message = $"User {id} not found." });
 
+        string branchName = "";
+        if (row.BranchId.HasValue && row.CompanyId.HasValue)
+        {
+            try
+            {
+                await using var tenant = await _tenantFactory.CreateAsync(row.CompanyId.Value);
+                var b = await tenant.Branches.AsNoTracking().FirstOrDefaultAsync(x => x.BranchId == row.BranchId.Value);
+                if (b != null) branchName = b.BranchName;
+            }
+            catch { }
+        }
+
         return Ok(new
         {
             row.UserId,
@@ -90,7 +231,9 @@ public class UsersController : ControllerBase
             row.Email,
             row.Status,
             row.CreatedAt,
-            row.CompanyId
+            row.CompanyId,
+            row.BranchId,
+            BranchName = branchName
         });
     }
 
@@ -100,10 +243,11 @@ public class UsersController : ControllerBase
         public string? LastName { get; set; }
         public string? FullName { get; set; }
         public string Email { get; set; } = "";
-        public int RoleId { get; set; }
+        public int RoleId { get; set; } = 2; // Default to Admin (2)
         public string Status { get; set; } = "Active";
         public string? Password { get; set; }
         public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
         public int? CurrentUserId { get; set; }
     }
 
@@ -150,16 +294,53 @@ public class UsersController : ControllerBase
         if (exists)
             return Conflict(new { message = $"A user with email '{req.Email}' already exists." });
 
+        // Resolve Company and caller permissions
+        int targetCompanyId = req.CompanyId ?? 1;
+        int callingUserId = req.CurrentUserId ?? 0;
+        if (callingUserId == 0 && Request.Headers.TryGetValue("X-Current-User-Id", out var hVal) && int.TryParse(hVal.FirstOrDefault(), out var uid) && uid > 0)
+            callingUserId = uid;
+
+        if (callingUserId > 0)
+        {
+            var caller = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.UserId == callingUserId);
+            if (caller != null && caller.RoleId != 4 && caller.CompanyId.HasValue)
+            {
+                targetCompanyId = caller.CompanyId.Value;
+                if (caller.BranchId.HasValue && caller.BranchId.Value > 0)
+                {
+                    req.BranchId = caller.BranchId.Value;
+                }
+            }
+        }
+
+        // Validate BranchId if assigned
+        int? assignedBranchId = (req.BranchId.HasValue && req.BranchId.Value > 0) ? req.BranchId.Value : null;
+        if (assignedBranchId.HasValue && targetCompanyId > 0)
+        {
+            try
+            {
+                await using var tenant = await _tenantFactory.CreateAsync(targetCompanyId);
+                var branchExists = await tenant.Branches.AnyAsync(b => b.BranchId == assignedBranchId.Value);
+                if (!branchExists)
+                {
+                    return BadRequest(new { message = $"Branch ID {assignedBranchId.Value} does not exist for this company." });
+                }
+            }
+            catch { }
+        }
+
         var user = new User
         {
             FirstName = first,
             LastName = last,
+            FullName = $"{first} {last}".Trim(),
             Email = req.Email.Trim(),
             RoleId = req.RoleId,
-            CompanyId = req.CompanyId,
+            CompanyId = targetCompanyId,
+            BranchId = assignedBranchId,
             Status = string.IsNullOrWhiteSpace(req.Status) ? "Active" : req.Status,
-            PasswordHash = req.Password ?? string.Empty,   // never null in the DB
-            IdentityUserId = string.Empty,                 // never null in the DB
+            PasswordHash = req.Password ?? string.Empty,
+            IdentityUserId = string.Empty,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -199,7 +380,8 @@ public class UsersController : ControllerBase
             user.Email,
             user.Status,
             user.CreatedAt,
-            user.CompanyId
+            user.CompanyId,
+            user.BranchId
         });
     }
 
@@ -213,6 +395,7 @@ public class UsersController : ControllerBase
         public string Status { get; set; } = "Active";
         public string? Password { get; set; }   // blank = keep existing
         public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
         public int? CurrentUserId { get; set; }
     }
 
@@ -224,7 +407,6 @@ public class UsersController : ControllerBase
         if (existing is null)
             return NotFound(new { message = $"User {id} not found." });
 
-        // Resolve caller user ID from headers, request body, or query string
         int currentUserId = 0;
         if (Request.Headers.TryGetValue("X-Current-User-Id", out var hVal) && int.TryParse(hVal, out var uid) && uid > 0)
         {
@@ -244,30 +426,11 @@ public class UsersController : ControllerBase
         }
 
         bool isSelfEdit = (currentUserId > 0 && currentUserId == id);
-        bool isSuperAdminSelfEdit = isSelfEdit && existing.RoleId == 4;
 
-        if (isSuperAdminSelfEdit)
+        // BACKEND SECURITY: Prevent users from editing their own user account in Manage Users
+        if (isSelfEdit)
         {
-            // Requirement 2: RoleId must remain Super Admin (4). User must not change their own role.
-            if (req.RoleId != 4 && req.RoleId != 0)
-            {
-                return BadRequest(new { message = "You cannot change your own Super Admin role." });
-            }
-            req.RoleId = 4;
-
-            // Requirement 3: Super Admin must NOT be able to change their own email. Existing email remains unchanged.
-            if (!string.IsNullOrWhiteSpace(req.Email) && !string.Equals(req.Email.Trim(), existing.Email, StringComparison.OrdinalIgnoreCase))
-            {
-                return BadRequest(new { message = "You cannot change your own email address." });
-            }
-            req.Email = existing.Email;
-
-            // Requirement 4: Super Admin must NOT be able to change their own account status.
-            if (!string.IsNullOrWhiteSpace(req.Status) && !string.Equals(req.Status.Trim(), existing.Status, StringComparison.OrdinalIgnoreCase))
-            {
-                return BadRequest(new { message = "You cannot change your own account status." });
-            }
-            req.Status = existing.Status;
+            return BadRequest(new { message = "You cannot edit your own user account from Manage Users." });
         }
 
         var first = req.FirstName?.Trim();
@@ -308,19 +471,40 @@ public class UsersController : ControllerBase
 
         existing.FirstName = first;
         existing.LastName = last;
-        existing.Email = isSuperAdminSelfEdit ? existing.Email : req.Email.Trim();
-        existing.RoleId = isSuperAdminSelfEdit ? 4 : req.RoleId;
-        existing.Status = isSuperAdminSelfEdit ? existing.Status : (string.IsNullOrWhiteSpace(req.Status) ? "Active" : req.Status);
-        if (req.CompanyId.HasValue && !isSuperAdminSelfEdit)
+        existing.FullName = $"{first} {last}".Trim();
+        existing.Email = req.Email.Trim();
+        existing.RoleId = req.RoleId;
+        existing.Status = string.IsNullOrWhiteSpace(req.Status) ? "Active" : req.Status;
+        if (req.CompanyId.HasValue)
             existing.CompanyId = req.CompanyId.Value;
 
-        // Only replace the password if the caller actually sent a non-empty one.
+        // User movement between branches
+        if (req.BranchId.HasValue)
+        {
+            int targetCid = existing.CompanyId ?? 1;
+            if (req.BranchId.Value > 0)
+            {
+                try
+                {
+                    await using var tenant = await _tenantFactory.CreateAsync(targetCid);
+                    var bExists = await tenant.Branches.AnyAsync(b => b.BranchId == req.BranchId.Value);
+                    if (!bExists)
+                    {
+                        return BadRequest(new { message = $"Branch ID {req.BranchId.Value} does not exist for this company." });
+                    }
+                }
+                catch { }
+                existing.BranchId = req.BranchId.Value;
+            }
+            else
+            {
+                existing.BranchId = null;
+            }
+        }
+
         if (!string.IsNullOrEmpty(req.Password))
             existing.PasswordHash = req.Password;
 
-        // ---- Defensive: the entity declares these as non-nullable strings,
-        // but the DB rows may have drifted to NULL. Coerce before saving so
-        // the UPDATE never fails on a NOT NULL constraint.
         existing.PasswordHash ??= string.Empty;
         existing.IdentityUserId ??= string.Empty;
         if (existing.CreatedAt == default)
@@ -346,7 +530,8 @@ public class UsersController : ControllerBase
             existing.Email,
             existing.Status,
             existing.CreatedAt,
-            existing.CompanyId
+            existing.CompanyId,
+            existing.BranchId
         });
     }
 
@@ -354,31 +539,14 @@ public class UsersController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
-        var row = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id);
-        if (row is null)
+        var existing = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id);
+        if (existing is null)
             return NotFound(new { message = $"User {id} not found." });
 
-        // Resolve caller user ID
-        int currentUserId = 0;
-        if (Request.Headers.TryGetValue("X-Current-User-Id", out var hVal) && int.TryParse(hVal, out var uid) && uid > 0)
-        {
-            currentUserId = uid;
-        }
-        else if (Request.Headers.TryGetValue("X-User-Id", out var hVal2) && int.TryParse(hVal2, out var uid2) && uid2 > 0)
-        {
-            currentUserId = uid2;
-        }
-        else if (Request.Query.TryGetValue("currentUserId", out var qVal) && int.TryParse(qVal, out var qUid) && qUid > 0)
-        {
-            currentUserId = qUid;
-        }
+        if (existing.RoleId == 4)
+            return BadRequest(new { message = "Super Admin accounts cannot be deleted." });
 
-        if (currentUserId > 0 && currentUserId == id && row.RoleId == 4)
-        {
-            return BadRequest(new { message = "Super Admin cannot delete their own account." });
-        }
-
-        _db.Users.Remove(row);
+        _db.Users.Remove(existing);
 
         try
         {

@@ -22,6 +22,10 @@ namespace CarwashServices.Dtos
         public int ServiceRequestsCount { get; set; }
         public int CustomersCount { get; set; }
 
+        public int? AssignedAdminId { get; set; }
+        public string? AssignedAdminName { get; set; }
+        public string? AssignedAdminEmail { get; set; }
+
         public string DisplayLocation
         {
             get
@@ -56,5 +60,33 @@ namespace CarwashServices.Dtos
         public bool MultiBranchEnabled { get; set; }
         public string PlanName { get; set; } = string.Empty;
         public int ActiveBranchesCount { get; set; }
+    }
+
+    public class EligibleBranchUserDto
+    {
+        public int UserId { get; set; }
+        public string FullName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public int RoleId { get; set; }
+        public string RoleName { get; set; } = string.Empty;
+        public int? CurrentBranchId { get; set; }
+        public string? CurrentBranchName { get; set; }
+        public bool IsAssignedToThisBranch { get; set; }
+    }
+
+    public class AssignBranchAdminRequestDto
+    {
+        public int? UserId { get; set; }
+    }
+
+    public class CreateBranchAdminRequestDto
+    {
+        public string FirstName { get; set; } = string.Empty;
+        public string LastName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public int RoleId { get; set; } = 2; // Default to Admin (2)
+        public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
     }
 }

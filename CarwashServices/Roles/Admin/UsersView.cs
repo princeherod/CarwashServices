@@ -45,23 +45,29 @@ namespace CarwashServices.Roles.Admin
         };
 
         private List<UserListItemDto> _all = new();
+        private bool _isSwitchingBranch;
 
         // ---- UI ----
         private Panel _contentPanel = null!;
+        private Panel _branchContextPanel = null!;
+        private ComboBox _branchCombo = null!;
+        private Label _companyLabel = null!;
+        private Panel _rolesCard = null!;
         private DataGridView _grid = null!;
+        private Panel _emptyStatePanel = null!;
         private Button _newUserBtn = null!;
 
         private const int PadX = 40;
-        private const int GridTop = 240;
+        private int _gridTop = 270;
         private const int PageBottom = 24;
 
-        // Aligned with Auth/UserRole.cs: 1 = Admin, 2 = Manager, 3 = Service Staff, 4 = Super Admin.
+        // Aligned with Auth/UserRole.cs: 1 = SuperAdmin, 2 = Admin, 3 = Manager, 4 = Service Staff.
         private static readonly Dictionary<int, string> RoleNames = new()
         {
             { 1, "Admin" },
-            { 2, "Manager" },
-            { 3, "Service Staff" },
-            { 4, "Super Admin" }
+            { 2, "Admin" },
+            { 3, "Manager" },
+            { 4, "Service Staff" }
         };
 
         private readonly int? _roleFilter;
@@ -79,7 +85,21 @@ namespace CarwashServices.Roles.Admin
 
             InitializeUI();
 
-            Load += async (s, e) => await LoadAsync();
+            CarwashServices.Auth.SessionUser.BranchChanged += () =>
+            {
+                if (IsDisposed || !IsHandleCreated) return;
+                Invoke(async () =>
+                {
+                    SyncBranchCombo();
+                    await LoadAsync();
+                });
+            };
+
+            Load += async (s, e) =>
+            {
+                await LoadBranchesAsync();
+                await LoadAsync();
+            };
         }
 
         private void InitializeUI()
@@ -96,7 +116,7 @@ namespace CarwashServices.Roles.Admin
                 Text = _customTitle ?? "Manage Users",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 22f),
-                Location = new Point(PadX, 20),
+                Location = new Point(PadX, 16),
                 AutoSize = true
             });
 
@@ -107,15 +127,73 @@ namespace CarwashServices.Roles.Admin
                     : "System user accounts, roles, access permissions, and account status.",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9.5f),
-                Location = new Point(PadX, 64),
+                Location = new Point(PadX, 58),
                 AutoSize = true
             });
 
+            // ============ BRANCH & CONTEXT BAR ============
+            _branchContextPanel = new Panel
+            {
+                BackColor = Color.White,
+                Location = new Point(PadX, 94),
+                Height = 60,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _branchContextPanel.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder);
+                e.Graphics.DrawRectangle(pen, 0, 0, _branchContextPanel.Width - 1, _branchContextPanel.Height - 1);
+            };
+            _contentPanel.Controls.Add(_branchContextPanel);
+
+            string compName = !string.IsNullOrWhiteSpace(CarwashServices.Auth.SessionUser.CompanyName)
+                ? CarwashServices.Auth.SessionUser.CompanyName
+                : "CleanRide Car Wash";
+
+            _companyLabel = new Label
+            {
+                Text = $"🏢 Company:  {compName}",
+                Font = new Font("Segoe UI Semibold", 10f),
+                ForeColor = Navy,
+                Location = new Point(20, 19),
+                AutoSize = true
+            };
+            _branchContextPanel.Controls.Add(_companyLabel);
+
+            var branchLbl = new Label
+            {
+                Text = "📍 Current Branch:",
+                Font = new Font("Segoe UI Semibold", 9.5f),
+                ForeColor = Muted,
+                Location = new Point(320, 20),
+                AutoSize = true
+            };
+            _branchContextPanel.Controls.Add(branchLbl);
+
+            _branchCombo = new ComboBox
+            {
+                Location = new Point(450, 16),
+                Width = 240,
+                Font = new Font("Segoe UI", 9.5f),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.White
+            };
+            _branchCombo.SelectedIndexChanged += async (s, e) =>
+            {
+                if (_isSwitchingBranch || _branchCombo.SelectedItem == null) return;
+                if (_branchCombo.SelectedItem is ComboItem item && item.Id.HasValue && item.Id.Value > 0)
+                {
+                    CarwashServices.Auth.SessionUser.SetBranch(item.Id.Value, item.Text);
+                    await LoadAsync();
+                }
+            };
+            _branchContextPanel.Controls.Add(_branchCombo);
+
             _newUserBtn = new Button
             {
-                Text = "+  New User",
+                Text = "+  Create User",
                 Font = new Font("Segoe UI Semibold", 10f),
-                Size = new Size(160, 44),
+                Size = new Size(150, 38),
                 Cursor = Cursors.Hand,
                 BackColor = Navy,
                 ForeColor = Color.White,
@@ -126,38 +204,38 @@ namespace CarwashServices.Roles.Admin
             _newUserBtn.FlatAppearance.BorderSize = 0;
             _newUserBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(0x16, 0x2A, 0x5C);
             _newUserBtn.Click += (s, e) => OpenNewUserDialog();
-            _contentPanel.Controls.Add(_newUserBtn);
+            _branchContextPanel.Controls.Add(_newUserBtn);
 
-            var rolesCard = new Panel
+            // ============ ROLES REFERENCE CARD ============
+            _rolesCard = new Panel
             {
                 BackColor = Color.White,
-                Location = new Point(PadX, 106),
-                Height = 110,
+                Location = new Point(PadX, 164),
+                Height = 84,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            rolesCard.Paint += (s, e) =>
+            _rolesCard.Paint += (s, e) =>
             {
                 using var pen = new Pen(CardBorder);
-                e.Graphics.DrawRectangle(pen, 0, 0, rolesCard.Width - 1, rolesCard.Height - 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, _rolesCard.Width - 1, _rolesCard.Height - 1);
             };
-            _contentPanel.Controls.Add(rolesCard);
+            _contentPanel.Controls.Add(_rolesCard);
 
-            rolesCard.Controls.Add(new Label
+            _rolesCard.Controls.Add(new Label
             {
                 Text = "ROLES REFERENCE TABLE",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI Semibold", 8.5f),
-                Location = new Point(20, 14),
+                Location = new Point(20, 10),
                 AutoSize = true
             });
 
-            // Aligned with Auth/UserRole.cs: 1 = Admin, 2 = Manager, 3 = Service Staff, 4 = Super Admin.
             string[] chips =
             {
-                "id:1  Admin",
-                "id:2  Manager",
-                "id:3  Service Staff",
-                "id:4  Super Admin"
+                "id:1  Super Admin",
+                "id:2  Admin",
+                "id:3  Manager",
+                "id:4  Service Staff"
             };
             int cx = 20;
             foreach (var text in chips)
@@ -168,9 +246,9 @@ namespace CarwashServices.Roles.Admin
                     Font = new Font("Segoe UI Semibold", 9f),
                     ForeColor = Muted,
                     BackColor = Color.FromArgb(0xF1, 0xF4, 0xF9),
-                    Padding = new Padding(14, 6, 14, 6),
+                    Padding = new Padding(12, 5, 12, 5),
                     AutoSize = true,
-                    Location = new Point(cx, 44)
+                    Location = new Point(cx, 36)
                 };
                 void Round()
                 {
@@ -179,17 +257,20 @@ namespace CarwashServices.Roles.Admin
                 }
                 chip.SizeChanged += (s, e) => Round();
                 Round();
-                rolesCard.Controls.Add(chip);
-                cx += chip.PreferredWidth + 20;
+                _rolesCard.Controls.Add(chip);
+                cx += chip.PreferredWidth + 16;
             }
 
+            _gridTop = 260;
+
+            // ============ DATA GRID ============
             _grid = new DataGridView
             {
                 BackgroundColor = Color.White,
                 BorderStyle = BorderStyle.None,
                 GridColor = CardBorder,
                 EnableHeadersVisualStyles = false,
-                Location = new Point(PadX, GridTop),
+                Location = new Point(PadX, _gridTop),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
                 {
@@ -205,7 +286,7 @@ namespace CarwashServices.Roles.Admin
                 ColumnHeadersHeight = 44,
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
                 ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
-                RowTemplate = { Height = 72 },
+                RowTemplate = { Height = 68 },
                 DefaultCellStyle = new DataGridViewCellStyle
                 {
                     Font = FontCell,
@@ -226,23 +307,95 @@ namespace CarwashServices.Roles.Admin
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal
             };
 
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "UserId", HeaderText = "User ID", Width = 100 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "UserId", HeaderText = "User ID", Width = 90 });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Name",
                 HeaderText = "Full Name / Email",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 260,
+                MinimumWidth = 240,
                 FillWeight = 100
             });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Role", HeaderText = "Role", Width = 180 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", Width = 140 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Created", HeaderText = "Date Created", Width = 160 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Actions", HeaderText = "Actions", Width = 120 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Role", HeaderText = "Role", Width = 150 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Branch", HeaderText = "Branch", Width = 170 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", Width = 130 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Created", HeaderText = "Date Created", Width = 130 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Actions", HeaderText = "Actions", Width = 110 });
 
             _grid.CellPainting += Grid_CellPainting;
             _grid.CellMouseClick += Grid_CellMouseClick;
+            _grid.CellMouseMove += Grid_CellMouseMove;
             _contentPanel.Controls.Add(_grid);
+
+            // ============ EMPTY STATE PANEL ============
+            _emptyStatePanel = new Panel
+            {
+                BackColor = Color.White,
+                Location = new Point(PadX, _gridTop),
+                Visible = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+            };
+            _emptyStatePanel.Paint += (s, e) =>
+            {
+                using var pen = new Pen(CardBorder);
+                e.Graphics.DrawRectangle(pen, 0, 0, _emptyStatePanel.Width - 1, _emptyStatePanel.Height - 1);
+            };
+
+            var emptyIcon = new Label
+            {
+                Text = "👥",
+                Font = new Font("Segoe UI", 36f),
+                ForeColor = Muted,
+                Size = new Size(80, 70),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            var emptyTitle = new Label
+            {
+                Text = "No users have been assigned to this branch yet.",
+                Font = new Font("Segoe UI Semibold", 13f),
+                ForeColor = Navy,
+                AutoSize = true
+            };
+            var emptySub = new Label
+            {
+                Text = "Click the button below to create and assign the first user for this branch.",
+                Font = new Font("Segoe UI", 9.5f),
+                ForeColor = Muted,
+                AutoSize = true
+            };
+            var emptyCreateBtn = new Button
+            {
+                Text = "+  Create User",
+                Font = new Font("Segoe UI Semibold", 10f),
+                Size = new Size(160, 42),
+                Cursor = Cursors.Hand,
+                BackColor = Navy,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                UseVisualStyleBackColor = false
+            };
+            emptyCreateBtn.FlatAppearance.BorderSize = 0;
+            emptyCreateBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(0x16, 0x2A, 0x5C);
+            emptyCreateBtn.Click += (s, e) => OpenNewUserDialog();
+
+            _emptyStatePanel.Controls.Add(emptyIcon);
+            _emptyStatePanel.Controls.Add(emptyTitle);
+            _emptyStatePanel.Controls.Add(emptySub);
+            _emptyStatePanel.Controls.Add(emptyCreateBtn);
+
+            void LayoutEmptyState()
+            {
+                int w = _emptyStatePanel.ClientSize.Width;
+                int h = _emptyStatePanel.ClientSize.Height;
+                int cy = Math.Max(40, (h - 220) / 2);
+
+                emptyIcon.Location = new Point((w - emptyIcon.Width) / 2, cy);
+                emptyTitle.Location = new Point((w - emptyTitle.PreferredWidth) / 2, cy + 80);
+                emptySub.Location = new Point((w - emptySub.PreferredWidth) / 2, cy + 115);
+                emptyCreateBtn.Location = new Point((w - emptyCreateBtn.Width) / 2, cy + 155);
+            }
+            _emptyStatePanel.Resize += (s, e) => LayoutEmptyState();
+            _contentPanel.Controls.Add(_emptyStatePanel);
 
             void Relayout()
             {
@@ -250,9 +403,13 @@ namespace CarwashServices.Roles.Admin
                 var h = _contentPanel.ClientSize.Height;
                 int contentW = Math.Max(0, w - 2 * PadX);
 
-                _newUserBtn.Location = new Point(w - _newUserBtn.Width - PadX, 20);
-                rolesCard.Width = contentW;
-                _grid.SetBounds(PadX, GridTop, contentW, Math.Max(0, h - GridTop - PageBottom));
+                _branchContextPanel.Width = contentW;
+                _newUserBtn.Location = new Point(_branchContextPanel.Width - _newUserBtn.Width - 16, 11);
+
+                _rolesCard.Width = contentW;
+                _grid.SetBounds(PadX, _gridTop, contentW, Math.Max(0, h - _gridTop - PageBottom));
+                _emptyStatePanel.SetBounds(PadX, _gridTop, contentW, Math.Max(0, h - _gridTop - PageBottom));
+                LayoutEmptyState();
             }
             _contentPanel.Resize += (s, e) => Relayout();
             Relayout();
@@ -270,6 +427,71 @@ namespace CarwashServices.Roles.Admin
             return p;
         }
 
+        private async Task LoadBranchesAsync()
+        {
+            try
+            {
+                int cid = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var branches = await _http.GetFromJsonAsync<List<Dtos.BranchDto>>($"api/tenant/{cid}/branches") ?? new();
+
+                _isSwitchingBranch = true;
+                _branchCombo.Items.Clear();
+
+                int selectIdx = 0;
+                for (int i = 0; i < branches.Count; i++)
+                {
+                    var b = branches[i];
+                    string label = b.IsMainBranch ? $"{b.BranchName} (Main)" : b.BranchName;
+                    int idx = _branchCombo.Items.Add(new ComboItem(b.BranchId, label));
+
+                    if (CarwashServices.Auth.SessionUser.CurrentBranchId == b.BranchId)
+                    {
+                        selectIdx = idx;
+                    }
+                    else if (!CarwashServices.Auth.SessionUser.CurrentBranchId.HasValue && b.IsMainBranch)
+                    {
+                        selectIdx = idx;
+                    }
+                }
+
+                if (_branchCombo.Items.Count > 0)
+                {
+                    _branchCombo.SelectedIndex = selectIdx;
+                    var curItem = _branchCombo.SelectedItem as ComboItem;
+                    if (curItem != null && curItem.Id > 0 && !CarwashServices.Auth.SessionUser.CurrentBranchId.HasValue)
+                    {
+                        CarwashServices.Auth.SessionUser.SetBranch(curItem.Id, curItem.Text);
+                    }
+                }
+
+                if (CarwashServices.Auth.SessionUser.IsSingleBranchUser)
+                {
+                    _branchCombo.Enabled = false;
+                }
+
+                _isSwitchingBranch = false;
+            }
+            catch
+            {
+                _isSwitchingBranch = false;
+            }
+        }
+
+        private void SyncBranchCombo()
+        {
+            if (_branchCombo == null || _branchCombo.IsDisposed) return;
+            _isSwitchingBranch = true;
+            for (int i = 0; i < _branchCombo.Items.Count; i++)
+            {
+                if (_branchCombo.Items[i] is ComboItem ci && ci.Id == CarwashServices.Auth.SessionUser.CurrentBranchId)
+                {
+                    _branchCombo.SelectedIndex = i;
+                    break;
+                }
+            }
+            _isSwitchingBranch = false;
+        }
+
         private async Task LoadAsync()
         {
             try
@@ -277,9 +499,38 @@ namespace CarwashServices.Roles.Admin
                 Cursor = Cursors.WaitCursor;
                 _newUserBtn.Enabled = false;
 
-                var url = (CarwashServices.Auth.SessionUser.RoleId == 4 || CarwashServices.Auth.SessionUser.Role == CarwashServices.Auth.UserRole.SuperAdmin)
-                    ? "api/users?roleIds=1,2,3,4"
-                    : $"api/users?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}";
+                if (CarwashServices.Auth.SessionUser.IsLoggedIn)
+                {
+                    _http.DefaultRequestHeaders.Remove("X-Current-User-Id");
+                    _http.DefaultRequestHeaders.Remove("X-User-Id");
+                    _http.DefaultRequestHeaders.Add("X-Current-User-Id", CarwashServices.Auth.SessionUser.UserId.ToString());
+                    _http.DefaultRequestHeaders.Add("X-User-Id", CarwashServices.Auth.SessionUser.UserId.ToString());
+                }
+
+                int? targetBranchId = null;
+                if (_branchCombo.SelectedItem is ComboItem bi && bi.Id.HasValue && bi.Id.Value > 0)
+                {
+                    targetBranchId = bi.Id.Value;
+                }
+                else if (CarwashServices.Auth.SessionUser.CurrentBranchId.HasValue)
+                {
+                    targetBranchId = CarwashServices.Auth.SessionUser.CurrentBranchId.Value;
+                }
+
+                string url;
+                if (CarwashServices.Auth.SessionUser.RoleId == 4 || CarwashServices.Auth.SessionUser.Role == CarwashServices.Auth.UserRole.SuperAdmin)
+                {
+                    url = targetBranchId.HasValue
+                        ? $"api/users?branchId={targetBranchId.Value}"
+                        : "api/users?roleIds=1,2,3,4";
+                }
+                else
+                {
+                    int cid = CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                    url = targetBranchId.HasValue
+                        ? $"api/users?companyId={cid}&branchId={targetBranchId.Value}"
+                        : $"api/users?companyId={cid}";
+                }
 
                 var list = await _http.GetFromJsonAsync<List<UserListItemDto>>(url)
                            ?? new List<UserListItemDto>();
@@ -310,7 +561,9 @@ namespace CarwashServices.Roles.Admin
                 query = query.Where(x => x.RoleId == _roleFilter.Value);
             }
 
-            foreach (var u in query.OrderBy(x => x.UserId))
+            var filteredList = query.OrderBy(x => x.UserId).ToList();
+
+            foreach (var u in filteredList)
             {
                 var nameCell = u.FullName;
                 if (!string.IsNullOrWhiteSpace(u.Email))
@@ -319,17 +572,37 @@ namespace CarwashServices.Roles.Admin
                 var roleCell = RoleNames.TryGetValue(u.RoleId, out var rn) ? rn : $"Role {u.RoleId}";
                 roleCell += "\nid:" + u.RoleId;
 
+                string branchDisplay = !string.IsNullOrWhiteSpace(u.BranchName)
+                    ? u.BranchName
+                    : (u.BranchId.HasValue ? $"Branch {u.BranchId}" : "Main Branch");
+
+                bool isSelf = CarwashServices.Auth.SessionUser.IsLoggedIn && u.UserId == CarwashServices.Auth.SessionUser.UserId;
+                string actionText = isSelf ? "" : "Edit";
+
                 _grid.Rows.Add(
                     u.UserId,
                     nameCell,
                     roleCell,
+                    branchDisplay,
                     u.Status,
                     u.CreatedAt.ToString("yyyy-MM-dd"),
-                    "Edit");
+                    actionText);
             }
 
             _grid.ClearSelection();
             _grid.ResumeLayout();
+
+            if (filteredList.Count == 0)
+            {
+                _grid.Visible = false;
+                _emptyStatePanel.Visible = true;
+                _emptyStatePanel.BringToFront();
+            }
+            else
+            {
+                _grid.Visible = true;
+                _emptyStatePanel.Visible = false;
+            }
         }
 
         private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -342,6 +615,7 @@ namespace CarwashServices.Roles.Admin
             {
                 case "Name": PaintNameCell(e); break;
                 case "Role": PaintRoleCell(e); break;
+                case "Branch": PaintBranchCell(e); break;
                 case "Status": PaintStatusCell(e); break;
                 case "Actions": PaintEditButton(e); break;
             }
@@ -366,7 +640,7 @@ namespace CarwashServices.Roles.Admin
                 return;
             }
 
-            int avatarSize = Math.Min(40, Math.Max(16, b.Height - 8));
+            int avatarSize = Math.Min(38, Math.Max(16, b.Height - 12));
             int ax = b.X + 16;
             int ay = b.Y + (b.Height - avatarSize) / 2;
 
@@ -422,7 +696,7 @@ namespace CarwashServices.Roles.Admin
 
             var b = e.CellBounds;
             int x = b.X + 16;
-            int y = b.Y + 14;
+            int y = b.Y + 12;
 
             using (var font = FontTag)
             {
@@ -430,8 +704,8 @@ namespace CarwashServices.Roles.Admin
                     new Size(int.MaxValue, int.MaxValue),
                     TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
 
-                int pillW = size.Width + 20;
-                int pillH = size.Height + 8;
+                int pillW = size.Width + 18;
+                int pillH = size.Height + 6;
                 var pill = new Rectangle(x, y, pillW, pillH);
 
                 var (bg, fg) = RoleColors(roleName);
@@ -447,8 +721,52 @@ namespace CarwashServices.Roles.Admin
             }
 
             TextRenderer.DrawText(e.Graphics, idLine, FontIdSub,
-                new Rectangle(x, y + 26, b.Width - 24, 18), Muted,
+                new Rectangle(x, y + 24, b.Width - 24, 18), Muted,
                 TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+
+            e.Handled = true;
+        }
+
+        private void PaintBranchCell(DataGridViewCellPaintingEventArgs e)
+        {
+            e.Paint(e.CellBounds, DataGridViewPaintParts.Background |
+                                  DataGridViewPaintParts.Border |
+                                  DataGridViewPaintParts.SelectionBackground);
+
+            var branchName = Convert.ToString(e.Value) ?? "";
+            if (string.IsNullOrWhiteSpace(branchName))
+                branchName = "Main Branch";
+
+            var b = e.CellBounds;
+            int x = b.X + 16;
+            int y = b.Y + (b.Height - 26) / 2;
+
+            using (var font = FontTag)
+            {
+                var size = TextRenderer.MeasureText(e.Graphics, branchName, font,
+                    new Size(int.MaxValue, int.MaxValue),
+                    TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+
+                int pillW = Math.Min(b.Width - 32, size.Width + 18);
+                int pillH = 26;
+                var pill = new Rectangle(x, y, pillW, pillH);
+
+                var bg = Color.FromArgb(0xF0, 0xF4, 0xF8);
+                var fg = Color.FromArgb(0x33, 0x4E, 0x68);
+
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var path = RoundedRect(pill, pillH / 2))
+                using (var brush = new SolidBrush(bg))
+                using (var pen = new Pen(Color.FromArgb(0xDC, 0xE2, 0xEC), 1f))
+                {
+                    e.Graphics.FillPath(brush, path);
+                    e.Graphics.DrawPath(pen, path);
+                }
+
+                TextRenderer.DrawText(e.Graphics, branchName, font, pill, fg,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            }
 
             e.Handled = true;
         }
@@ -459,34 +777,35 @@ namespace CarwashServices.Roles.Admin
                                   DataGridViewPaintParts.Border |
                                   DataGridViewPaintParts.SelectionBackground);
 
-            var text = Convert.ToString(e.Value) ?? "";
-            if (text.Length == 0) { e.Handled = true; return; }
-
-            bool active = string.Equals(text, "Active", StringComparison.OrdinalIgnoreCase);
-            var fg = active ? StatusActiveFg : StatusInactiveFg;
-            var bg = active ? StatusActiveBg : StatusInactiveBg;
+            var status = Convert.ToString(e.Value) ?? "Active";
+            bool isActive = string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase);
 
             var b = e.CellBounds;
-            using var font = FontTag;
-            var size = TextRenderer.MeasureText(e.Graphics, text, font,
-                new Size(int.MaxValue, int.MaxValue),
-                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+            int x = b.X + 16;
+            int y = b.Y + (b.Height - 24) / 2;
 
-            int pillW = size.Width + 24;
-            int pillH = size.Height + 10;
-            var pill = new Rectangle(
-                b.X + 16,
-                b.Y + (b.Height - pillH) / 2,
-                pillW, pillH);
+            var bg = isActive ? StatusActiveBg : StatusInactiveBg;
+            var fg = isActive ? StatusActiveFg : StatusInactiveFg;
 
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = RoundedRect(pill, pillH / 2))
-            using (var brush = new SolidBrush(bg))
-                e.Graphics.FillPath(brush, path);
+            using (var font = FontTag)
+            {
+                var size = TextRenderer.MeasureText(e.Graphics, status, font,
+                    new Size(int.MaxValue, int.MaxValue),
+                    TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
 
-            TextRenderer.DrawText(e.Graphics, text, font, pill, fg,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+                int pillW = size.Width + 18;
+                int pillH = 24;
+                var pill = new Rectangle(x, y, pillW, pillH);
+
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var path = RoundedRect(pill, pillH / 2))
+                using (var brush = new SolidBrush(bg))
+                    e.Graphics.FillPath(brush, path);
+
+                TextRenderer.DrawText(e.Graphics, status, font, pill, fg,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            }
 
             e.Handled = true;
         }
@@ -497,15 +816,23 @@ namespace CarwashServices.Roles.Admin
                                   DataGridViewPaintParts.Border |
                                   DataGridViewPaintParts.SelectionBackground);
 
+            var actionText = Convert.ToString(e.Value) ?? "";
+            if (string.IsNullOrWhiteSpace(actionText))
+            {
+                // Self row: do not paint the Edit button (completely hidden)
+                e.Handled = true;
+                return;
+            }
+
             var b = e.CellBounds;
-            int btnW = 72, btnH = 32;
+            int btnW = 68, btnH = 30;
             var rect = new Rectangle(
                 b.X + (b.Width - btnW) / 2,
                 b.Y + (b.Height - btnH) / 2,
                 btnW, btnH);
 
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = RoundedRect(rect, 8))
+            using (var path = RoundedRect(rect, 6))
             using (var fill = new SolidBrush(Color.White))
             using (var pen = new Pen(Blue, 1f))
             {
@@ -538,30 +865,70 @@ namespace CarwashServices.Roles.Admin
             return (parts[0][0].ToString() + parts[parts.Length - 1][0].ToString()).ToUpper();
         }
 
+        private void Grid_CellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && _grid.Columns[e.ColumnIndex].Name == "Actions")
+            {
+                var action = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
+                _grid.Cursor = (action == "Edit") ? Cursors.Hand : Cursors.Default;
+            }
+            else
+            {
+                _grid.Cursor = Cursors.Default;
+            }
+        }
+
         private void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
             if (_grid.Columns[e.ColumnIndex].Name != "Actions") return;
 
+            var actionText = _grid.Rows[e.RowIndex].Cells["Actions"].Value?.ToString() ?? "";
+            if (string.IsNullOrWhiteSpace(actionText) || actionText != "Edit") return;
+
             var idText = _grid.Rows[e.RowIndex].Cells["UserId"].Value?.ToString() ?? "";
             if (!int.TryParse(idText, out var id)) return;
+
+            // Extra client-side guard: do not allow editing own account
+            if (CarwashServices.Auth.SessionUser.IsLoggedIn && id == CarwashServices.Auth.SessionUser.UserId)
+            {
+                return;
+            }
 
             OpenEditUserDialog(id);
         }
 
         private async void OpenNewUserDialog()
         {
-            using var dlg = new UserEditDialog(null);
+            int? currentBranchId = null;
+            string? currentBranchName = null;
+
+            if (_branchCombo.SelectedItem is ComboItem bi && bi.Id.HasValue && bi.Id.Value > 0)
+            {
+                currentBranchId = bi.Id.Value;
+                currentBranchName = bi.Text;
+            }
+            else if (CarwashServices.Auth.SessionUser.CurrentBranchId.HasValue)
+            {
+                currentBranchId = CarwashServices.Auth.SessionUser.CurrentBranchId.Value;
+                currentBranchName = CarwashServices.Auth.SessionUser.CurrentBranchName;
+            }
+
+            using var dlg = new UserEditDialog(null, currentBranchId, currentBranchName);
             if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+            {
                 await LoadAsync();
+            }
         }
 
         private async void OpenEditUserDialog(int userId)
         {
             using var dlg = new UserEditDialog(userId);
             if (dlg.ShowDialog(FindForm()) == DialogResult.OK)
+            {
                 await LoadAsync();
+            }
         }
     }
 }

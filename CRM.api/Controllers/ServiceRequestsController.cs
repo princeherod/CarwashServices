@@ -48,6 +48,14 @@ public class ServiceRequestsController : ControllerBase
         [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
+
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_masterDb, HttpContext, cid, branchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+        branchId = sec.EffectiveBranchId;
+
         await using var tenant = await _tenantFactory.CreateAsync(cid);
 
         var query = tenant.ServiceRequests
@@ -93,6 +101,14 @@ public class ServiceRequestsController : ControllerBase
         [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
+
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_masterDb, HttpContext, cid, branchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+        branchId = sec.EffectiveBranchId;
+
         await using var tenant = await _tenantFactory.CreateAsync(cid);
 
         var query = tenant.ServiceRequests
@@ -176,6 +192,17 @@ public class ServiceRequestsController : ControllerBase
         req.ArchivedAt = null;
         req.ArchivedBy = null;
 
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_masterDb, HttpContext, cid, req.BranchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+
+        if (sec.EffectiveBranchId.HasValue && sec.EffectiveBranchId.Value > 0)
+        {
+            req.BranchId = sec.EffectiveBranchId.Value;
+        }
+
         // Default BranchId to main or first branch if not specified
         if (!req.BranchId.HasValue || req.BranchId.Value <= 0)
         {
@@ -184,6 +211,16 @@ public class ServiceRequestsController : ControllerBase
             if (defBranch != null)
             {
                 req.BranchId = defBranch.BranchId;
+            }
+        }
+
+        // Validate branch is active and not archived
+        if (req.BranchId.HasValue && req.BranchId.Value > 0)
+        {
+            var targetBranch = await tenant.Branches.AsNoTracking().FirstOrDefaultAsync(b => b.BranchId == req.BranchId.Value);
+            if (targetBranch == null || targetBranch.IsArchived || !targetBranch.IsActive)
+            {
+                return BadRequest(new { message = "Cannot create a service request for an archived or inactive branch." });
             }
         }
 

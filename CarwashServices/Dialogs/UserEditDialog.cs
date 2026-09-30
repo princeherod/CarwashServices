@@ -7,6 +7,7 @@ using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Collections.Generic;
 
 using CarwashServices.Dtos;
 
@@ -31,21 +32,24 @@ namespace CarwashServices.Dialogs
 
         private static readonly (int Id, string Name)[] SuperAdminRoles =
         {
-            (4, "Super Admin"),
-            (1, "Admin"),
-            (2, "Manager"),
-            (3, "Service Staff")
+            (1, "Super Admin"),
+            (2, "Admin"),
+            (3, "Manager"),
+            (4, "Service Staff")
         };
 
         private static readonly (int Id, string Name)[] StandardRoles =
         {
-            (2, "Manager"),
-            (3, "Service Staff")
+            (2, "Admin"),
+            (3, "Manager"),
+            (4, "Service Staff")
         };
 
         // ---- State ----
         private readonly int? _userId;
         private readonly bool _isEdit;
+        private readonly int? _defaultBranchId;
+        private readonly string? _defaultBranchName;
         private UserDetailDto? _loaded;
 
         // ---- Controls ----
@@ -54,6 +58,7 @@ namespace CarwashServices.Dialogs
         private TextBox _emailTxt = null!;
         private ComboBox _roleCombo = null!;
         private ComboBox? _statusCombo;
+        private ComboBox _branchCombo = null!;
         private TextBox _passwordTxt = null!;
         private TextBox _confirmTxt = null!;
         private Label _errorLbl = null!;
@@ -68,10 +73,13 @@ namespace CarwashServices.Dialogs
         private static readonly Regex EmailRegex =
             new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
 
-        public UserEditDialog(int? userId)
+        public UserEditDialog(int? userId, int? defaultBranchId = null, string? defaultBranchName = null)
         {
             _userId = userId;
             _isEdit = userId.HasValue;
+            _defaultBranchId = defaultBranchId;
+            _defaultBranchName = defaultBranchName;
+
             if (CarwashServices.Auth.SessionUser.IsLoggedIn)
             {
                 _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Current-User-Id", CarwashServices.Auth.SessionUser.UserId.ToString());
@@ -79,8 +87,18 @@ namespace CarwashServices.Dialogs
             }
             InitializeForm();
 
-            if (_isEdit)
-                Load += async (s, e) => await LoadUserAsync(userId!.Value);
+            Load += async (s, e) =>
+            {
+                if (_isEdit)
+                {
+                    await LoadUserAsync(userId!.Value);
+                    await LoadBranchesAsync(_loaded?.BranchId);
+                }
+                else
+                {
+                    await LoadBranchesAsync(_defaultBranchId);
+                }
+            };
         }
 
         // =================================================================
@@ -89,7 +107,7 @@ namespace CarwashServices.Dialogs
         private void InitializeForm()
         {
             Text = _isEdit ? "Edit System User" : "Create System User";
-            ClientSize = new Size(720, 580);
+            ClientSize = new Size(720, 640);
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             Font = new Font("Segoe UI", 9.5f);
@@ -127,11 +145,12 @@ namespace CarwashServices.Dialogs
             _errorLbl = new Label
             {
                 AutoSize = false,
-                Location = new Point(PadX, 12),
-                Size = new Size(360, 52),
+                Location = new Point(PadX, 10),
+                Size = new Size(ContentW, 20),
                 ForeColor = Danger,
                 Font = new Font("Segoe UI", 9f),
-                TextAlign = ContentAlignment.MiddleLeft
+                TextAlign = ContentAlignment.MiddleLeft,
+                Visible = false
             };
             footer.Controls.Add(_errorLbl);
 
@@ -265,6 +284,19 @@ namespace CarwashServices.Dialogs
                 _statusCombo.SelectedIndex = 0;
                 body.Controls.Add(_statusCombo);
             }
+            y += 76;
+
+            // ============ BRANCH ASSIGNMENT ============
+            body.Controls.Add(MakeLabel("Assigned Branch *", PadX, y));
+            _branchCombo = new ComboBox
+            {
+                Location = new Point(PadX, y + 22),
+                Width = ContentW,
+                Font = new Font("Segoe UI", 10f),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.White
+            };
+            body.Controls.Add(_branchCombo);
             y += 88;
 
             // ============ PASSWORD & SECURITY ============
@@ -317,66 +349,89 @@ namespace CarwashServices.Dialogs
                 Size = new Size(ContentW, 20),
                 BackColor = Color.White
             };
-            p.Controls.Add(new Label
+            p.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Line);
+                int cy = p.Height / 2;
+                e.Graphics.DrawLine(pen, 0, cy, lx - 8, cy);
+                e.Graphics.DrawLine(pen, lx + tw + 8, cy, ContentW, cy);
+            };
+
+            var lbl = new Label
             {
                 Text = text,
-                ForeColor = Accent,
+                ForeColor = Faint,
                 Font = font,
-                AutoSize = true,
-                BackColor = Color.White,
-                Location = new Point(lx, 0)
-            });
-            p.Controls.Add(new Panel
-            {
-                Location = new Point(0, 9),
-                Size = new Size(Math.Max(0, lx - 12), 1),
-                BackColor = Line
-            });
-            p.Controls.Add(new Panel
-            {
-                Location = new Point(lx + tw + 12, 9),
-                Size = new Size(Math.Max(0, ContentW - (lx + tw + 12)), 1),
-                BackColor = Line
-            });
+                Location = new Point(lx, 0),
+                AutoSize = true
+            };
+            p.Controls.Add(lbl);
             return p;
         }
 
-        private void ClearError()
-        {
-            if (_errorLbl != null) _errorLbl.Text = "";
-        }
-
-        // =================================================================
-        //  LOAD (edit mode)
-        // =================================================================
-        private async Task LoadUserAsync(int id)
+        private async Task LoadBranchesAsync(int? selectedBranchId = null)
         {
             try
             {
-                var u = await _http.GetFromJsonAsync<UserDetailDto>($"api/users/{id}");
-                if (u == null) return;
+                int cid = _loaded?.CompanyId ?? CarwashServices.Auth.SessionUser.CurrentCompanyId;
+                var branches = await _http.GetFromJsonAsync<List<Dtos.BranchDto>>($"api/tenant/{cid}/branches") ?? new();
 
+                _branchCombo.Items.Clear();
+                int selectIdx = 0;
+                for (int i = 0; i < branches.Count; i++)
+                {
+                    var b = branches[i];
+                    string label = b.IsMainBranch ? $"{b.BranchName} (Main)" : b.BranchName;
+                    int idx = _branchCombo.Items.Add(new ComboItem(b.BranchId, label));
+                    if (selectedBranchId.HasValue && selectedBranchId.Value == b.BranchId)
+                    {
+                        selectIdx = idx;
+                    }
+                    else if (!selectedBranchId.HasValue && _defaultBranchId.HasValue && _defaultBranchId.Value == b.BranchId)
+                    {
+                        selectIdx = idx;
+                    }
+                }
+
+                if (_branchCombo.Items.Count > 0)
+                {
+                    _branchCombo.SelectedIndex = selectIdx;
+                }
+
+                if (CarwashServices.Auth.SessionUser.IsSingleBranchUser)
+                {
+                    _branchCombo.Enabled = false;
+                }
+            }
+            catch
+            {
+                if (_defaultBranchId.HasValue)
+                {
+                    _branchCombo.Items.Clear();
+                    _branchCombo.Items.Add(new ComboItem(_defaultBranchId.Value, _defaultBranchName ?? "Assigned Branch"));
+                    _branchCombo.SelectedIndex = 0;
+                }
+            }
+        }
+
+        // =================================================================
+        //  DATA ACCESS
+        // =================================================================
+        private async Task LoadUserAsync(int userId)
+        {
+            try
+            {
+                var u = await _http.GetFromJsonAsync<UserDetailDto>($"api/users/{userId}");
+                if (u is null)
+                {
+                    MessageBox.Show("User could not be found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Close();
+                    return;
+                }
                 _loaded = u;
-                if (!string.IsNullOrWhiteSpace(u.FirstName))
-                {
-                    _firstNameTxt.Text = u.FirstName;
-                    _lastNameTxt.Text = u.LastName;
-                }
-                else
-                {
-                    var full = u.FullName ?? "";
-                    int idx = full.IndexOf(' ');
-                    if (idx > 0)
-                    {
-                        _firstNameTxt.Text = full.Substring(0, idx).Trim();
-                        _lastNameTxt.Text = full.Substring(idx + 1).Trim();
-                    }
-                    else
-                    {
-                        _firstNameTxt.Text = full;
-                        _lastNameTxt.Text = "";
-                    }
-                }
+
+                _firstNameTxt.Text = u.FirstName;
+                _lastNameTxt.Text = u.LastName;
                 _emailTxt.Text = u.Email;
 
                 bool roleMatched = false;
@@ -389,14 +444,15 @@ namespace CarwashServices.Dialogs
                         break;
                     }
                 }
-                if (!roleMatched && u.RoleId > 0)
+
+                if (!roleMatched)
                 {
                     string rName = u.RoleId switch
                     {
-                        1 => "Admin",
-                        2 => "Manager",
-                        3 => "Service Staff",
-                        4 => "Super Admin",
+                        1 => "Super Admin",
+                        2 => "Admin",
+                        3 => "Manager",
+                        4 => "Service Staff",
                         _ => $"Role {u.RoleId}"
                     };
                     int addedIdx = _roleCombo.Items.Add(new ComboItem(u.RoleId, rName));
@@ -457,9 +513,17 @@ namespace CarwashServices.Dialogs
 
         private async Task SaveAsync()
         {
+            if (_isEdit && _userId.HasValue && CarwashServices.Auth.SessionUser.IsLoggedIn && _userId.Value == CarwashServices.Auth.SessionUser.UserId)
+            {
+                _errorLbl.Text = "You cannot edit your own user account.";
+                _errorLbl.Visible = true;
+                return;
+            }
+
             if (!ValidateForm(out var error))
             {
                 _errorLbl.Text = error;
+                _errorLbl.Visible = true;
                 return;
             }
             ClearError();
@@ -472,6 +536,16 @@ namespace CarwashServices.Dialogs
             var last = _lastNameTxt.Text.Trim();
             var full = $"{first} {last}".Trim();
 
+            int? selectedBranchId = null;
+            if (_branchCombo.SelectedItem is ComboItem bItem && bItem.Id > 0)
+            {
+                selectedBranchId = bItem.Id;
+            }
+            else if (_defaultBranchId.HasValue)
+            {
+                selectedBranchId = _defaultBranchId.Value;
+            }
+
             try
             {
                 HttpResponseMessage resp;
@@ -479,6 +553,8 @@ namespace CarwashServices.Dialogs
                 int? targetCompanyId = _isEdit
                     ? (_loaded?.CompanyId ?? (CarwashServices.Auth.SessionUser.CompanyId.HasValue ? CarwashServices.Auth.SessionUser.CurrentCompanyId : (int?)null))
                     : (CarwashServices.Auth.SessionUser.CompanyId.HasValue ? CarwashServices.Auth.SessionUser.CompanyId.Value : (int?)null);
+
+                int currentUserId = CarwashServices.Auth.SessionUser.UserId;
 
                 if (_isEdit)
                 {
@@ -491,7 +567,9 @@ namespace CarwashServices.Dialogs
                             email = _emailTxt.Text.Trim(),
                             roleId = role.Id,
                             status,
-                            companyId = targetCompanyId
+                            companyId = targetCompanyId,
+                            branchId = selectedBranchId,
+                            currentUserId = currentUserId
                         }
                         : new
                         {
@@ -502,7 +580,9 @@ namespace CarwashServices.Dialogs
                             roleId = role.Id,
                             status,
                             password,
-                            companyId = targetCompanyId
+                            companyId = targetCompanyId,
+                            branchId = selectedBranchId,
+                            currentUserId = currentUserId
                         };
 
                     resp = await _http.PutAsJsonAsync($"api/users/{_userId!.Value}", body);
@@ -515,10 +595,11 @@ namespace CarwashServices.Dialogs
                         lastName = last,
                         fullName = full,
                         email = _emailTxt.Text.Trim(),
-                        roleId = role.Id,
+                        roleId = role.Id, // Saved as RoleId = 2 for Admin
                         status,
                         password,
-                        companyId = targetCompanyId
+                        companyId = targetCompanyId,
+                        branchId = selectedBranchId
                     };
                     resp = await _http.PostAsJsonAsync("api/users", body);
                 }
@@ -547,64 +628,64 @@ namespace CarwashServices.Dialogs
                         if (doc.RootElement.TryGetProperty("message", out var m))
                             errorMsg = m.GetString() ?? errorMsg;
                     }
-                    catch
-                    {
-                        if (!string.IsNullOrWhiteSpace(text)) errorMsg = text;
-                    }
+                    catch { }
 
                     _errorLbl.Text = errorMsg;
-                    MessageBox.Show(
-                        errorMsg,
-                        resp.StatusCode == System.Net.HttpStatusCode.Conflict ? "User Already Exists" : "Save User Failed",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
+                    _errorLbl.Visible = true;
                 }
             }
             catch (Exception ex)
             {
-                _errorLbl.Text = "Save failed. " + ex.Message;
+                _errorLbl.Text = $"Connection error: {ex.Message}";
+                _errorLbl.Visible = true;
             }
         }
 
-        // =================================================================
-        //  DELETE (edit mode only)
-        // =================================================================
         private async Task DeleteAsync()
         {
-            if (!_isEdit) return;
+            if (!_isEdit || !_userId.HasValue) return;
 
-            var dispName = $"{_firstNameTxt.Text.Trim()} {_lastNameTxt.Text.Trim()}".Trim();
-            if (string.IsNullOrEmpty(dispName)) dispName = _loaded?.FullName ?? "User";
-
-            var answer = MessageBox.Show(
-                $"Delete this user?\n\n{dispName}\n\nThis cannot be undone.",
-                "Delete User",
+            var r = MessageBox.Show(
+                $"Are you sure you want to delete '{_loaded?.FullName ?? "this user"}'?\nThis action cannot be undone.",
+                "Confirm Delete",
                 MessageBoxButtons.YesNo,
-                MessageBoxIcon.Warning,
-                MessageBoxDefaultButton.Button2);
+                MessageBoxIcon.Warning);
 
-            if (answer != DialogResult.Yes) return;
+            if (r != DialogResult.Yes) return;
 
             try
             {
-                var resp = await _http.DeleteAsync($"api/users/{_userId!.Value}");
+                var resp = await _http.DeleteAsync($"api/users/{_userId.Value}");
                 if (resp.IsSuccessStatusCode)
                 {
-                    MessageBox.Show("User deleted.", "Success",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("User deleted successfully.", "User Deleted", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     DialogResult = DialogResult.OK;
                     Close();
                 }
                 else
                 {
                     var text = await resp.Content.ReadAsStringAsync();
-                    _errorLbl.Text = $"Delete failed ({(int)resp.StatusCode}). {text}";
+                    string msg = "Delete failed.";
+                    try
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(text);
+                        if (doc.RootElement.TryGetProperty("message", out var m))
+                            msg = m.GetString() ?? msg;
+                    }
+                    catch { }
+                    MessageBox.Show(msg, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             catch (Exception ex)
             {
-                _errorLbl.Text = "Delete failed. " + ex.Message;
+                MessageBox.Show($"Connection error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private void ClearError()
+        {
+            _errorLbl.Text = "";
+            _errorLbl.Visible = false;
         }
     }
 }

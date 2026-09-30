@@ -147,6 +147,14 @@ public class FollowUpsController : ControllerBase
         [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
+
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, cid, branchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+        branchId = sec.EffectiveBranchId;
+
         await using var tenant = await _tenantFactory.CreateAsync(cid);
         await AutoExpireAsync(tenant);
 
@@ -258,6 +266,14 @@ public class FollowUpsController : ControllerBase
         [FromQuery] int? branchId = null)
     {
         var cid = ResolveCompanyId(companyId);
+
+        var sec = await CRM.api.Services.BranchSecurityHelper.ResolveAndValidateAsync(_db, HttpContext, cid, branchId);
+        if (!sec.Allowed)
+        {
+            return StatusCode(403, new { message = sec.ErrorMessage });
+        }
+        branchId = sec.EffectiveBranchId;
+
         await using var tenant = await _tenantFactory.CreateAsync(cid);
 
         var query = tenant.FollowUps

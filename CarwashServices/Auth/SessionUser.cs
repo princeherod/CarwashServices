@@ -19,13 +19,20 @@ namespace CarwashServices.Auth
             set
             {
                 _role = value;
-                _roleId = (int)value;
+                _roleId = value switch
+                {
+                    UserRole.SuperAdmin => 1,
+                    UserRole.Admin => 2,
+                    UserRole.Manager => 3,
+                    UserRole.ServiceStaff => 4,
+                    _ => (int)value
+                };
             }
         }
 
         /// <summary>
         /// Numeric role ID:
-        /// 1 = Admin, 2 = Manager, 3 = Staff/ServiceStaff, 4 = Super Admin
+        /// 1 = SuperAdmin, 2 = Admin, 3 = Manager, 4 = ServiceStaff
         /// </summary>
         public static int RoleId
         {
@@ -33,15 +40,27 @@ namespace CarwashServices.Auth
             set
             {
                 _roleId = value;
-                _role = value switch
-                {
-                    1 => UserRole.Admin,
-                    2 => UserRole.Manager,
-                    3 => UserRole.ServiceStaff,
-                    4 => UserRole.SuperAdmin,
-                    _ => (UserRole)value
-                };
+                _role = ResolveRole(value, Email, CompanyId);
             }
+        }
+
+        public static UserRole ResolveRole(int roleId, string? email = null, int? companyId = null)
+        {
+            var em = (email ?? Email ?? "").ToLowerInvariant();
+            var cid = companyId ?? CompanyId;
+            bool isSuperAdminAccount = em.Contains("superadmin") || cid == null || cid <= 0;
+
+            if (isSuperAdminAccount)
+                return UserRole.SuperAdmin;
+
+            return roleId switch
+            {
+                1 => UserRole.Admin,         // Existing tenant admin accounts
+                2 => UserRole.Admin,         // Branch Admin & Admin (RoleId 2 = Admin)
+                3 => UserRole.Manager,       // Manager
+                4 => UserRole.ServiceStaff,  // Service Staff
+                _ => UserRole.Admin
+            };
         }
 
         public static int? CompanyId { get; set; }
@@ -51,14 +70,26 @@ namespace CarwashServices.Auth
         public static string? TermsAcceptedVersion { get; set; }
 
         public static bool MultiBranchEnabled { get; set; } = false;
+        public static int? AssignedBranchId { get; set; } = null;
+        public static string? AssignedBranchName { get; set; } = null;
+        public static bool IsSingleBranchUser => AssignedBranchId.HasValue && AssignedBranchId.Value > 0;
+
         public static int? CurrentBranchId { get; set; } = null;
         public static string CurrentBranchName { get; set; } = "All Branches";
         public static event System.Action? BranchChanged;
 
         public static void SetBranch(int? branchId, string? branchName)
         {
-            CurrentBranchId = branchId;
-            CurrentBranchName = string.IsNullOrWhiteSpace(branchName) ? "All Branches" : branchName;
+            if (IsSingleBranchUser)
+            {
+                CurrentBranchId = AssignedBranchId;
+                CurrentBranchName = AssignedBranchName ?? "Branch";
+            }
+            else
+            {
+                CurrentBranchId = branchId;
+                CurrentBranchName = string.IsNullOrWhiteSpace(branchName) ? "All Branches" : branchName;
+            }
             BranchChanged?.Invoke();
         }
 
@@ -83,6 +114,8 @@ namespace CarwashServices.Auth
             TermsAccepted = true;
             TermsAcceptedVersion = null;
             MultiBranchEnabled = false;
+            AssignedBranchId = null;
+            AssignedBranchName = null;
             CurrentBranchId = null;
             CurrentBranchName = "All Branches";
         }
