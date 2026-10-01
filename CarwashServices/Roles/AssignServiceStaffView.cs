@@ -409,7 +409,7 @@ namespace CarwashServices.Roles
             try
             {
                 var all = await _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}{userBranchQuery}") ?? new();
-                _staff = all.Where(u => u.RoleId == 3).ToList();
+                _staff = all.Where(u => u.RoleId == 4).ToList();
             }
             catch { _staff = new(); }
 
@@ -714,8 +714,41 @@ namespace CarwashServices.Roles
             _staffCombo.SetBounds(comboX, comboY, AssignComboW, 28);
             _assignBtn.SetBounds(btnX, btnY, AssignBtnW, AssignBtnH);
 
-            if (_staffCombo.SelectedIndex < 0 && _staffCombo.Items.Count > 0)
+            var idText = _grid.Rows[rowIndex].Cells["RequestId"].Value?.ToString() ?? "";
+            int.TryParse(idText.TrimStart('#'), out var reqId);
+            var req = _unassigned.FirstOrDefault(x => x.RequestId == reqId);
+
+            var eligible = _staff.Where(s =>
+                !s.BranchId.HasValue ||
+                req == null ||
+                !req.BranchId.HasValue ||
+                s.BranchId.Value == req.BranchId.Value
+            ).OrderBy(s => s.FullName).ToList();
+
+            var previousSelectedId = (_staffCombo.SelectedItem as ComboItem)?.Id;
+
+            _staffCombo.Items.Clear();
+            int selectedIdx = -1;
+            for (int i = 0; i < eligible.Count; i++)
+            {
+                var s = eligible[i];
+                string branchTag = !string.IsNullOrWhiteSpace(s.BranchName) ? $" ({s.BranchName})" : "";
+                _staffCombo.Items.Add(new ComboItem(s.UserId, $"{s.FullName}{branchTag}"));
+                if (previousSelectedId.HasValue && s.UserId == previousSelectedId.Value)
+                {
+                    selectedIdx = i;
+                }
+            }
+
+            if (eligible.Count > 0)
+            {
+                _staffCombo.SelectedIndex = selectedIdx >= 0 ? selectedIdx : 0;
+            }
+            else
+            {
+                _staffCombo.Items.Add(new ComboItem(null, "No staff for this branch"));
                 _staffCombo.SelectedIndex = 0;
+            }
 
             _staffCombo.Visible = true;
             _assignBtn.Visible = true;
@@ -750,7 +783,10 @@ namespace CarwashServices.Roles
 
                 var resp = await _http.PutAsJsonAsync(
                     $"api/service-requests/{requestId}/assign?companyId={CarwashServices.Auth.SessionUser.CurrentCompanyId}",
-                    new { assignedStaffId = picked.Id.Value });
+                    new {
+                        assignedStaffId = picked.Id.Value,
+                        updatedBy = CarwashServices.Auth.SessionUser.UserId
+                    });
 
                 if (!resp.IsSuccessStatusCode)
                 {

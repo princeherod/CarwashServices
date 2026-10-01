@@ -59,7 +59,6 @@ namespace CarwashServices.Dialogs
                 AutoSize = true
             };
             header.Controls.AddRange(new Control[] { titleLbl, subLbl });
-            Controls.Add(header);
 
             var body = new Panel
             {
@@ -118,7 +117,6 @@ namespace CarwashServices.Dialogs
             AddDetailRow(detailsCard, "Created Date", _b.CreatedAt.ToString("MMM dd, yyyy"), dy);
 
             body.Controls.Add(detailsCard);
-            Controls.Add(body);
 
             // Footer
             var footer = new Panel
@@ -185,7 +183,13 @@ namespace CarwashServices.Dialogs
             closeBtn.Click += (s, e) => Close();
 
             footer.Controls.AddRange(new Control[] { switchBtn, assignBtn, closeBtn });
+
+            CancelButton = closeBtn;
+
+            Controls.Add(header);
             Controls.Add(footer);
+            Controls.Add(body);
+            body.BringToFront();
         }
 
         private static Panel CreateStatCard(string caption, string val, int x, int y, int w)

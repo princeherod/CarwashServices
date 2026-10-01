@@ -147,7 +147,17 @@ namespace CarwashServices.Shell
                 if (SessionUser.MultiBranchEnabled) return true;
             }
             var allowed = RoleRouter.ModulesFor(SessionUser.Role);
-            return Array.IndexOf(allowed, moduleKey) >= 0;
+            if (Array.IndexOf(allowed, moduleKey) >= 0) return true;
+
+            // Aliases
+            if (moduleKey is "Dashboard" or "View Dashboard")
+                return allowed.Contains("Dashboard") || allowed.Contains("View Dashboard");
+            if (moduleKey is "Reports" or "View Reports")
+                return allowed.Contains("Reports") || allowed.Contains("View Reports");
+            if (moduleKey is "Terms & Conditions" or "Terms and Conditions" or "Terms & Condition" or "Terms and Condition")
+                return allowed.Any(a => a.StartsWith("Terms"));
+
+            return false;
         }
 
         // ================================================================
@@ -296,6 +306,7 @@ namespace CarwashServices.Shell
 
                 switch (key)
                 {
+                    case "Dashboard":
                     case "View Dashboard":
                         if (SessionUser.Role == UserRole.ServiceStaff)
                         {
@@ -314,6 +325,7 @@ namespace CarwashServices.Shell
                         headerText = "ANALYTICS";
                         break;
 
+                    case "Reports":
                     case "View Reports":
                         view = new ReportsView();
                         headerText = "VIEW REPORTS";

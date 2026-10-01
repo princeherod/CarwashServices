@@ -123,7 +123,6 @@ namespace CarwashServices.Dialogs
                 AutoSize = true
             };
             header.Controls.AddRange(new Control[] { titleLbl, subLbl });
-            Controls.Add(header);
 
             // Body
             var body = new Panel
@@ -336,7 +335,6 @@ namespace CarwashServices.Dialogs
             _createPanel.Controls.Add(createHint);
 
             body.Controls.Add(_createPanel);
-            Controls.Add(body);
 
             // Footer
             var footer = new Panel
@@ -374,7 +372,14 @@ namespace CarwashServices.Dialogs
             _cancelBtn.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
 
             footer.Controls.AddRange(new Control[] { _saveBtn, _cancelBtn });
+
+            CancelButton = _cancelBtn;
+            AcceptButton = _saveBtn;
+
+            Controls.Add(header);
             Controls.Add(footer);
+            Controls.Add(body);
+            body.BringToFront();
         }
 
         private void ToggleMode()

@@ -82,7 +82,6 @@ namespace CarwashServices.Dialogs
                 AutoSize = true
             };
             header.Controls.AddRange(new Control[] { titleLbl, subLbl });
-            Controls.Add(header);
 
             var body = new Panel
             {
@@ -101,7 +100,9 @@ namespace CarwashServices.Dialogs
 
             _codeTxt = CreateTextBox(24, y, colW);
             _codeTxt.CharacterCasing = CharacterCasing.Upper;
+            _codeTxt.TabIndex = 0;
             _nameTxt = CreateTextBox(24 + colW + 16, y, colW);
+            _nameTxt.TabIndex = 1;
             body.Controls.AddRange(new Control[] { _codeTxt, _nameTxt });
             y += 44;
 
@@ -111,7 +112,9 @@ namespace CarwashServices.Dialogs
             y += 22;
 
             _cityTxt = CreateTextBox(24, y, colW);
+            _cityTxt.TabIndex = 2;
             _provinceTxt = CreateTextBox(24 + colW + 16, y, colW);
+            _provinceTxt.TabIndex = 3;
             body.Controls.AddRange(new Control[] { _cityTxt, _provinceTxt });
             y += 44;
 
@@ -119,6 +122,7 @@ namespace CarwashServices.Dialogs
             body.Controls.Add(CreateCaption("STREET ADDRESS", 24, y));
             y += 22;
             _addressTxt = CreateTextBox(24, y, colW * 2 + 16);
+            _addressTxt.TabIndex = 4;
             body.Controls.Add(_addressTxt);
             y += 44;
 
@@ -128,7 +132,9 @@ namespace CarwashServices.Dialogs
             y += 22;
 
             _phoneTxt = CreateTextBox(24, y, colW);
+            _phoneTxt.TabIndex = 5;
             _emailTxt = CreateTextBox(24 + colW + 16, y, colW);
+            _emailTxt.TabIndex = 6;
             body.Controls.AddRange(new Control[] { _phoneTxt, _emailTxt });
             y += 48;
 
@@ -139,7 +145,8 @@ namespace CarwashServices.Dialogs
                 Location = new Point(24, y),
                 AutoSize = true,
                 Font = new Font("Segoe UI Semibold", 9.5f),
-                ForeColor = Navy
+                ForeColor = Navy,
+                TabIndex = 7
             };
             _isActiveChk = new CheckBox
             {
@@ -148,7 +155,8 @@ namespace CarwashServices.Dialogs
                 AutoSize = true,
                 Checked = true,
                 Font = new Font("Segoe UI Semibold", 9.5f),
-                ForeColor = Navy
+                ForeColor = Navy,
+                TabIndex = 8
             };
             body.Controls.AddRange(new Control[] { _isMainChk, _isActiveChk });
             y += 46;
@@ -163,8 +171,6 @@ namespace CarwashServices.Dialogs
             };
             body.Controls.Add(hintLbl);
 
-            Controls.Add(body);
-
             // Footer
             var footer = new Panel
             {
@@ -177,11 +183,11 @@ namespace CarwashServices.Dialogs
             {
                 Text = "Cancel",
                 Size = new Size(100, 36),
-                Location = new Point(Width - 240, 12),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.White,
                 ForeColor = Navy,
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                TabIndex = 10
             };
             _cancelBtn.FlatAppearance.BorderColor = BorderSoft;
             _cancelBtn.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
@@ -189,19 +195,46 @@ namespace CarwashServices.Dialogs
             _saveBtn = new Button
             {
                 Text = _existing != null ? "Save Changes" : "Create Branch",
-                Size = new Size(116, 36),
-                Location = new Point(Width - 132, 12),
+                Size = new Size(130, 36),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Blue,
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI Semibold", 9.5f),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                TabIndex = 9
             };
             _saveBtn.FlatAppearance.BorderSize = 0;
             _saveBtn.Click += async (s, e) => await SaveAsync();
 
+            void PlaceFooterButtons()
+            {
+                _saveBtn.Location = new Point(footer.ClientSize.Width - 24 - _saveBtn.Width, 12);
+                _cancelBtn.Location = new Point(_saveBtn.Left - 12 - _cancelBtn.Width, 12);
+            }
+            footer.Resize += (s, e) => PlaceFooterButtons();
+            PlaceFooterButtons();
+
             footer.Controls.AddRange(new Control[] { _cancelBtn, _saveBtn });
+
+            CancelButton = _cancelBtn;
+            AcceptButton = _saveBtn;
+
+            Controls.Add(header);
             Controls.Add(footer);
+            Controls.Add(body);
+            body.BringToFront();
+
+            Shown += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(_nameTxt.Text))
+                {
+                    _nameTxt.Focus();
+                }
+                else
+                {
+                    _codeTxt.Focus();
+                }
+            };
         }
 
         private static Label CreateCaption(string text, int x, int y) => new()

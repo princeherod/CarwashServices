@@ -11,7 +11,7 @@ public class CloudSyncBackgroundService : BackgroundService
 {
     private readonly ICloudSyncService _cloudSyncService;
     private readonly ILogger<CloudSyncBackgroundService> _logger;
-    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(60);
 
     public CloudSyncBackgroundService(
         ICloudSyncService cloudSyncService,

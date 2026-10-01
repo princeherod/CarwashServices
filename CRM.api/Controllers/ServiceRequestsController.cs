@@ -45,7 +45,8 @@ public class ServiceRequestsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] int? companyId = null,
-        [FromQuery] int? branchId = null)
+        [FromQuery] int? branchId = null,
+        [FromQuery] int? assignedStaffId = null)
     {
         var cid = ResolveCompanyId(companyId);
 
@@ -66,6 +67,11 @@ public class ServiceRequestsController : ControllerBase
         if (branchId.HasValue && branchId.Value > 0)
         {
             query = query.Where(r => r.BranchId == branchId.Value);
+        }
+
+        if (assignedStaffId.HasValue && assignedStaffId.Value > 0)
+        {
+            query = query.Where(r => r.AssignedStaffId == assignedStaffId.Value);
         }
 
         var list = await query
@@ -203,14 +209,35 @@ public class ServiceRequestsController : ControllerBase
             req.BranchId = sec.EffectiveBranchId.Value;
         }
 
-        // Default BranchId to main or first branch if not specified
+        // Validate customer exists
+        var cust = await tenant.TenantCustomers.AsNoTracking().FirstOrDefaultAsync(c => c.TenantCustomerId == req.CustomerId);
+        if (cust == null)
+            return BadRequest(new { message = "Selected customer not found." });
+
+        // Validate service exists
+        var srv = await tenant.Products.AsNoTracking().FirstOrDefaultAsync(p => p.ProductId == req.ServiceId);
+        if (srv == null)
+            return BadRequest(new { message = "Selected service not found." });
+
+        // Default BranchId: if not specified by caller, infer from customer or service, or fallback to main/first branch
         if (!req.BranchId.HasValue || req.BranchId.Value <= 0)
         {
-            var defBranch = await tenant.Branches.FirstOrDefaultAsync(b => b.IsMainBranch && !b.IsArchived)
-                ?? await tenant.Branches.FirstOrDefaultAsync(b => !b.IsArchived);
-            if (defBranch != null)
+            if (cust.BranchId.HasValue && cust.BranchId.Value > 0)
             {
-                req.BranchId = defBranch.BranchId;
+                req.BranchId = cust.BranchId.Value;
+            }
+            else if (srv.BranchId.HasValue && srv.BranchId.Value > 0)
+            {
+                req.BranchId = srv.BranchId.Value;
+            }
+            else
+            {
+                var defBranch = await tenant.Branches.FirstOrDefaultAsync(b => b.IsMainBranch && !b.IsArchived)
+                    ?? await tenant.Branches.FirstOrDefaultAsync(b => !b.IsArchived);
+                if (defBranch != null)
+                {
+                    req.BranchId = defBranch.BranchId;
+                }
             }
         }
 
@@ -225,16 +252,10 @@ public class ServiceRequestsController : ControllerBase
         }
 
         // Validate customer belongs to this branch
-        var cust = await tenant.TenantCustomers.AsNoTracking().FirstOrDefaultAsync(c => c.TenantCustomerId == req.CustomerId);
-        if (cust == null)
-            return BadRequest(new { message = "Selected customer not found." });
         if (req.BranchId.HasValue && cust.BranchId.HasValue && cust.BranchId.Value != req.BranchId.Value)
             return BadRequest(new { message = "Selected customer belongs to another branch." });
 
         // Validate service belongs to this branch
-        var srv = await tenant.Products.AsNoTracking().FirstOrDefaultAsync(p => p.ProductId == req.ServiceId);
-        if (srv == null)
-            return BadRequest(new { message = "Selected service not found." });
         if (req.BranchId.HasValue && srv.BranchId.HasValue && srv.BranchId.Value != req.BranchId.Value)
             return BadRequest(new { message = "Selected service belongs to another branch." });
 
@@ -252,7 +273,32 @@ public class ServiceRequestsController : ControllerBase
         tenant.ServiceRequests.Add(req);
         await tenant.SaveChangesAsync();
 
-        return CreatedAtAction(nameof(GetById), new { requestId = req.RequestId, companyId = cid }, req);
+        tenant.ServiceStatusLogs.Add(new ServiceStatusLog
+        {
+            RequestId = req.RequestId,
+            Status = "Pending",
+            UpdatedBy = req.CreatedBy,
+            UpdatedAt = DateTime.Now,
+            Notes = "Service request created."
+        });
+        await tenant.SaveChangesAsync();
+
+        return CreatedAtAction(nameof(GetById), new { requestId = req.RequestId, companyId = cid }, new
+        {
+            req.RequestId,
+            req.CustomerId,
+            req.ServiceId,
+            req.BranchId,
+            req.AssignedStaffId,
+            req.CreatedBy,
+            req.Status,
+            req.Priority,
+            req.RequestedDate,
+            req.ScheduledDate,
+            req.CompletedDate,
+            req.Notes,
+            req.IsArchived
+        });
     }
 
     public class UpdateRequest
@@ -388,6 +434,7 @@ public class ServiceRequestsController : ControllerBase
     public class AssignRequest
     {
         public int? AssignedStaffId { get; set; }
+        public int? UpdatedBy { get; set; }
     }
 
     [HttpPut("{requestId:int}/assign")]
@@ -419,6 +466,15 @@ public class ServiceRequestsController : ControllerBase
         if (staffUser == null)
             return BadRequest(new { message = $"User {req.AssignedStaffId} not found." });
 
+        // Enforce RoleId == 4 (ServiceStaff)
+        if (staffUser.RoleId != 4)
+            return BadRequest(new { message = $"User {req.AssignedStaffId} is not a Service Staff (RoleId must be 4)." });
+
+        // Enforce Company/tenant isolation
+        if (staffUser.CompanyId.HasValue && staffUser.CompanyId.Value != cid)
+            return BadRequest(new { message = "Selected staff does not belong to this company/tenant." });
+
+        // Enforce Branch isolation
         if (staffUser.BranchId.HasValue && existing.BranchId.HasValue && staffUser.BranchId.Value != existing.BranchId.Value)
             return BadRequest(new { message = "Selected staff does not belong to the request's branch." });
 
@@ -427,6 +483,19 @@ public class ServiceRequestsController : ControllerBase
         if (string.Equals(existing.Status, "Pending", StringComparison.OrdinalIgnoreCase))
             existing.Status = "Assigned";
 
+        var updaterId = (req.UpdatedBy.HasValue && req.UpdatedBy.Value > 0)
+            ? req.UpdatedBy.Value
+            : req.AssignedStaffId.Value;
+
+        tenant.ServiceStatusLogs.Add(new ServiceStatusLog
+        {
+            RequestId = existing.RequestId,
+            Status = existing.Status,
+            UpdatedBy = updaterId,
+            UpdatedAt = DateTime.Now,
+            Notes = $"Assigned to service staff {staffUser.FullName}."
+        });
+
         await tenant.SaveChangesAsync();
         return Ok(existing);
     }
@@ -434,8 +503,12 @@ public class ServiceRequestsController : ControllerBase
     [HttpPut("{requestId:int}/status")]
     public async Task<IActionResult> UpdateStatus(int requestId, [FromBody] StatusUpdateDto dto, [FromQuery] int? companyId = null)
     {
+        var statusInput = (dto.Status ?? "").Trim();
+        if (statusInput.Equals("In Progress", StringComparison.OrdinalIgnoreCase))
+            statusInput = "InProgress";
+
         var allowed = new[] { "Pending", "Assigned", "InProgress", "Completed", "Cancelled" };
-        if (string.IsNullOrWhiteSpace(dto.Status) || !allowed.Contains(dto.Status))
+        if (string.IsNullOrWhiteSpace(statusInput) || !allowed.Any(a => string.Equals(a, statusInput, StringComparison.OrdinalIgnoreCase)))
             return BadRequest(new { message = $"Status must be one of: {string.Join(", ", allowed)}." });
 
         var cid = ResolveCompanyId(companyId);
@@ -447,7 +520,7 @@ public class ServiceRequestsController : ControllerBase
         if (existing is null)
             return NotFound(new { message = $"ServiceRequest {requestId} not found in tenant database." });
 
-        existing.Status = dto.Status;
+        existing.Status = statusInput;
         if (string.Equals(dto.Status, "Completed", StringComparison.OrdinalIgnoreCase))
         {
             existing.CompletedDate = DateTime.Now;
@@ -498,8 +571,12 @@ public class ServiceRequestsController : ControllerBase
         if (req.StaffId <= 0)
             return BadRequest(new { message = "StaffId is required." });
 
+        var statusInput = (req.Status ?? "").Trim();
+        if (statusInput.Equals("In Progress", StringComparison.OrdinalIgnoreCase))
+            statusInput = "InProgress";
+
         var allowed = new[] { "Pending", "Assigned", "InProgress", "Completed", "Cancelled" };
-        if (string.IsNullOrWhiteSpace(req.Status) || !allowed.Contains(req.Status))
+        if (string.IsNullOrWhiteSpace(statusInput) || !allowed.Any(a => string.Equals(a, statusInput, StringComparison.OrdinalIgnoreCase)))
             return BadRequest(new { message = $"Status must be one of: {string.Join(", ", allowed)}." });
 
         var cid = ResolveCompanyId(companyId);
@@ -518,7 +595,7 @@ public class ServiceRequestsController : ControllerBase
             return StatusCode(403, new { message = "This request is not assigned to you." });
 
         var from = (existing.Status ?? "Pending").Trim();
-        var to = req.Status.Trim();
+        var to = statusInput;
 
         if (!IsValidTransition(from, to))
         {
@@ -580,6 +657,9 @@ public class ServiceRequestsController : ControllerBase
     {
         from = from?.Trim() ?? "Pending";
         to = to?.Trim() ?? "Pending";
+
+        if (from.Equals("In Progress", StringComparison.OrdinalIgnoreCase)) from = "InProgress";
+        if (to.Equals("In Progress", StringComparison.OrdinalIgnoreCase)) to = "InProgress";
 
         if (string.Equals(from, to, StringComparison.OrdinalIgnoreCase)) return true;
 

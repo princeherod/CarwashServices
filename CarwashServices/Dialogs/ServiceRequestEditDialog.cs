@@ -573,6 +573,7 @@ namespace CarwashServices.Dialogs
                 branchId = _requestId.HasValue
                     ? (_existing?.BranchId ?? CarwashServices.Auth.SessionUser.CurrentBranchId)
                     : CarwashServices.Auth.SessionUser.CurrentBranchId,
+                createdBy = CarwashServices.Auth.SessionUser.UserId,
                 priority = _priorityCombo.SelectedItem?.ToString() ?? "Normal",
                 requestedDate = _requestedPicker.Value,
                 scheduledDate = (DateTime?)_scheduledPicker.Value,

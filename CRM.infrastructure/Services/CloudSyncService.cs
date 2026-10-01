@@ -4,6 +4,9 @@ using System.Data;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Linq;
+using System.Text;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -1325,5 +1328,855 @@ END;";
             else result.FailureCount++;
             result.ProcessedCount++;
         }
+    }
+
+    // =========================================================================
+    // MULTI-DATABASE LOCAL -> MONSTERASP CLOUD SYNCHRONIZATION IMPLEMENTATION
+    // =========================================================================
+
+    public class SyncTargetConfig
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string LocalDatabase { get; set; } = string.Empty;
+        public string? LocalFallbackDatabase { get; set; }
+        public string CloudDatabase { get; set; } = string.Empty;
+        public string CloudServer { get; set; } = string.Empty;
+        public string? CloudPublicServer { get; set; }
+        public string CredentialKey { get; set; } = string.Empty;
+        public int? CompanyId { get; set; }
+        public List<string> Tables { get; set; } = new();
+    }
+
+    private class TableColumnInfo
+    {
+        public string Name { get; set; } = string.Empty;
+        public bool IsIdentity { get; set; }
+        public bool IsPrimaryKey { get; set; }
+        public string TypeName { get; set; } = string.Empty;
+    }
+
+    private List<SyncTargetConfig> GetSyncTargets()
+    {
+        var tenantTables = new List<string>
+        {
+            "Branches",
+            "Products",
+            "Suppliers",
+            "Inventories",
+            "TenantCustomers",
+            "CustomerInteractions",
+            "ServiceRequests",
+            "ServiceStatusLogs",
+            "BillingTransactions",
+            "FollowUps"
+        };
+
+        var masterTables = new List<string>
+        {
+            "Companies",
+            "CompanyDatabases",
+            "Roles",
+            "Users",
+            "TermsConditions",
+            "TenantSubscriptionPlans",
+            "TenantSubscriptions",
+            "TenantBillingTransactions",
+            "BackupLogs",
+            "Branches"
+        };
+
+        return new List<SyncTargetConfig>
+        {
+            new SyncTargetConfig
+            {
+                Key = "AquaShine",
+                Name = "AquaShine",
+                LocalDatabase = _configuration["CloudSync:Targets:AquaShine:LocalDatabase"] ?? "aquaShine_db",
+                CloudDatabase = _configuration["CloudSync:Targets:AquaShine:CloudDatabase"] ?? "db70860",
+                CloudServer = _configuration["CloudSync:Targets:AquaShine:CloudServer"] ?? "db70860.databaseasp.net",
+                CloudPublicServer = _configuration["CloudSync:Targets:AquaShine:CloudPublicServer"] ?? "5.9.179.199",
+                CredentialKey = "aquaShineCreds",
+                CompanyId = 1,
+                Tables = tenantTables
+            },
+            new SyncTargetConfig
+            {
+                Key = "SparkleRide",
+                Name = "SparkleRide",
+                LocalDatabase = _configuration["CloudSync:Targets:SparkleRide:LocalDatabase"] ?? "sparkleRide_db",
+                CloudDatabase = _configuration["CloudSync:Targets:SparkleRide:CloudDatabase"] ?? "db70861",
+                CloudServer = _configuration["CloudSync:Targets:SparkleRide:CloudServer"] ?? "db70861.databaseasp.net",
+                CloudPublicServer = _configuration["CloudSync:Targets:SparkleRide:CloudPublicServer"] ?? "5.9.179.199",
+                CredentialKey = "sparkleRideCreds",
+                CompanyId = 2,
+                Tables = tenantTables
+            },
+            new SyncTargetConfig
+            {
+                Key = "CleanRide",
+                Name = "CleanRide",
+                LocalDatabase = _configuration["CloudSync:Targets:CleanRide:LocalDatabase"] ?? "cleanRide_db",
+                CloudDatabase = _configuration["CloudSync:Targets:CleanRide:CloudDatabase"] ?? "db70862",
+                CloudServer = _configuration["CloudSync:Targets:CleanRide:CloudServer"] ?? "db70862.databaseasp.net",
+                CloudPublicServer = _configuration["CloudSync:Targets:CleanRide:CloudPublicServer"] ?? "5.9.179.199",
+                CredentialKey = "cleanRideCreds",
+                CompanyId = 3,
+                Tables = tenantTables
+            },
+            new SyncTargetConfig
+            {
+                Key = "MasterERP",
+                Name = "Master ERP",
+                LocalDatabase = _configuration["CloudSync:Targets:MasterERP:LocalDatabase"] ?? "CarwashMasterERP",
+                LocalFallbackDatabase = _configuration["CloudSync:Targets:MasterERP:LocalFallbackDatabase"] ?? "MSME_MasterCrm",
+                CloudDatabase = _configuration["CloudSync:Targets:MasterERP:CloudDatabase"] ?? "db67193",
+                CloudServer = _configuration["CloudSync:Targets:MasterERP:CloudServer"] ?? "db67193.databaseasp.net",
+                CloudPublicServer = _configuration["CloudSync:Targets:MasterERP:CloudPublicServer"] ?? "db67193.public.databaseasp.net",
+                CredentialKey = "CloudConnection",
+                CompanyId = null,
+                Tables = masterTables
+            }
+        };
+    }
+
+    private async Task<string> ResolveLocalDatabaseNameAsync(SyncTargetConfig target, CancellationToken ct)
+    {
+        string localMaster = _localMasterConnStr;
+        var cb = new SqlConnectionStringBuilder(localMaster)
+        {
+            InitialCatalog = "master",
+            ConnectTimeout = 4
+        };
+
+        try
+        {
+            await using var conn = new SqlConnection(cb.ConnectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT name FROM sys.databases WHERE name = @n;";
+            cmd.Parameters.AddWithValue("@n", target.LocalDatabase);
+            var res = await cmd.ExecuteScalarAsync(ct);
+            if (res != null)
+            {
+                return target.LocalDatabase;
+            }
+
+            if (!string.IsNullOrWhiteSpace(target.LocalFallbackDatabase))
+            {
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("@n", target.LocalFallbackDatabase);
+                var fallbackRes = await cmd.ExecuteScalarAsync(ct);
+                if (fallbackRes != null)
+                {
+                    return target.LocalFallbackDatabase;
+                }
+            }
+        }
+        catch
+        {
+            // If master probe fails, use specified LocalDatabase or fallback
+        }
+
+        return target.LocalDatabase;
+    }
+
+    private string BuildLocalConnectionString(string databaseName)
+    {
+        var cb = new SqlConnectionStringBuilder(_localMasterConnStr)
+        {
+            InitialCatalog = databaseName,
+            ConnectTimeout = 15
+        };
+        return cb.ConnectionString;
+    }
+
+    private async Task<SqlConnection> GetOpenCloudConnectionForTargetAsync(
+        SyncTargetConfig target,
+        CancellationToken ct)
+    {
+        string userId;
+        string password;
+
+        if (target.Key == "MasterERP")
+        {
+            var rawConn = _configuration.GetConnectionString("CloudConnection")
+                          ?? _configuration.GetConnectionString("CloudInternalConnection")
+                          ?? "";
+            var cb = new SqlConnectionStringBuilder(rawConn);
+            userId = cb.UserID;
+            password = cb.Password;
+            if (string.IsNullOrWhiteSpace(userId)) userId = "db67193";
+        }
+        else
+        {
+            userId = _configuration[$"TenantCredentials:{target.CredentialKey}:UserId"] ?? target.CloudDatabase;
+            password = _configuration[$"TenantCredentials:{target.CredentialKey}:Password"] ?? "";
+        }
+
+        var candidates = new List<string>();
+
+        // 1. Configured CloudPublicServer (fast unencrypted connection first, then encrypted fallback)
+        if (!string.IsNullOrWhiteSpace(target.CloudPublicServer))
+        {
+            candidates.Add($"Server={target.CloudPublicServer},1433;Database={target.CloudDatabase};User Id={userId};Password={password};Encrypt=False;TrustServerCertificate=True;Connect Timeout=6;");
+            candidates.Add($"Server={target.CloudPublicServer},1433;Database={target.CloudDatabase};User Id={userId};Password={password};Encrypt=True;TrustServerCertificate=True;Connect Timeout=6;");
+        }
+
+        // 2. Direct IP fallback (5.9.179.197 for db67193, 5.9.179.199 for others)
+        string fallbackIp = target.Key == "MasterERP" ? "5.9.179.197" : "5.9.179.199";
+        candidates.Add($"Server={fallbackIp},1433;Database={target.CloudDatabase};User Id={userId};Password={password};Encrypt=False;TrustServerCertificate=True;Connect Timeout=6;");
+        candidates.Add($"Server={fallbackIp},1433;Database={target.CloudDatabase};User Id={userId};Password={password};Encrypt=True;TrustServerCertificate=True;Connect Timeout=6;");
+
+        // 3. Domain format {target.CloudDatabase}.public.databaseasp.net
+        candidates.Add($"Server={target.CloudDatabase}.public.databaseasp.net,1433;Database={target.CloudDatabase};User Id={userId};Password={password};Encrypt=False;TrustServerCertificate=True;Connect Timeout=6;");
+
+        // 4. Internal MonsterASP server (used when hosted in MonsterASP)
+        if (!string.IsNullOrWhiteSpace(target.CloudServer))
+        {
+            candidates.Add($"Server={target.CloudServer},1433;Database={target.CloudDatabase};User Id={userId};Password={password};Encrypt=False;TrustServerCertificate=True;Connect Timeout=6;");
+        }
+
+        Exception? lastEx = null;
+        foreach (var cs in candidates.Distinct())
+        {
+            try
+            {
+                var conn = new SqlConnection(cs);
+                await conn.OpenAsync(ct);
+                return conn;
+            }
+            catch (Exception ex)
+            {
+                lastEx = ex;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Cannot connect to MonsterASP cloud database '{target.CloudDatabase}' ({target.Name}): {lastEx?.Message}", lastEx);
+    }
+
+    public async Task<Dictionary<string, bool>> CheckAllCloudDatabasesOnlineAsync(CancellationToken cancellationToken = default)
+    {
+        var targets = GetSyncTargets();
+        var results = new Dictionary<string, bool>();
+
+        var checkTasks = targets.Select(async t =>
+        {
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(15));
+                await using var conn = await GetOpenCloudConnectionForTargetAsync(t, cts.Token);
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT 1";
+                var res = await cmd.ExecuteScalarAsync(cts.Token);
+                return (Key: t.Key, Online: res != null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Connectivity check failed for {Target}: {Message}", t.Key, ex.Message);
+                return (Key: t.Key, Online: false);
+            }
+        });
+
+        var completed = await Task.WhenAll(checkTasks);
+        foreach (var c in completed)
+        {
+            results[c.Key] = c.Online;
+        }
+
+        return results;
+    }
+
+    private static async Task EnsureCloudSchemaCompatibilityAsync(SqlConnection cloudConn, SyncTargetConfig target, CancellationToken ct)
+    {
+        if (target.Key != "MasterERP")
+        {
+            await using var cmd = cloudConn.CreateCommand();
+            cmd.CommandText = @"
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Branches')
+BEGIN
+    CREATE TABLE Branches (
+        BranchId INT IDENTITY(1,1) PRIMARY KEY,
+        BranchCode NVARCHAR(50) NOT NULL,
+        BranchName NVARCHAR(200) NOT NULL,
+        Address NVARCHAR(500) NULL,
+        City NVARCHAR(100) NULL,
+        Province NVARCHAR(100) NULL,
+        ContactNumber NVARCHAR(50) NULL,
+        Email NVARCHAR(200) NULL,
+        IsMainBranch BIT NOT NULL DEFAULT 0,
+        IsActive BIT NOT NULL DEFAULT 1,
+        IsArchived BIT NOT NULL DEFAULT 0,
+        ArchivedAt DATETIME2 NULL,
+        ArchivedBy NVARCHAR(200) NULL,
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+    );
+    CREATE INDEX IX_Branches_IsArchived ON Branches(IsArchived);
+    CREATE INDEX IX_Branches_BranchCode ON Branches(BranchCode);
+END;
+
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'ServiceRequests' AND COLUMN_NAME = 'BranchId')
+    ALTER TABLE ServiceRequests ADD BranchId INT NULL;
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'TenantCustomers' AND COLUMN_NAME = 'BranchId')
+    ALTER TABLE TenantCustomers ADD BranchId INT NULL;
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'FollowUps' AND COLUMN_NAME = 'BranchId')
+    ALTER TABLE FollowUps ADD BranchId INT NULL;
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'BillingTransactions' AND COLUMN_NAME = 'BranchId')
+    ALTER TABLE BillingTransactions ADD BranchId INT NULL;
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Products' AND COLUMN_NAME = 'BranchId')
+    ALTER TABLE Products ADD BranchId INT NULL;
+";
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        else
+        {
+            await using var cmd = cloudConn.CreateCommand();
+            cmd.CommandText = @"
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Users' AND COLUMN_NAME = 'BranchId')
+    ALTER TABLE Users ADD BranchId INT NULL;
+";
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+    }
+
+    private static async Task<List<TableColumnInfo>> GetTableColumnsAsync(SqlConnection conn, string tableName, SqlTransaction? tx, CancellationToken ct)
+    {
+        var list = new List<TableColumnInfo>();
+        await using var cmd = conn.CreateCommand();
+        if (tx != null) cmd.Transaction = tx;
+        cmd.CommandText = @"
+SELECT 
+    c.name AS ColumnName,
+    c.is_identity,
+    TYPE_NAME(c.user_type_id) AS TypeName,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM sys.index_columns ic 
+        JOIN sys.indexes i ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+        WHERE ic.object_id = c.object_id AND ic.column_id = c.column_id AND i.is_primary_key = 1
+    ) THEN 1 ELSE 0 END AS is_pk
+FROM sys.columns c
+WHERE c.object_id = OBJECT_ID(@t, 'U') AND c.is_computed = 0
+ORDER BY c.column_id;
+";
+        cmd.Parameters.AddWithValue("@t", tableName);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            list.Add(new TableColumnInfo
+            {
+                Name = reader.GetString(0),
+                IsIdentity = reader.GetBoolean(1),
+                TypeName = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                IsPrimaryKey = Convert.ToInt32(reader.GetValue(3)) == 1
+            });
+        }
+        return list;
+    }
+
+    private static async Task<bool> TableExistsAsync(SqlConnection conn, string tableName, SqlTransaction? tx, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        if (tx != null) cmd.Transaction = tx;
+        cmd.CommandText = "SELECT CASE WHEN OBJECT_ID(@t, 'U') IS NOT NULL THEN 1 ELSE 0 END;";
+        cmd.Parameters.AddWithValue("@t", tableName);
+        var res = await cmd.ExecuteScalarAsync(ct);
+        return Convert.ToInt32(res) == 1;
+    }
+
+    private static bool AreValuesEqual(object? v1, object? v2)
+    {
+        if (v1 == null || v1 == DBNull.Value)
+        {
+            return v2 == null || v2 == DBNull.Value;
+        }
+        if (v2 == null || v2 == DBNull.Value)
+        {
+            return false;
+        }
+
+        if (v1 is DateTime dt1 && v2 is DateTime dt2)
+        {
+            return Math.Abs((dt1 - dt2).TotalMilliseconds) < 15;
+        }
+
+        if (v1 is DateTimeOffset dto1 && v2 is DateTimeOffset dto2)
+        {
+            return Math.Abs((dto1 - dto2).TotalMilliseconds) < 15;
+        }
+
+        if (IsNumeric(v1) && IsNumeric(v2))
+        {
+            return Convert.ToDecimal(v1) == Convert.ToDecimal(v2);
+        }
+
+        if (v1 is bool b1 && v2 is bool b2)
+        {
+            return b1 == b2;
+        }
+
+        if (v1 is string s1 && v2 is string s2)
+        {
+            return string.Equals(s1.Trim(), s2.Trim(), StringComparison.Ordinal);
+        }
+
+        if (v1 is byte[] bytes1 && v2 is byte[] bytes2)
+        {
+            return bytes1.SequenceEqual(bytes2);
+        }
+
+        return object.Equals(v1, v2);
+    }
+
+    private static bool IsNumeric(object val)
+    {
+        return val is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal;
+    }
+
+    public async Task<List<SyncDatabasePreviewDto>> GenerateSyncPreviewAsync(string target, CancellationToken cancellationToken = default)
+    {
+        var allTargets = GetSyncTargets();
+        var selectedTargets = new List<SyncTargetConfig>();
+
+        if (string.Equals(target, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            selectedTargets.AddRange(allTargets);
+        }
+        else
+        {
+            var match = allTargets.FirstOrDefault(t => string.Equals(t.Key, target, StringComparison.OrdinalIgnoreCase));
+            if (match == null)
+            {
+                throw new ArgumentException($"Unknown sync target '{target}'. Valid targets are AquaShine, SparkleRide, CleanRide, MasterERP, or All.");
+            }
+            selectedTargets.Add(match);
+        }
+
+        var previews = new List<SyncDatabasePreviewDto>();
+
+        foreach (var t in selectedTargets)
+        {
+            string actualLocalDb = await ResolveLocalDatabaseNameAsync(t, cancellationToken);
+            var dbPreview = new SyncDatabasePreviewDto
+            {
+                Target = t.Key,
+                SourceDatabase = actualLocalDb,
+                DestinationDatabase = t.CloudDatabase,
+                DestinationServer = t.CloudPublicServer ?? t.CloudServer
+            };
+
+            try
+            {
+                string localConnStr = BuildLocalConnectionString(actualLocalDb);
+                await using var localConn = new SqlConnection(localConnStr);
+                await localConn.OpenAsync(cancellationToken);
+
+                await using var cloudConn = await GetOpenCloudConnectionForTargetAsync(t, cancellationToken);
+                dbPreview.IsCloudOnline = true;
+
+                // Ensure compatibility before reading
+                await EnsureCloudSchemaCompatibilityAsync(cloudConn, t, cancellationToken);
+
+                foreach (var tableName in t.Tables)
+                {
+                    if (!await TableExistsAsync(localConn, tableName, null, cancellationToken))
+                    {
+                        continue;
+                    }
+
+                    if (!await TableExistsAsync(cloudConn, tableName, null, cancellationToken))
+                    {
+                        continue;
+                    }
+
+                    var localCols = await GetTableColumnsAsync(localConn, tableName, null, cancellationToken);
+                    var cloudCols = await GetTableColumnsAsync(cloudConn, tableName, null, cancellationToken);
+
+                    var sharedColNames = localCols.Select(c => c.Name)
+                        .Intersect(cloudCols.Select(c => c.Name), StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    if (sharedColNames.Count == 0) continue;
+
+                    var pkCol = localCols.FirstOrDefault(c => c.IsPrimaryKey) ?? localCols.First();
+                    string pkName = pkCol.Name;
+
+                    if (!sharedColNames.Contains(pkName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    // Read local
+                    var localRows = new Dictionary<string, Dictionary<string, object?>>();
+                    {
+                        await using var cmd = localConn.CreateCommand();
+                        cmd.CommandText = $"SELECT {string.Join(", ", sharedColNames.Select(c => $"[{c}]"))} FROM [{tableName}];";
+                        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                        while (await reader.ReadAsync(cancellationToken))
+                        {
+                            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                            for (int i = 0; i < reader.FieldCount; i++)
+                            {
+                                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                            }
+                            var key = row[pkName]?.ToString() ?? "";
+                            if (!string.IsNullOrEmpty(key)) localRows[key] = row;
+                        }
+                    }
+
+                    // Read cloud
+                    var cloudRows = new Dictionary<string, Dictionary<string, object?>>();
+                    {
+                        await using var cmd = cloudConn.CreateCommand();
+                        cmd.CommandText = $"SELECT {string.Join(", ", sharedColNames.Select(c => $"[{c}]"))} FROM [{tableName}];";
+                        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                        while (await reader.ReadAsync(cancellationToken))
+                        {
+                            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                            for (int i = 0; i < reader.FieldCount; i++)
+                            {
+                                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                            }
+                            var key = row[pkName]?.ToString() ?? "";
+                            if (!string.IsNullOrEmpty(key)) cloudRows[key] = row;
+                        }
+                    }
+
+                    int newCount = 0;
+                    int updatedCount = 0;
+                    int unchangedCount = 0;
+
+                    var nonPkCols = sharedColNames.Where(c => !string.Equals(c, pkName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    foreach (var kvp in localRows)
+                    {
+                        if (!cloudRows.TryGetValue(kvp.Key, out var cRow))
+                        {
+                            newCount++;
+                        }
+                        else
+                        {
+                            bool hasChanged = false;
+                            foreach (var col in nonPkCols)
+                            {
+                                kvp.Value.TryGetValue(col, out var lVal);
+                                cRow.TryGetValue(col, out var cVal);
+                                if (!AreValuesEqual(lVal, cVal))
+                                {
+                                    hasChanged = true;
+                                    break;
+                                }
+                            }
+
+                            if (hasChanged) updatedCount++;
+                            else unchangedCount++;
+                        }
+                    }
+
+                    int cloudOnlyCount = cloudRows.Keys.Count(k => !localRows.ContainsKey(k));
+
+                    dbPreview.Tables.Add(new SyncTablePreviewDto
+                    {
+                        TableName = tableName,
+                        NewCount = newCount,
+                        UpdatedCount = updatedCount,
+                        UnchangedCount = unchangedCount,
+                        CloudOnlyCount = cloudOnlyCount
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                dbPreview.IsCloudOnline = false;
+                dbPreview.ConnectionError = ex.Message;
+                _logger.LogError(ex, "Failed to generate sync preview for target {Target}", t.Name);
+            }
+
+            dbPreview.TotalNew = dbPreview.Tables.Sum(x => x.NewCount);
+            dbPreview.TotalUpdated = dbPreview.Tables.Sum(x => x.UpdatedCount);
+            dbPreview.TotalUnchanged = dbPreview.Tables.Sum(x => x.UnchangedCount);
+            dbPreview.TotalCloudOnly = dbPreview.Tables.Sum(x => x.CloudOnlyCount);
+
+            previews.Add(dbPreview);
+        }
+
+        return previews;
+    }
+
+    public async Task<MultiSyncResultDto> ExecuteSyncAsync(string target, CancellationToken cancellationToken = default)
+    {
+        var allTargets = GetSyncTargets();
+        var selectedTargets = new List<SyncTargetConfig>();
+
+        if (string.Equals(target, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            selectedTargets.AddRange(allTargets);
+        }
+        else
+        {
+            var match = allTargets.FirstOrDefault(t => string.Equals(t.Key, target, StringComparison.OrdinalIgnoreCase));
+            if (match == null)
+            {
+                throw new ArgumentException($"Unknown sync target '{target}'. Valid targets are AquaShine, SparkleRide, CleanRide, MasterERP, or All.");
+            }
+            selectedTargets.Add(match);
+        }
+
+        var multiResult = new MultiSyncResultDto
+        {
+            Success = true
+        };
+
+        var totalSw = Stopwatch.StartNew();
+
+        foreach (var t in selectedTargets)
+        {
+            var dbSw = Stopwatch.StartNew();
+            string actualLocalDb = await ResolveLocalDatabaseNameAsync(t, cancellationToken);
+            var dbResult = new SyncDatabaseResultDto
+            {
+                Target = t.Key,
+                SourceDatabase = actualLocalDb,
+                DestinationDatabase = t.CloudDatabase,
+                Success = false
+            };
+
+            try
+            {
+                string localConnStr = BuildLocalConnectionString(actualLocalDb);
+                await using var localConn = new SqlConnection(localConnStr);
+                await localConn.OpenAsync(cancellationToken);
+
+                await using var cloudConn = await GetOpenCloudConnectionForTargetAsync(t, cancellationToken);
+                await EnsureCloudSchemaCompatibilityAsync(cloudConn, t, cancellationToken);
+
+                // Transaction on cloud for atomicity per database
+                await using var tx = (SqlTransaction)await cloudConn.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+
+                try
+                {
+                    foreach (var tableName in t.Tables)
+                    {
+                        if (!await TableExistsAsync(localConn, tableName, null, cancellationToken))
+                        {
+                            continue;
+                        }
+                        if (!await TableExistsAsync(cloudConn, tableName, tx, cancellationToken))
+                        {
+                            continue;
+                        }
+
+                        var localCols = await GetTableColumnsAsync(localConn, tableName, null, cancellationToken);
+                        var cloudCols = await GetTableColumnsAsync(cloudConn, tableName, tx, cancellationToken);
+
+                        var sharedCols = localCols
+                            .Where(lc => cloudCols.Any(cc => string.Equals(cc.Name, lc.Name, StringComparison.OrdinalIgnoreCase)))
+                            .ToList();
+
+                        if (sharedCols.Count == 0) continue;
+
+                        var pkCol = sharedCols.FirstOrDefault(c => c.IsPrimaryKey) ?? sharedCols.First();
+                        string pkName = pkCol.Name;
+
+                        var sharedColNames = sharedCols.Select(c => c.Name).ToList();
+
+                        // Read local
+                        var localRows = new Dictionary<string, Dictionary<string, object?>>();
+                        {
+                            await using var cmd = localConn.CreateCommand();
+                            cmd.CommandText = $"SELECT {string.Join(", ", sharedColNames.Select(c => $"[{c}]"))} FROM [{tableName}];";
+                            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                            while (await reader.ReadAsync(cancellationToken))
+                            {
+                                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                                for (int i = 0; i < reader.FieldCount; i++)
+                                {
+                                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                                }
+                                var key = row[pkName]?.ToString() ?? "";
+                                if (!string.IsNullOrEmpty(key)) localRows[key] = row;
+                            }
+                        }
+
+                        // Read cloud
+                        var cloudRows = new Dictionary<string, Dictionary<string, object?>>();
+                        {
+                            await using var cmd = cloudConn.CreateCommand();
+                            cmd.Transaction = tx;
+                            cmd.CommandText = $"SELECT {string.Join(", ", sharedColNames.Select(c => $"[{c}]"))} FROM [{tableName}];";
+                            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                            while (await reader.ReadAsync(cancellationToken))
+                            {
+                                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                                for (int i = 0; i < reader.FieldCount; i++)
+                                {
+                                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                                }
+                                var key = row[pkName]?.ToString() ?? "";
+                                if (!string.IsNullOrEmpty(key)) cloudRows[key] = row;
+                            }
+                        }
+
+                        var rowsToInsert = new List<Dictionary<string, object?>>();
+                        var rowsToUpdate = new List<Dictionary<string, object?>>();
+                        int unchangedCount = 0;
+
+                        var nonPkCols = sharedCols.Where(c => !string.Equals(c.Name, pkName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                        foreach (var kvp in localRows)
+                        {
+                            if (!cloudRows.TryGetValue(kvp.Key, out var cRow))
+                            {
+                                rowsToInsert.Add(kvp.Value);
+                            }
+                            else
+                            {
+                                bool hasChanged = false;
+                                foreach (var col in nonPkCols)
+                                {
+                                    kvp.Value.TryGetValue(col.Name, out var lVal);
+                                    cRow.TryGetValue(col.Name, out var cVal);
+                                    if (!AreValuesEqual(lVal, cVal))
+                                    {
+                                        hasChanged = true;
+                                        break;
+                                    }
+                                }
+
+                                if (hasChanged) rowsToUpdate.Add(kvp.Value);
+                                else unchangedCount++;
+                            }
+                        }
+
+                        int cloudOnlyCount = cloudRows.Keys.Count(k => !localRows.ContainsKey(k));
+
+                        var tableResult = new SyncTableResultDto
+                        {
+                            TableName = tableName,
+                            Skipped = unchangedCount + cloudOnlyCount
+                        };
+
+                        // Disable FK constraint check temporarily during table sync
+                        try
+                        {
+                            await using var disableFkCmd = cloudConn.CreateCommand();
+                            disableFkCmd.Transaction = tx;
+                            disableFkCmd.CommandText = $"ALTER TABLE [{tableName}] NOCHECK CONSTRAINT ALL;";
+                            await disableFkCmd.ExecuteNonQueryAsync(cancellationToken);
+                        }
+                        catch { }
+
+                        // 1. INSERTS
+                        if (rowsToInsert.Count > 0)
+                        {
+                            bool hasIdentity = sharedCols.Any(c => c.IsIdentity);
+                            if (hasIdentity)
+                            {
+                                await using var idOnCmd = cloudConn.CreateCommand();
+                                idOnCmd.Transaction = tx;
+                                idOnCmd.CommandText = $"SET IDENTITY_INSERT [{tableName}] ON;";
+                                await idOnCmd.ExecuteNonQueryAsync(cancellationToken);
+                            }
+
+                            string insertSql = $"INSERT INTO [{tableName}] ({string.Join(", ", sharedColNames.Select(c => $"[{c}]"))}) VALUES ({string.Join(", ", sharedColNames.Select((c, idx) => $"@p{idx}"))});";
+
+                            foreach (var row in rowsToInsert)
+                            {
+                                await using var insCmd = cloudConn.CreateCommand();
+                                insCmd.Transaction = tx;
+                                insCmd.CommandText = insertSql;
+                                for (int i = 0; i < sharedColNames.Count; i++)
+                                {
+                                    row.TryGetValue(sharedColNames[i], out var val);
+                                    insCmd.Parameters.AddWithValue($"@p{i}", val ?? DBNull.Value);
+                                }
+                                await insCmd.ExecuteNonQueryAsync(cancellationToken);
+                                tableResult.Inserted++;
+                            }
+
+                            if (hasIdentity)
+                            {
+                                await using var idOffCmd = cloudConn.CreateCommand();
+                                idOffCmd.Transaction = tx;
+                                idOffCmd.CommandText = $"SET IDENTITY_INSERT [{tableName}] OFF;";
+                                await idOffCmd.ExecuteNonQueryAsync(cancellationToken);
+                            }
+                        }
+
+                        // 2. UPDATES
+                        if (rowsToUpdate.Count > 0 && nonPkCols.Count > 0)
+                        {
+                            var setClauses = nonPkCols.Select((c, idx) => $"[{c.Name}] = @p{idx}").ToList();
+                            string updateSql = $"UPDATE [{tableName}] SET {string.Join(", ", setClauses)} WHERE [{pkName}] = @pkVal;";
+
+                            foreach (var row in rowsToUpdate)
+                            {
+                                await using var upCmd = cloudConn.CreateCommand();
+                                upCmd.Transaction = tx;
+                                upCmd.CommandText = updateSql;
+                                for (int i = 0; i < nonPkCols.Count; i++)
+                                {
+                                    row.TryGetValue(nonPkCols[i].Name, out var val);
+                                    upCmd.Parameters.AddWithValue($"@p{i}", val ?? DBNull.Value);
+                                }
+                                row.TryGetValue(pkName, out var pkVal);
+                                upCmd.Parameters.AddWithValue("@pkVal", pkVal ?? DBNull.Value);
+                                await upCmd.ExecuteNonQueryAsync(cancellationToken);
+                                tableResult.Updated++;
+                            }
+                        }
+
+                        // Re-enable constraints
+                        try
+                        {
+                            await using var enableFkCmd = cloudConn.CreateCommand();
+                            enableFkCmd.Transaction = tx;
+                            enableFkCmd.CommandText = $"ALTER TABLE [{tableName}] WITH CHECK CHECK CONSTRAINT ALL;";
+                            await enableFkCmd.ExecuteNonQueryAsync(cancellationToken);
+                        }
+                        catch { }
+
+                        dbResult.Tables.Add(tableResult);
+                    }
+
+                    await tx.CommitAsync(cancellationToken);
+                    dbResult.Success = true;
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        await tx.RollbackAsync(cancellationToken);
+                    }
+                    catch { }
+                    throw new InvalidOperationException($"Error synchronizing tables in {t.Name}: {ex.Message}", ex);
+                }
+            }
+            catch (Exception ex)
+            {
+                dbResult.Success = false;
+                dbResult.ErrorMessage = ex.Message;
+                multiResult.Success = false;
+                _logger.LogError(ex, "Synchronization failed for target {Target}", t.Name);
+            }
+
+            dbResult.TotalInserted = dbResult.Tables.Sum(x => x.Inserted);
+            dbResult.TotalUpdated = dbResult.Tables.Sum(x => x.Updated);
+            dbResult.TotalSkipped = dbResult.Tables.Sum(x => x.Skipped);
+            dbResult.TotalFailed = dbResult.Tables.Sum(x => x.Failed);
+
+            dbSw.Stop();
+            dbResult.Duration = dbSw.Elapsed.ToString(@"hh\:mm\:ss");
+            multiResult.Databases.Add(dbResult);
+        }
+
+        totalSw.Stop();
+        multiResult.TotalDuration = totalSw.Elapsed.ToString(@"hh\:mm\:ss");
+        multiResult.Message = multiResult.Success
+            ? "All database synchronizations completed successfully."
+            : "One or more database synchronizations failed. Please review individual database results.";
+
+        return multiResult;
     }
 }

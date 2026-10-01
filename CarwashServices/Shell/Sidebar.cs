@@ -62,11 +62,26 @@ namespace CarwashServices.Shell
             {
                 newBtn.SetActive(true);
             }
+            else if (moduleKey is "Dashboard" or "View Dashboard")
+            {
+                if (_moduleButtons.TryGetValue("Dashboard", out var nb1)) nb1.SetActive(true);
+                else if (_moduleButtons.TryGetValue("View Dashboard", out var nb2)) nb2.SetActive(true);
+            }
+            else if (moduleKey is "Reports" or "View Reports")
+            {
+                if (_moduleButtons.TryGetValue("Reports", out var nb1)) nb1.SetActive(true);
+                else if (_moduleButtons.TryGetValue("View Reports", out var nb2)) nb2.SetActive(true);
+            }
+            else if (moduleKey is "Terms & Conditions" or "Terms and Conditions")
+            {
+                if (_moduleButtons.TryGetValue("Terms and Conditions", out var nb1)) nb1.SetActive(true);
+                else if (_moduleButtons.TryGetValue("Terms & Conditions", out var nb2)) nb2.SetActive(true);
+            }
 
             // Sync Overview top pill button active highlight
             if (_overviewHeaderBtn != null)
             {
-                bool isOverviewActive = _activeModule is "View Dashboard" or "Overview";
+                bool isOverviewActive = _activeModule is "View Dashboard" or "Overview" or "Dashboard";
                 _overviewHeaderBtn.SetActive(isOverviewActive);
             }
         }
@@ -336,7 +351,7 @@ namespace CarwashServices.Shell
             bool isFirstSection = true;
             foreach (var section in sections)
             {
-                if (section.Title == "OVERVIEW" && SessionUser.Role != UserRole.SuperAdmin)
+                if (section.Title == "OVERVIEW" && SessionUser.Role != UserRole.SuperAdmin && SessionUser.Role != UserRole.Admin)
                 {
                     // Render featured Overview blue pill button
                     _overviewHeaderBtn = new SidebarButton("home", "Overview", theme, isPillStyle: true)
@@ -477,9 +492,11 @@ namespace CarwashServices.Shell
         private static string IconKeyFor(string moduleKey) => moduleKey switch
         {
             "Overview" => "home",
+            "Dashboard" => "dot",
             "View Dashboard" => "dot",
             "Analytics" => "analytics",
             "Business Intelligence" => "analytics",
+            "Reports" => "reports",
             "View Reports" => "reports",
             "Manage Users" => "users",
             "Manage Customers" => "customers",

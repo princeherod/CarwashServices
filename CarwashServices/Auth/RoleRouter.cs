@@ -43,43 +43,46 @@ namespace CarwashServices.Auth
                 var code = (SessionUser.CompanyCode ?? "").ToUpperInvariant();
                 var name = (SessionUser.CompanyName ?? "").ToLowerInvariant();
 
-                // Tenant A: AquaShine -> Main Transactions & Data Collection
+                // Tenant A: AquaShine -> Standard Admin modules restored
                 if (code.Contains("AQUA") || code == "COMP001" || name.Contains("aquashine") || email == "admin@aquashine.com")
                 {
                     return new[]
                     {
-                        new ModuleSection("MAIN TRANSACTIONS", new[]
+                        new ModuleSection("OVERVIEW", new[]
                         {
-                            "View Dashboard",
-                            "Manage Service Requests",
-                            "Manage Services"
+                            "Dashboard",
+                            "Analytics",
+                            "Reports"
                         }),
-                        new ModuleSection("DATA COLLECTION", new[]
+                        new ModuleSection("MANAGEMENT", new[]
                         {
                             "Manage Customers",
-                            "Manage Users",
-                            "Terms & Conditions"
+                            "Manage Services",
+                            "Manage Service Requests",
+                            "Follow-Ups / Reminders",
+                            "Terms and Conditions"
                         })
                     };
                 }
 
-                // Tenant B: SparkleRide -> Business Intelligence & Actions
+                // Tenant B: SparkleRide -> Standard Admin modules restored
                 if (code.Contains("SPARK") || code == "COMP002" || name.Contains("sparkleride") || email == "admin@sparkleride.com")
                 {
                     return new[]
                     {
-                        new ModuleSection("BUSINESS INTELLIGENCE", new[]
+                        new ModuleSection("OVERVIEW", new[]
                         {
-                            "View Dashboard",
+                            "Dashboard",
                             "Analytics",
-                            "View Reports"
+                            "Reports"
                         }),
-                        new ModuleSection("ACTIONS", new[]
+                        new ModuleSection("MANAGEMENT", new[]
                         {
+                            "Manage Customers",
+                            "Manage Services",
                             "Manage Service Requests",
                             "Follow-Ups / Reminders",
-                            "Manage Users",
-                            "Terms & Conditions"
+                            "Terms and Conditions"
                         })
                     };
                 }

@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using CarwashServices.Auth;
+using CarwashServices.Dialogs;
 using CarwashServices.Dtos;
 using CarwashServices.Shell;
 
@@ -47,7 +48,7 @@ namespace CarwashServices.Roles.SuperAdmin
         private readonly HttpClient _http = new()
         {
             BaseAddress = new Uri("http://localhost:5180/"),
-            Timeout = TimeSpan.FromSeconds(60)
+            Timeout = TimeSpan.FromSeconds(180)
         };
 
         // ================================================================
@@ -56,6 +57,7 @@ namespace CarwashServices.Roles.SuperAdmin
         private Panel _scrollContainer = null!;
         private Panel _leftCard = null!;
         private Panel _rightCard = null!;
+        private Panel _syncCard = null!;
 
         // Left Card controls
         private Label _leftDescLbl = null!;
@@ -71,6 +73,25 @@ namespace CarwashServices.Roles.SuperAdmin
         private Panel _backupsListPanel = null!;
         private Label _restoreStatusLbl = null!;
         private Button _restoreBtn = null!;
+
+        // Cloud Sync Card controls
+        private Label _syncDescLbl = null!;
+        private Label _syncStatusLbl = null!;
+        private Button _syncAquaBtn = null!;
+        private Button _syncSparkleBtn = null!;
+        private Button _syncCleanBtn = null!;
+        private Button _syncMasterBtn = null!;
+        private Button _syncAllBtn = null!;
+        private Button _refreshStatusBtn = null!;
+        private Label _statusAquaPill = null!;
+        private Label _statusSparklePill = null!;
+        private Label _statusCleanPill = null!;
+        private Label _statusMasterPill = null!;
+        private Panel _tileAqua = null!;
+        private Panel _tileSparkle = null!;
+        private Panel _tileClean = null!;
+        private Panel _tileMaster = null!;
+        private Panel? _bottomSpacer;
 
         private BackupItemDto? _selectedBackup;
         private List<BackupItemDto> _successfulBackups = new();
@@ -91,7 +112,11 @@ namespace CarwashServices.Roles.SuperAdmin
             InitializeComponent();
             Sidebar.EnableDoubleBuffering(this);
 
-            Load += async (s, e) => await LoadBackupsAsync();
+            Load += async (s, e) =>
+            {
+                await LoadBackupsAsync();
+                await LoadCloudStatusAsync();
+            };
         }
 
         private void InitializeComponent()
@@ -110,7 +135,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // ---- Title ----
             _scrollContainer.Controls.Add(new Label
             {
-                Text = "Backup & Restore",
+                Text = "Backup, Restore & Cloud Sync",
                 ForeColor = Navy,
                 Font = new Font("Segoe UI Semibold", 22f),
                 Location = new Point(36, 20),
@@ -121,7 +146,7 @@ namespace CarwashServices.Roles.SuperAdmin
             // ---- Subtitle ----
             _scrollContainer.Controls.Add(new Label
             {
-                Text = SuperAdminLabels.BackupRestoreDataSubtitle,
+                Text = "Manage local database backups, restore points, and safe local-to-MonsterASP cloud synchronization.",
                 ForeColor = Muted,
                 Font = new Font("Segoe UI", 9.5f),
                 Location = new Point(36, 64),
@@ -132,20 +157,26 @@ namespace CarwashServices.Roles.SuperAdmin
             // ---- Cards ----
             _leftCard = CreateCardPanel();
             _rightCard = CreateCardPanel();
+            _syncCard = CreateCardPanel();
+            _bottomSpacer = new Panel { BackColor = Color.Transparent };
 
             _scrollContainer.Controls.Add(_leftCard);
             _scrollContainer.Controls.Add(_rightCard);
-
-            RelayoutCards();
+            _scrollContainer.Controls.Add(_syncCard);
+            _scrollContainer.Controls.Add(_bottomSpacer);
 
             BuildLeftCard();
             BuildRightCard();
+            BuildSyncCard();
 
             _leftCard.Resize += (s, e) => RelayoutLeftCard();
             _rightCard.Resize += (s, e) => RelayoutRightCard();
+            _syncCard.Resize += (s, e) => RelayoutSyncCard();
 
+            RelayoutCards();
             RelayoutLeftCard();
             RelayoutRightCard();
+            RelayoutSyncCard();
 
             _scrollContainer.Resize += (s, e) => RelayoutCards();
 
@@ -174,12 +205,21 @@ namespace CarwashServices.Roles.SuperAdmin
             int padX = 36;
             int gap = 24;
             int availableWidth = Math.Max(700, _scrollContainer.ClientSize.Width - (padX * 2));
-            int availableHeight = Math.Max(580, _scrollContainer.ClientSize.Height - top - 24);
+            int cardHeight = 490;
 
             int cardWidth = (availableWidth - gap) / 2;
 
-            _leftCard.SetBounds(padX, top, cardWidth, availableHeight);
-            _rightCard.SetBounds(padX + cardWidth + gap, top, cardWidth, availableHeight);
+            _leftCard.SetBounds(padX, top, cardWidth, cardHeight);
+            _rightCard.SetBounds(padX + cardWidth + gap, top, cardWidth, cardHeight);
+
+            int syncTop = top + cardHeight + 24;
+            int syncHeight = availableWidth >= 850 ? 285 : 395;
+            _syncCard.SetBounds(padX, syncTop, availableWidth, syncHeight);
+
+            if (_bottomSpacer != null)
+            {
+                _bottomSpacer.SetBounds(padX, syncTop + syncHeight, availableWidth, 32);
+            }
         }
 
         // ================================================================
@@ -743,6 +783,415 @@ namespace CarwashServices.Roles.SuperAdmin
             finally
             {
                 _restoreBtn.Enabled = _selectedBackup != null;
+                Cursor = Cursors.Default;
+            }
+        }
+
+        // ================================================================
+        //  BOTTOM CARD: Safe Cloud Synchronization
+        // ================================================================
+        private void BuildSyncCard()
+        {
+            _syncCard.SuspendLayout();
+
+            var titleLbl = new Label
+            {
+                Text = "SAFE LOCAL ➔ MONSTERASP CLOUD SYNCHRONIZATION",
+                ForeColor = Navy,
+                Font = new Font("Segoe UI Semibold", 13f),
+                Location = new Point(24, 18),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            _syncCard.Controls.Add(titleLbl);
+
+            _syncDescLbl = new Label
+            {
+                Text = "Safely synchronize records from local SQL Server databases to MonsterASP cloud databases (Port 1433). " +
+                       "Record-level sync performs INSERT for new records and UPDATE for modified records. Existing cloud records are never deleted.",
+                ForeColor = Muted,
+                Font = new Font("Segoe UI", 9f),
+                Location = new Point(24, 46),
+                Size = new Size(Math.Max(100, _syncCard.Width - 48), 28),
+                UseMnemonic = false
+            };
+            _syncCard.Controls.Add(_syncDescLbl);
+
+            // 4 Database Tiles
+            _tileAqua = CreateDatabaseTile("AquaShine", "aquaShine_db ➔ db70860", out _statusAquaPill, out _syncAquaBtn, "Sync AquaShine", () => RunSyncFlowAsync("AquaShine"));
+            _tileSparkle = CreateDatabaseTile("SparkleRide", "sparkleRide_db ➔ db70861", out _statusSparklePill, out _syncSparkleBtn, "Sync SparkleRide", () => RunSyncFlowAsync("SparkleRide"));
+            _tileClean = CreateDatabaseTile("CleanRide", "cleanRide_db ➔ db70862", out _statusCleanPill, out _syncCleanBtn, "Sync CleanRide", () => RunSyncFlowAsync("CleanRide"));
+            _tileMaster = CreateDatabaseTile("Master ERP", "MSME_MasterCrm ➔ db67193", out _statusMasterPill, out _syncMasterBtn, "Sync Master ERP", () => RunSyncFlowAsync("MasterERP"));
+
+            _syncCard.Controls.Add(_tileAqua);
+            _syncCard.Controls.Add(_tileSparkle);
+            _syncCard.Controls.Add(_tileClean);
+            _syncCard.Controls.Add(_tileMaster);
+
+            // Status label
+            _syncStatusLbl = new Label
+            {
+                Text = "Initializing cloud connectivity...",
+                Font = new Font("Segoe UI", 8.8f),
+                ForeColor = Muted,
+                Location = new Point(24, 235),
+                Size = new Size(400, 24),
+                AutoEllipsis = true,
+                UseMnemonic = false
+            };
+            _syncCard.Controls.Add(_syncStatusLbl);
+
+            // Refresh Status button
+            _refreshStatusBtn = new Button
+            {
+                Text = "↻ Refresh Status",
+                Font = new Font("Segoe UI", 8.8f),
+                ForeColor = SlateBlue,
+                BackColor = SlateBlueSoft,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                Size = new Size(130, 36)
+            };
+            _refreshStatusBtn.FlatAppearance.BorderColor = Color.FromArgb(0xCB, 0xD5, 0xE1);
+            _refreshStatusBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xE2, 0xE8, 0xF0);
+            _refreshStatusBtn.Click += async (s, e) => await LoadCloudStatusAsync();
+            _syncCard.Controls.Add(_refreshStatusBtn);
+
+            // "Sync All Databases" Button
+            _syncAllBtn = new Button
+            {
+                Text = "⚡ Sync All Databases",
+                Font = new Font("Segoe UI Semibold", 9.5f),
+                ForeColor = Color.White,
+                BackColor = RoyalBlue,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                Size = new Size(185, 36)
+            };
+            _syncAllBtn.FlatAppearance.BorderSize = 0;
+            _syncAllBtn.FlatAppearance.MouseOverBackColor = RoyalBlueHover;
+            _syncAllBtn.Click += async (s, e) => await RunSyncFlowAsync("All");
+            _syncCard.Controls.Add(_syncAllBtn);
+
+            _syncCard.ResumeLayout(true);
+        }
+
+        private Panel CreateDatabaseTile(
+            string title,
+            string subtitle,
+            out Label pill,
+            out Button syncBtn,
+            string buttonText,
+            Func<Task> onSync)
+        {
+            var p = new Panel
+            {
+                BackColor = Color.FromArgb(0xF8, 0xFA, 0xFC),
+                Padding = new Padding(12)
+            };
+            p.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using var path = RoundedRect(new Rectangle(0, 0, p.Width - 1, p.Height - 1), 8);
+                using var pen = new Pen(Color.FromArgb(0xE2, 0xE8, 0xF0), 1.2f);
+                e.Graphics.DrawPath(pen, path);
+            };
+
+            var titleLbl = new Label
+            {
+                Text = title,
+                Font = new Font("Segoe UI Semibold", 10.2f),
+                ForeColor = Navy,
+                Location = new Point(12, 10),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            p.Controls.Add(titleLbl);
+
+            var subLbl = new Label
+            {
+                Text = subtitle,
+                Font = new Font("Segoe UI", 7.8f),
+                ForeColor = Muted,
+                Location = new Point(12, 33),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            p.Controls.Add(subLbl);
+
+            pill = new Label
+            {
+                Text = "Checking...",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                ForeColor = SlateBlue,
+                BackColor = SlateBlueSoft,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Size = new Size(96, 20),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                UseMnemonic = false
+            };
+            pill.Location = new Point(Math.Max(120, p.Width - 12 - pill.Width), 10);
+            p.Controls.Add(pill);
+
+            syncBtn = new Button
+            {
+                Text = buttonText,
+                Font = new Font("Segoe UI Semibold", 9f),
+                ForeColor = Color.White,
+                BackColor = Navy,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                Height = 32,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+            };
+            syncBtn.FlatAppearance.BorderSize = 0;
+            syncBtn.FlatAppearance.MouseOverBackColor = NavyHover;
+            syncBtn.Location = new Point(12, Math.Max(50, p.Height - 12 - syncBtn.Height));
+            syncBtn.Width = Math.Max(80, p.Width - 24);
+            syncBtn.Click += async (s, e) => await onSync();
+            p.Controls.Add(syncBtn);
+
+            var localPill = pill;
+            var localBtn = syncBtn;
+            p.Resize += (s, e) =>
+            {
+                localPill.Left = Math.Max(10, p.Width - 12 - localPill.Width);
+                localBtn.Width = Math.Max(80, p.Width - 24);
+                localBtn.Top = Math.Max(50, p.Height - 12 - localBtn.Height);
+            };
+
+            return p;
+        }
+
+        private void RelayoutSyncCard()
+        {
+            if (_syncCard == null || _syncDescLbl == null) return;
+            int w = Math.Max(100, _syncCard.ClientSize.Width - 48);
+
+            _syncDescLbl.Width = w;
+
+            int tilesTop = 80;
+            int gap = 12;
+
+            if (w >= 850)
+            {
+                int tileWidth = (w - (3 * gap)) / 4;
+                int tileHeight = 125;
+
+                _tileAqua.SetBounds(24, tilesTop, tileWidth, tileHeight);
+                _tileSparkle.SetBounds(24 + (tileWidth + gap), tilesTop, tileWidth, tileHeight);
+                _tileClean.SetBounds(24 + (tileWidth + gap) * 2, tilesTop, tileWidth, tileHeight);
+                _tileMaster.SetBounds(24 + (tileWidth + gap) * 3, tilesTop, tileWidth, tileHeight);
+
+                int bottomTop = tilesTop + tileHeight + 16;
+                _syncStatusLbl.SetBounds(24, bottomTop + 6, Math.Max(200, w - 340), 24);
+                _refreshStatusBtn.SetBounds(24 + w - 330, bottomTop, 130, 36);
+                _syncAllBtn.SetBounds(24 + w - 190, bottomTop, 190, 36);
+            }
+            else
+            {
+                int tileWidth = (w - gap) / 2;
+                int tileHeight = 115;
+
+                _tileAqua.SetBounds(24, tilesTop, tileWidth, tileHeight);
+                _tileSparkle.SetBounds(24 + tileWidth + gap, tilesTop, tileWidth, tileHeight);
+                _tileClean.SetBounds(24, tilesTop + tileHeight + gap, tileWidth, tileHeight);
+                _tileMaster.SetBounds(24 + tileWidth + gap, tilesTop + tileHeight + gap, tileWidth, tileHeight);
+
+                int bottomTop = tilesTop + (tileHeight * 2) + gap + 16;
+                _syncStatusLbl.SetBounds(24, bottomTop + 6, Math.Max(200, w - 340), 24);
+                _refreshStatusBtn.SetBounds(24 + w - 330, bottomTop, 130, 36);
+                _syncAllBtn.SetBounds(24 + w - 190, bottomTop, 190, 36);
+            }
+        }
+
+        private async Task LoadCloudStatusAsync()
+        {
+            try
+            {
+                _syncStatusLbl.Text = "Checking MonsterASP cloud connectivity...";
+                _syncStatusLbl.ForeColor = Muted;
+                _statusAquaPill.Text = "Checking...";
+                _statusSparklePill.Text = "Checking...";
+                _statusCleanPill.Text = "Checking...";
+                _statusMasterPill.Text = "Checking...";
+
+                using var req = CreateAuthenticatedRequest(HttpMethod.Get, "api/cloud-sync/connectivity");
+                using var resp = await _http.SendAsync(req);
+                if (resp.IsSuccessStatusCode)
+                {
+                    var connectivity = await resp.Content.ReadFromJsonAsync<Dictionary<string, bool>>();
+                    if (connectivity != null)
+                    {
+                        connectivity.TryGetValue("AquaShine", out var a);
+                        connectivity.TryGetValue("SparkleRide", out var s);
+                        connectivity.TryGetValue("CleanRide", out var c);
+                        connectivity.TryGetValue("MasterERP", out var m);
+
+                        UpdatePill(_statusAquaPill, a);
+                        UpdatePill(_statusSparklePill, s);
+                        UpdatePill(_statusCleanPill, c);
+                        UpdatePill(_statusMasterPill, m);
+
+                        bool allOnline = (a && s && c && m);
+                        _syncStatusLbl.Text = allOnline
+                            ? "✓ All 4 MonsterASP cloud databases are online and ready for synchronization."
+                            : "⚠ Some cloud databases are offline or unreachable. Check credentials and firewall.";
+                        _syncStatusLbl.ForeColor = allOnline ? Color.FromArgb(0x16, 0x65, 0x34) : Color.FromArgb(0x99, 0x1B, 0x1B);
+                        return;
+                    }
+                }
+
+                _syncStatusLbl.Text = "Could not check cloud connectivity (API responded with error).";
+                _syncStatusLbl.ForeColor = SlateBlue;
+            }
+            catch (Exception ex)
+            {
+                _syncStatusLbl.Text = $"Connectivity check failed: {ex.Message}";
+                _syncStatusLbl.ForeColor = SlateBlue;
+            }
+        }
+
+        private static void UpdatePill(Label pill, bool isOnline)
+        {
+            pill.Text = isOnline ? "● Cloud Online" : "● Offline";
+            pill.ForeColor = isOnline ? Color.FromArgb(0x16, 0x65, 0x34) : Color.FromArgb(0x99, 0x1B, 0x1B);
+            pill.BackColor = isOnline ? Color.FromArgb(0xDC, 0xFC, 0xE7) : Color.FromArgb(0xFE, 0xE2, 0xE2);
+        }
+
+        private void SetSyncButtonsEnabled(bool enabled)
+        {
+            _syncAquaBtn.Enabled = enabled;
+            _syncSparkleBtn.Enabled = enabled;
+            _syncCleanBtn.Enabled = enabled;
+            _syncMasterBtn.Enabled = enabled;
+            _syncAllBtn.Enabled = enabled;
+            _refreshStatusBtn.Enabled = enabled;
+        }
+
+        private static HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string url)
+        {
+            var req = new HttpRequestMessage(method, url);
+            int userId = SessionUser.UserId > 0 ? SessionUser.UserId : 11;
+            req.Headers.Add("X-Current-User-Id", userId.ToString());
+            req.Headers.Add("X-User-Id", userId.ToString());
+            return req;
+        }
+
+        private async Task RunSyncFlowAsync(string target)
+        {
+            // 1. Confirm Dialog
+            using (var confirmDlg = new SyncConfirmDialog(target))
+            {
+                if (confirmDlg.ShowDialog(this) != DialogResult.OK)
+                    return;
+            }
+
+            SetSyncButtonsEnabled(false);
+            _syncStatusLbl.Text = $"[1/3] Generating preview for {target}... Inspecting schemas and comparing records.";
+            _syncStatusLbl.ForeColor = Blue;
+            Cursor = Cursors.WaitCursor;
+
+            try
+            {
+                // 2. Fetch Preview
+                using var previewReq = CreateAuthenticatedRequest(HttpMethod.Get, $"api/cloud-sync/preview?target={Uri.EscapeDataString(target)}");
+                using var previewResp = await _http.SendAsync(previewReq);
+
+                if (!previewResp.IsSuccessStatusCode)
+                {
+                    var err = await previewResp.Content.ReadAsStringAsync();
+                    MessageBox.Show(
+                        $"Failed to generate sync preview:\n\n{err}",
+                        "Sync Preview Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    _syncStatusLbl.Text = "Preview generation failed.";
+                    _syncStatusLbl.ForeColor = Color.FromArgb(0x99, 0x1B, 0x1B);
+                    return;
+                }
+
+                var previews = await previewResp.Content.ReadFromJsonAsync<List<SyncDatabasePreviewDto>>();
+                if (previews == null || previews.Count == 0)
+                {
+                    MessageBox.Show(
+                        "No database preview data returned from server.",
+                        "Preview Empty",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // Show Preview Dialog
+                using (var previewDlg = new SyncPreviewDialog(target, previews))
+                {
+                    if (previewDlg.ShowDialog(this) != DialogResult.OK)
+                    {
+                        _syncStatusLbl.Text = "Synchronization cancelled by user after preview.";
+                        _syncStatusLbl.ForeColor = Muted;
+                        return;
+                    }
+                }
+
+                // 3. Execute Sync
+                _syncStatusLbl.Text = $"[2/3] Synchronizing records for {target} to MonsterASP cloud... Please wait.";
+                _syncStatusLbl.ForeColor = RoyalBlue;
+
+                using var syncReq = CreateAuthenticatedRequest(HttpMethod.Post, $"api/cloud-sync/sync?target={Uri.EscapeDataString(target)}");
+                using var syncResp = await _http.SendAsync(syncReq);
+
+                if (!syncResp.IsSuccessStatusCode)
+                {
+                    var err = await syncResp.Content.ReadAsStringAsync();
+                    MessageBox.Show(
+                        $"Sync execution failed:\n\n{err}",
+                        "Synchronization Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    _syncStatusLbl.Text = $"Sync failed: {err}";
+                    _syncStatusLbl.ForeColor = Color.FromArgb(0x99, 0x1B, 0x1B);
+                    return;
+                }
+
+                var result = await syncResp.Content.ReadFromJsonAsync<MultiSyncResultDto>();
+                if (result == null)
+                {
+                    MessageBox.Show("Sync completed but no result details were received.", "Sync Finished", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // 4. Show Result Dialog
+                _syncStatusLbl.Text = $"[3/3] Sync finished in {result.TotalDuration}. Showing results.";
+                using (var resultDlg = new SyncResultDialog(target, result))
+                {
+                    resultDlg.ShowDialog(this);
+                }
+
+                int totalIns = result.Databases.Sum(d => d.TotalInserted);
+                int totalUpd = result.Databases.Sum(d => d.TotalUpdated);
+                int totalSkip = result.Databases.Sum(d => d.TotalSkipped);
+                int totalFail = result.Databases.Sum(d => d.TotalFailed);
+
+                _syncStatusLbl.Text = result.Success
+                    ? $"✓ Sync completed successfully: {totalIns} inserted, {totalUpd} updated, {totalSkip} unchanged, {totalFail} failed (Duration: {result.TotalDuration})."
+                    : $"⚠ Sync completed with errors: {totalIns} inserted, {totalUpd} updated, {totalFail} failed.";
+                _syncStatusLbl.ForeColor = result.Success ? Color.FromArgb(0x16, 0x65, 0x34) : Color.FromArgb(0x99, 0x1B, 0x1B);
+
+                await LoadCloudStatusAsync();
+            }
+            catch (Exception ex)
+            {
+                _syncStatusLbl.Text = $"Synchronization error: {ex.Message}";
+                _syncStatusLbl.ForeColor = Color.FromArgb(0x99, 0x1B, 0x1B);
+                MessageBox.Show(
+                    $"An unexpected error occurred during synchronization:\n\n{ex.Message}",
+                    "Sync Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            finally
+            {
+                SetSyncButtonsEnabled(true);
                 Cursor = Cursors.Default;
             }
         }

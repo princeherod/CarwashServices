@@ -31,27 +31,15 @@ public class ServiceStatusController : ControllerBase
         // Load everything that's needed up front, then do the joins in memory.
         // This keeps the round-trip count low, which is the main reason the
         // previous version was timing out.
-        var custQuery = tenant.TenantCustomers
+        var customers = await tenant.TenantCustomers
             .AsNoTracking()
-            .Where(c => !c.IsArchived);
+            .Where(c => !c.IsArchived)
+            .ToListAsync();
 
-        if (branchId.HasValue && branchId.Value > 0)
-        {
-            custQuery = custQuery.Where(c => c.BranchId == branchId.Value);
-        }
-
-        var customers = await custQuery.ToListAsync();
-
-        var prodQuery = tenant.Products
+        var products = await tenant.Products
             .AsNoTracking()
-            .Where(p => !p.IsArchived);
-
-        if (branchId.HasValue && branchId.Value > 0)
-        {
-            prodQuery = prodQuery.Where(p => p.BranchId == branchId.Value);
-        }
-
-        var products = await prodQuery.ToListAsync();
+            .Where(p => !p.IsArchived)
+            .ToListAsync();
 
         var users = await _db.Users
             .AsNoTracking()
@@ -108,10 +96,18 @@ public class ServiceStatusController : ControllerBase
             var svc = prodById.TryGetValue(r.ServiceId, out var p) ? p : null;
 
             string staff = "Unassigned";
-            if (r.AssignedStaffId.HasValue &&
-                userById.TryGetValue(r.AssignedStaffId.Value, out var st))
+            if (r.AssignedStaffId.HasValue)
             {
-                staff = st.FullName;
+                if (userById.TryGetValue(r.AssignedStaffId.Value, out var st))
+                {
+                    staff = !string.IsNullOrWhiteSpace(st.FullName)
+                        ? st.FullName
+                        : (!string.IsNullOrWhiteSpace(st.FirstName) ? $"{st.FirstName} {st.LastName}".Trim() : st.Email);
+                }
+                else
+                {
+                    staff = $"Staff #{r.AssignedStaffId.Value}";
+                }
             }
 
             string lastUpdated = "";
@@ -120,7 +116,15 @@ public class ServiceStatusController : ControllerBase
             {
                 lastUpdated = log.UpdatedAt.ToString("yyyy-MM-dd HH:mm");
                 if (userById.TryGetValue(log.UpdatedBy, out var lu))
-                    updatedBy = lu.FullName;
+                {
+                    updatedBy = !string.IsNullOrWhiteSpace(lu.FullName)
+                        ? lu.FullName
+                        : (!string.IsNullOrWhiteSpace(lu.FirstName) ? $"{lu.FirstName} {lu.LastName}".Trim() : lu.Email);
+                }
+                else
+                {
+                    updatedBy = $"User #{log.UpdatedBy}";
+                }
             }
 
             current.Add(new
@@ -152,7 +156,17 @@ public class ServiceStatusController : ControllerBase
             var req = requestById.TryGetValue(l.RequestId, out var rr) ? rr : null;
             var cust = req != null && custById.TryGetValue(req.CustomerId, out var c) ? c : null;
             var svc = req != null && prodById.TryGetValue(req.ServiceId, out var p) ? p : null;
-            string who = userById.TryGetValue(l.UpdatedBy, out var u) ? u.FullName : $"id:{l.UpdatedBy}";
+            string who;
+            if (userById.TryGetValue(l.UpdatedBy, out var u))
+            {
+                who = !string.IsNullOrWhiteSpace(u.FullName)
+                    ? u.FullName
+                    : (!string.IsNullOrWhiteSpace(u.FirstName) ? $"{u.FirstName} {u.LastName}".Trim() : u.Email);
+            }
+            else
+            {
+                who = $"User #{l.UpdatedBy}";
+            }
 
             return new
             {

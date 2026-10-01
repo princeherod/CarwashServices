@@ -304,7 +304,7 @@ namespace CarwashServices.Roles.ServiceStaff
                 var userBranchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
                 var reqBranchQuery = branchId.HasValue && branchId.Value > 0 ? $"&branchId={branchId.Value}" : "";
 
-                var reqsT = _http.GetFromJsonAsync<List<ServiceRequestDto>>($"api/service-requests?companyId={companyId}{reqBranchQuery}");
+                var reqsT = _http.GetFromJsonAsync<List<ServiceRequestDto>>($"api/service-requests?companyId={companyId}{reqBranchQuery}&assignedStaffId={staffId}");
                 var custsT = _http.GetFromJsonAsync<List<TenantCustomerDto>>($"api/tenant/{companyId}/tenant-customers{branchQuery}");
                 var svcsT = _http.GetFromJsonAsync<List<ProductDto>>($"api/tenant/{companyId}/products{branchQuery}");
                 var usersT = _http.GetFromJsonAsync<List<UserDto>>($"api/users?companyId={companyId}{userBranchQuery}");
